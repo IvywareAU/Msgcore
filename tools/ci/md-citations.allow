@@ -1,0 +1,74 @@
+# Citations that deliberately point outside this repository.
+#
+# Read by check_md_citations.ps1, which fails on any .md citation it cannot resolve.
+# Format, one per line:
+#
+#     <citing file> -> <token exactly as written>    # why it stays unfollowable
+#
+# The key is the PAIR. Allowing a document to be discussed in one file does not let a
+# new file start citing it -- which matters most for SECURITY_REVIEW.md, where the
+# whole point of the B7 rewording was that source comments stop pointing at it.
+#
+# A reason is not decoration. B7's finding was that unfollowable pointers accumulate
+# when nobody has to say why, so an entry here should read like an argument, and the
+# next person should be able to tell whether it still holds.
+#
+# This file is the one thing the check does not scan, because it names every token it
+# exempts. Adding a line here is therefore the one edit that cannot be verified by the
+# check itself -- which is the reason for the reason.
+
+
+# ---------------------------------------------------------------------------------
+#  Published design notes naming sibling MSCS components.
+#
+#  byte_order.md was written about MSCS as a whole and is published here because
+#  Msgcore's sources cite it. It refers to sibling components that are
+#  not published. The README states the trade outright: a design note carrying a few
+#  names you cannot look up is worth more than one with its context stripped out, and
+#  rewriting somebody's design note to survive a grep is how you get a document that
+#  says less than it knew.
+#
+#  LINKAGE.md's is different in kind -- it is a pointer to the matching rule in the
+#  sibling's own linkage document, and the sentence stands without it.
+
+LINKAGE.md       -> TargetCore/LINKAGE.md  # sibling's copy of the same rule; sentence stands without it
+byte_order.md    -> p2p_BrowserHub.md      # sibling component, not published
+byte_order.md    -> p2p_PhpHub.md          # sibling component, not published
+byte_order.md    -> VERSIONING.md          # sibling TargetCore's versioning note. A DESIGN-NOTE
+                                           # exemption and deliberately not a source-comment one:
+                                           # the five source and test citations of this same
+                                           # document were reworded to name it instead, which is
+                                           # B7's rule -- source comments stop pointing at what a
+                                           # reader cannot open. This one stays because
+                                           # byte_order.md is a note about MSCS as a whole and its
+                                           # 4.4 argues the generation scheme directly against
+                                           # that document; strip the reference and the argument
+                                           # has nothing left to be an argument WITH.
+
+
+# ---------------------------------------------------------------------------------
+#  The release-readiness register's own entries lived here, and are gone with it.
+#
+#  Nine pairs sat here, all keyed on a document that is no longer in this repository:
+#  it was withheld deliberately and now lives outside the tree. The checker had been
+#  reporting them as `stale allowlist entry` on every run, which is the right answer
+#  to an exemption for a file nobody can cite from any more.
+#
+#  Removed rather than left as harmless clutter, because a stale allowlist entry is
+#  an exemption nobody is checking: if a document of that name ever returns, it should
+#  arrive with no standing permission to dangle. The rule this block recorded -- that a
+#  sentence explaining WHY a document is withheld is not a dangling pointer -- is worth
+#  keeping in mind if that argument ever needs an entry again.
+
+
+# ---------------------------------------------------------------------------------
+#  Not a citation at all.
+#
+#  Rows of machine-readable data that happen to end in .md. The check has no way to
+#  tell a filename in a hash table, or a pattern in an ignore file, from a pointer in
+#  prose -- and teaching it to would mean teaching it each of these formats, which buys
+#  less than a line saying so.
+
+.gitignore -> RELEASE_READINESS.md               # ignore PATTERN, not a pointer: it exists to keep that
+                                                 # document OUT of this repository, so the check demanding
+                                                 # the file be present would defeat the line's whole purpose

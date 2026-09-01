@@ -1,0 +1,4 @@
+# Holds this directory in git while it is empty, which is the state to want:
+# findings/ carries minimal reproducers for fuzz findings that are STILL OPEN.
+# F1's reproducer left here when item 13 fixed it -- it is now C4LoadTest
+# scenario [9] and corpus/f1_bstrio_oob.dat. See ../README.md.

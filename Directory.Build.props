@@ -1,0 +1,47 @@
+<Project>
+  <!--
+    Repo-root MSBuild properties for the Msgcore repository.
+
+    This file exists so that a clone of THIS repository alone builds correctly. Before it,
+    $(WDMSCS_LIB) was defaulted only by MSCS\Directory.Build.props in the surrounding tree,
+    which is not part of this repository: a standalone clone got neither the default nor the
+    guard in Directory.Build.targets, and link.exe wrote the import library and its .exp to
+    the ROOT OF THE CURRENT DRIVE, silently, with the build still green. (Historic evidence
+    from exactly that failure: C:\Msgcore(2022).lib and three siblings, Apr/May 2026, under
+    the pre-d50f150 artifact names.)
+
+    MSBuild imports only the NEAREST Directory.Build.props walking up from the project, so
+    this file shadows the outer one for Msgcore(2022).vcxproj and com\MsgcoreCom(2022).vcxproj.
+    That would silently move the staging directory for anyone building inside the MSCS tree,
+    where sibling projects (TargetCore, MsgcoreMFC) link against MSCS\lib\... — so if an outer
+    Directory.Build.props exists, chain to it and let it win. The standalone defaults below
+    apply only when there is no outer file, i.e. in a real standalone clone.
+  -->
+
+  <PropertyGroup>
+    <MsgcoreOuterBuildProps>$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))</MsgcoreOuterBuildProps>
+  </PropertyGroup>
+
+  <Import Project="$(MsgcoreOuterBuildProps)"
+          Condition="'$(MsgcoreOuterBuildProps)' != '' and Exists('$(MsgcoreOuterBuildProps)')" />
+
+  <PropertyGroup>
+    <MsgcoreStandalone Condition="'$(MsgcoreOuterBuildProps)' == ''">true</MsgcoreStandalone>
+  </PropertyGroup>
+
+  <!-- Standalone clone: default WDMSCS_LIB to this repository's own lib\, so the variable is
+       never empty and never relative. An explicit WDMSCS_LIB (environment or command line)
+       still wins, exactly as in the outer file. -->
+  <PropertyGroup Condition="'$(MsgcoreStandalone)' == 'true' and '$(WDMSCS_LIB)' == ''">
+    <WDMSCS_LIB>$(MSBuildThisFileDirectory)lib</WDMSCS_LIB>
+  </PropertyGroup>
+
+  <!-- Import libs are keyed by BOTH platform and configuration. Artifact names carry no
+       version suffix and no debug 'd', so Debug and Release produce identically named
+       .lib files; only the directory keeps them apart. Do not collapse this back to
+       per-platform-only or Release will overwrite Debug. Mirrors the outer file. -->
+  <PropertyGroup Condition="'$(MsgcoreStandalone)' == 'true' and '$(WDMSCS_LIB)' != '' and '$(Platform)' != '' and '$(Configuration)' != ''">
+    <WDMSCS_LIB_ROOT Condition="'$(WDMSCS_LIB_ROOT)' == ''">$(WDMSCS_LIB)</WDMSCS_LIB_ROOT>
+    <WDMSCS_LIB>$(WDMSCS_LIB_ROOT)\$(Platform)\$(Configuration)</WDMSCS_LIB>
+  </PropertyGroup>
+</Project>

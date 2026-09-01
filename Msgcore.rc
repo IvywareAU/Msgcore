@@ -1,0 +1,114 @@
+//Microsoft Visual C++ generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+#include "Msgcore_version.h"
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+LANGUAGE 9, 1
+#pragma code_page(1252)
+
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE  
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "#include ""Msgcore_version.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE  
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+// Every number and fixed string below comes from Msgcore_version.h; nothing
+// here is a literal that could drift out of step with the COM server's copy.
+// FILETYPE is VFT_DLL because the resource only reaches a shipped module in
+// the DLL configurations - the Lib configurations archive it and no consumer
+// ever queries it.
+//
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    MSGCORE_VERSION_COMMAS
+ PRODUCTVERSION MSGCORE_VERSION_COMMAS
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+ FILEFLAGS      VS_FF_DEBUG
+#else
+ FILEFLAGS      0x0L
+#endif
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_DLL
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      MSGCORE_COMPANY_NAME
+            VALUE "FileDescription",  "Msgcore - offset-addressed structured message store"
+            VALUE "FileVersion",      MSGCORE_VERSION_STRING
+            VALUE "InternalName",     "Msgcore"
+            VALUE "LegalCopyright",   MSGCORE_COPYRIGHT
+            VALUE "OriginalFilename", "Msgcore.dll"
+            VALUE "ProductName",      MSGCORE_PRODUCT_NAME
+            VALUE "ProductVersion",   MSGCORE_VERSION_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// String Table
+//
+
+STRINGTABLE
+BEGIN
+   IDS_APP_TITLE       "Msgcore"
+END
+
+#endif
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED

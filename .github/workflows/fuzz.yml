@@ -1,0 +1,248 @@
+# Copyright © 2026 Khrustal & Mann
+#              MELBOURNE, VICTORIA, AUSTRALIA, 3000
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied. See the License for the specific language governing
+# permissions and limitations under the License.
+#
+# Msgcore fuzzing -- the release-readiness register, item 14, fourth job.
+#
+# TWO HARNESSES, as a matrix. fuzz_iomage_load drives P2PmsgMgr::Load; the
+# newer fuzz_recv_image drives the receive path -- heap-from-image, then
+# traversal -- which is where F4 to F7 were and which nothing in this repository
+# could fuzz before it existed. Those four were all found by p2p_fuzzframe,
+# which lives in TargetCore, so the path responsible for the majority of this
+# library's known memory unsafety had no harness here and every "cumulative
+# clean hour" this document has quoted was an hour of the other path.
+#
+# WHEN THIS JOB GOES RED, THE JOB IS WORKING. Its first ninety-second run found
+# a heap-buffer-overflow in the BSTRio branch of P2PmsgMgr::Load -- recorded as
+# F1 in the release-readiness register's security posture. F1 is closed and the first
+# scheduled run (2026-08-14, one hour) was green, so red is no longer the
+# expected state -- but the standing instruction is unchanged: a crash here is
+# a finding to be fixed, never a suppression to be added.
+#
+# NOTES: Scheduled rather than per-push, because an hour of fuzzing does not
+#        belong between a commit and a green tick, and because coverage here
+#        accumulates across runs rather than being decided by any one of them.
+#      : WEEKLY, not nightly, and that is a billing decision rather than a
+#        coverage one. windows-2022 bills at the 2x multiplier, so an hour a
+#        night is ~3,660 minutes a month against the 2,000 a private repository
+#        gets free -- a quota shared with TargetCore and MscsUnitTests. Weekly
+#        costs ~520 and fits. Publishing the repository makes Actions free on
+#        standard runners and makes nightly affordable again; restore
+#        '20 14 * * *' when it does.
+#      : The cost of weekly is wall-clock. Exit criterion 2's two cumulative
+#        hours now take a fortnight to bank unattended rather than two nights,
+#        so run this by hand (workflow_dispatch) after any change to the load
+#        or heap paths -- which is how F1, F2 and F3 were actually found. Every
+#        finding to date came from a manual run, not from the schedule.
+#      : The corpus is carried between runs by actions/cache, which is what
+#        makes "two hours cumulative" mean anything -- without it every run
+#        would restart from the two tracked seeds and re-derive the same
+#        shallow inputs. The tracked seeds under tests\fuzz\corpus\ are the
+#        floor, not the working set; see tests\fuzz\README.md.
+#      : actions/cache is used on the same reasoning as actions/checkout --
+#        first-party, versioned, and the alternative is hand-rolling a cache
+#        against the GitHub API. The no-third-party-actions rule in ci.yml is
+#        about unaudited actions, not about GitHub's own.
+#      : Windows only, and no clang-cl. MSVC ships both ASan and libFuzzer
+#        (clang_rt.fuzzer_MD-x86_64.lib), so the harness builds with the same
+#        toolchain as everything else. Item 14 assumed clang-cl was required;
+#        it is not, which is a relief for an MFC extension library.
+
+name: Fuzz
+
+on:
+  schedule:
+    # 14:20 UTC on Sundays. Off the hour on purpose -- GitHub queues scheduled
+    # workflows worldwide at :00 and a shared runner pool makes you wait.
+    # Weekly rather than nightly for the billing reason in the header.
+    - cron: '20 14 * * 0'
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: 'Fuzzing time in seconds'
+        required: false
+        default: '3600'
+      triage:
+        description: 'Fork mode: keep going past a crash and collect distinct ones'
+        type: boolean
+        required: false
+        default: false
+      platform_ref:
+        description: Ref of the sibling Platform repository (blank = its default branch).
+        required: false
+        default: ""
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: false      # never cancel a long run to start another
+
+env:
+  PLATFORM_REPO: IvywareAU/Platform
+
+# working-directory, because the checkouts nest this repository one level down to
+# make room for its sibling Platform. Steps that run BEFORE that directory exists
+# override it back to the workspace root; actions/cache and upload-artifact take
+# workspace-relative paths and carry the prefix explicitly.
+defaults:
+  run:
+    shell: pwsh
+    working-directory: mscs/Msgcore
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: ASan + libFuzzer (${{ matrix.harness }})
+    runs-on: windows-2022
+    # 75, not 120. The fuzz itself is capped at -Seconds below and the one run to
+    # date took 1h01m end to end, so anything past ~75 minutes is a hung job
+    # billing at 2x for nothing. Raise this if -Seconds is ever raised.
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false      # a finding in one harness must not hide the other's
+      matrix:
+        harness: [iomage_load, recv_image]
+
+    steps:
+      # -- the two-repository layout -----------------------------------------
+      # Platform/ is a SIBLING repository, not a subdirectory of this one, so a
+      # single-repository checkout compiles nothing: stdafx.h opens with
+      # #include "../Platform/platform.h". The runner assembles the pair by name,
+      # in the layout that include expects:
+      #
+      #     mscs/Platform    the Win32->POSIX shim layer
+      #     mscs/Msgcore     this repository, at the ref that triggered the run
+      #
+      # Both repositories are private and the automatic GITHUB_TOKEN is scoped to
+      # this one alone, so the sibling checkout needs a PAT -- MSCS_SOLUTION_TOKEN,
+      # the same secret TargetCore's solution-build.yml uses. Without it the
+      # checkout fails with a 404 that reads like a deleted repository, which is
+      # what the preflight below exists to turn into a sentence.
+      - name: Preflight - the cross-repository token
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          TOKEN: ${{ secrets.MSCS_SOLUTION_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "MSCS_SOLUTION_TOKEN is not set on this repository."
+            echo
+            echo "Platform is private, and the automatic GITHUB_TOKEN cannot read"
+            echo "across repositories. The Platform checkout below would fail with"
+            echo "a 404 that reads like a deleted repository."
+            echo
+            echo "Fix: create a PAT with read access to Platform, then:"
+            echo "    gh secret set MSCS_SOLUTION_TOKEN --repo IvywareAU/Msgcore"
+            exit 1
+          fi
+          echo "ok  MSCS_SOLUTION_TOKEN is present."
+
+      - name: Check out Platform
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.PLATFORM_REPO }}
+          ref: ${{ inputs.platform_ref }}
+          token: ${{ secrets.MSCS_SOLUTION_TOKEN }}
+          path: mscs/Platform
+
+      # This repository last, at the ref that triggered the run.
+      - name: Check out Msgcore
+        uses: actions/checkout@v5
+        with:
+          path: mscs/Msgcore
+
+      # A missing sibling fails loudly and specifically, and never reads as a
+      # defect in this repository. It never degrades to a skip either: a job that
+      # prints "skipped" and exits 0 puts a green tick on every commit for having
+      # verified nothing.
+      - name: Verify the sibling layout
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          missing=0
+          for f in mscs/Platform/platform.h mscs/Platform/mfcshim.h mscs/Msgcore/stdafx.h; do
+            if [ -e "$f" ]; then echo "ok       $f"; else echo "MISSING  $f"; missing=1; fi
+          done
+          if [ "$missing" != 0 ]; then
+            echo
+            echo "::error::The sibling layout is not assembled -- this is not a Msgcore defect."
+            exit 1
+          fi
+
+      - name: Assert the MSCS tree variables are absent
+        run: |
+          foreach ($name in 'WDMSCS_LIB', 'WDMSCS_DEBUG', 'WDMSCS_VSUTILS') {
+              if (-not [string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($name))) {
+                  Write-Host "::error::$name is set; this job must build from a clean environment."
+                  exit 1
+              }
+          }
+
+      # Rolling cache: each run restores the newest previous corpus and saves
+      # its own. The exact key never hits, so it always saves; restore-keys
+      # gives it the most recent prefix match to start from.
+      # Per-harness cache. The two harnesses share tests\fuzz\corpus as seeds but
+      # not their accumulated work: an input that is coverage-interesting to the
+      # load path usually is not to the traversal, and one shared cache would
+      # have each run re-deriving the other's leavings.
+      - name: Restore the accumulated corpus
+        uses: actions/cache@v6
+        with:
+          path: mscs/Msgcore/out/fuzz/work/${{ matrix.harness }}
+          key: fuzz-corpus-${{ matrix.harness }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.harness }}-
+
+      - name: Build and fuzz
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+
+          # 1800 per harness, not 3600. Two harnesses on two runners for half the
+          # time each bills exactly what one harness for the full hour did -- the
+          # billing envelope in the header is unchanged, and wall-clock actually
+          # falls because the matrix runs them in parallel. What it costs is the
+          # load path's per-run depth, which is the right trade to make: the
+          # receive path is where F4-F7 were and it has never been fuzzed here at
+          # all, so an hour split evenly buys more than a second hour of the path
+          # that already has ~1h banked. Pass -f seconds=3600 by hand for a full
+          # run on each when the minutes are there.
+          $seconds = '${{ inputs.seconds }}'
+          if (-not $seconds) { $seconds = '1800' }     # the schedule passes nothing
+
+          $argv = @('-Harness', '${{ matrix.harness }}', '-Seconds', $seconds)
+          if ('${{ inputs.triage }}' -eq 'true') { $argv += '-Triage' }
+
+          & pwsh -NoProfile -File tests\fuzz\build_run_fuzz.ps1 @argv
+          exit $LASTEXITCODE
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts-${{ matrix.harness }}-${{ github.run_id }}
+          path: mscs/Msgcore/out/fuzz/artifacts/${{ matrix.harness }}/
+          if-no-files-found: ignore
+          retention-days: 90
+
+      # Kept on success too: this is the corpus a human would promote a seed
+      # from, and it is the only evidence of what the run actually covered.
+      - name: Upload the working corpus
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-corpus-${{ matrix.harness }}-${{ github.run_id }}
+          path: mscs/Msgcore/out/fuzz/work/${{ matrix.harness }}/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,297 @@
+# Copyright © 2026 Khrustal & Mann
+#              MELBOURNE, VICTORIA, AUSTRALIA, 3000
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied. See the License for the specific language governing
+# permissions and limitations under the License.
+#
+# Msgcore -> libmsgcore.so / Msgcore.dll
+#
+# This file works two ways:
+#
+#   * as a SUBDIRECTORY of the surrounding MSCS tree, which is what it was written for --
+#     MSCS/CMakeLists.txt adds it when MSCS_BUILD_LIBS=ON, having already defined the
+#     p2pplatform target from MSCS/Platform/; and
+#   * on its own, `cmake -S . -B build`, WITH the sibling Platform/ present beside this
+#     repository. That is a two-repository layout, not a lone clone: Platform/ used to be
+#     vendored in here so a clone of this repository alone would compile, and that copy has
+#     been removed. The guarded add_subdirectory() below reaches ../Platform and fails with
+#     a sentence when it is absent.
+#
+# On Windows the (2022).vcxproj remains authoritative: it is the build that is verified
+# across all eight configurations, and it is what Readme.md tells you to use. The CMake path
+# is maintained for the Linux port and for parity checking.
+#
+# The TU list mirrors the compiled set in Msgcore(2022).vcxproj.
+
+# Only when this is the top-level project. As a subdirectory both calls belong to the parent.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    cmake_minimum_required(VERSION 3.24)
+    project(Msgcore LANGUAGES CXX)
+endif()
+
+# The parent tree defines p2pplatform from MSCS/Platform/ before it adds this directory;
+# on its own, nothing has, so add the SIBLING ../Platform. Guarded rather than unconditional
+# because add_subdirectory() on an already-defined target is a hard error.
+#
+# The binary directory is named explicitly because the source directory is outside this one:
+# CMake places an in-tree subdirectory's outputs by itself, an out-of-tree one it will not.
+#
+# A missing sibling is a FATAL_ERROR carrying an instruction, not a header-not-found cascade
+# forty errors deep. Same rule the CI layout check follows -- fail loudly and specifically,
+# and never in a way that reads like a defect in this repository.
+#
+# There is now exactly ONE Platform/, so nothing has to choose between copies.
+# MSGCORE_PLATFORM_FROM_PARENT is gone with the vendored tree it existed to disambiguate.
+if(NOT TARGET p2pplatform)
+    if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../Platform/CMakeLists.txt)
+        message(FATAL_ERROR
+            "Platform/ is a SIBLING of this repository and is not present at "
+            "${CMAKE_CURRENT_SOURCE_DIR}/../Platform. Clone IvywareAU/Platform "
+            "beside this one -- see Readme.md, \"The sibling dependency\". "
+            "A clone of this repository alone does not build.")
+    endif()
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../Platform ${CMAKE_BINARY_DIR}/platform)
+endif()
+
+set(MSGCORE_SOURCES
+    Kernel32_Ext.cpp
+    Msgcore_c.cpp
+    Msgcore_c_u8.cpp
+    MsgAttr.cpp
+    MsgCollectors.cpp
+    MsgCurs.cpp
+    MsgDesc.cpp
+    Msgexception.cpp
+    MsgList.cpp
+    MsgStck.cpp
+    MsgVect.cpp
+    P2Pmsg.cpp
+    P2PmsgBSTR.cpp
+    Msgcore.cpp
+    P2PmsgMgr.cpp
+    MsgVBHeap.cpp
+    P2PmsgVBLock.cpp
+    P2Pmsg_Ext.cpp)
+# Excluded on Linux: stdafx.cpp (PCH via target_precompile_headers).
+# The §2 orphan TUs this list used to exclude by name are deleted; nothing is out of scope.
+
+# CMake-on-Windows parity: mirror Msgcore(2022).vcxproj, which
+# builds Msgcore.dll as an MFC extension DLL using the SHARED MFC runtime (UseOfMfc=
+# Dynamic) + Unicode. CMAKE_MFC_FLAG must be set BEFORE add_library() (it is consumed
+# there to inject the MFC include/lib/_AFXDLL wiring). The Windows source set is identical
+# to the Linux one PLUS the PCH — but target_precompile_headers below re-creates the PCH
+# on both, so no per-OS source difference is needed (the vcxproj's stdafx.cpp is the classic
+# /Yc TU, which CMake generates itself).
+if(WIN32)
+    set(CMAKE_MFC_FLAG 2)   # 2 = use MFC in a shared DLL (matches UseOfMfc=Dynamic)
+    # Msgcore.rc carries VS_VERSION_INFO (company, product, version, copyright, all from
+    # Msgcore_version.h) and the IDS_APP_TITLE string. Without it a CMake-built DLL has no
+    # .rsrc section at all, so it reported EMPTY company and copyright to Explorer and to an
+    # installer while the vcxproj-built one reported the full block - the same binary by two
+    # routes disagreeing about who owns it. Mirrors TargetCore/CMakeLists.txt, which has
+    # compiled its .rc all along.
+    # project() above declares LANGUAGES CXX only, so RC must be enabled before a .rc can be
+    # attached to a target.
+    enable_language(RC)
+    list(APPEND MSGCORE_SOURCES Msgcore.rc)
+endif()
+
+add_library(msgcore SHARED ${MSGCORE_SOURCES})
+# C++17, matching Msgcore(2022).vcxproj, which sets stdcpp17 in all eight
+# configurations. That was a deliberate choice (commit 3f7bf5e, 2026-08-15):
+# "latest" is a moving target across toolset updates, and a library that has to
+# build the same way in five years should not have its language level chosen by
+# whichever Visual Studio the builder happens to have installed.
+#
+# This file said cxx_std_23 from 2026-07-08 -- five weeks BEFORE that decision --
+# and was never brought in line with it, so the two build systems compiled the
+# same sources at different language levels. The direction was the dangerous one:
+# CMake was the MORE permissive of the two, so a C++20 or C++23 construct added
+# here would compile green under CMake on both platforms, pass every Linux gate,
+# and fail only when someone next built the .sln.
+#
+# CMAKE_CXX_STANDARD is 23 at the top level, so the feature request alone would
+# not lower it -- the standard is a target property and the global default wins
+# unless the property is set. Both are set, so the request cannot silently
+# disagree with the property.
+#
+# PUBLIC is still correct at 17: it declares the MINIMUM a consumer needs, and
+# targetcore asks for cxx_std_23 and still gets it. The headers already have to
+# be valid under both -- TargetCore(2022).vcxproj is stdcpplatest and includes
+# them -- so this is not a new constraint on them.
+target_compile_features(msgcore PUBLIC cxx_std_17)
+set_target_properties(msgcore PROPERTIES
+                      CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+# $<BUILD_INTERFACE:> and not a bare `p2pplatform`, and the reason is the whole
+# reason this target can be exported at all. p2pplatform is a BUILD-TIME
+# dependency: an INTERFACE library whose only content is an include directory
+# pointing into MSCS/Platform/, so that the legacy TUs here resolve <afxwin.h>
+# and friends. Nothing of it survives into libmsgcore.so / Msgcore.dll except
+# the code it caused to be compiled -- an installed consumer needs none of its
+# headers, because the only header that ships is the self-contained Msgcore_c.h.
+# A bare link would put p2pplatform in INTERFACE_LINK_LIBRARIES, and
+# install(TARGETS ... EXPORT) then refuses to generate at all ("requires target
+# p2pplatform that is not in any export set"). The alternatives were to export a
+# shim that publishes nothing, or to demote the link to PRIVATE and lose the
+# include-directory propagation that targetcore and the test suites rely on.
+# Wrapping it keeps the build tree byte-identical and empties the install
+# interface, which is exactly the truth about it.
+target_link_libraries(msgcore PUBLIC $<BUILD_INTERFACE:p2pplatform>)
+# Where an INSTALLED consumer finds Msgcore_c.h. Evaluates to nothing in the
+# build tree, so in-tree consumers are unaffected.
+target_include_directories(msgcore INTERFACE $<INSTALL_INTERFACE:include>)
+target_compile_definitions(msgcore PRIVATE Msgcore_EXPORTS)
+
+target_precompile_headers(msgcore PRIVATE stdafx.h)   # re-creates the stdafx.h PCH (§7)
+
+if(WIN32)
+    # Match the vcxproj preprocessor set (CMAKE_MFC_FLAG already adds _AFXDLL + the shared
+    # runtime). _AFXEXT marks this as an MFC extension DLL; Unicode is the character set.
+    target_compile_definitions(msgcore PRIVATE WIN32 _WINDOWS _AFXEXT _UNICODE UNICODE)
+    # The CMake target is lowercase (targets are identifiers); the artifact must not be.
+    # The vcxproj ships Msgcore.dll / Msgcore.lib and every downstream consumer, the shared
+    # bin\<Config><Arch> tree included, resolves that name. On a case-insensitive filesystem
+    # a lowercase msgcore.dll looks harmless right up to the moment something copies both
+    # into one directory, at which point they are one file and the winner is whichever was
+    # copied last. Naming the artifact after the product rather than after the target
+    # removes the ambiguity instead of relying on the filesystem to fold it.
+    set_target_properties(msgcore PROPERTIES OUTPUT_NAME Msgcore)
+    # Nothing stages this DLL anywhere, and that is deliberate. See the block headed
+    # "WHY THERE IS NO STAGING STEP HERE" in the top-level CMakeLists.txt before adding one.
+    # Same system libs the vcxproj links: Winsock, the COM support runtime for
+    # _bstr_t/_variant_t (comsuppwd.lib Debug / comsuppw.lib Release -- the "w" = wide),
+    # and Propsys for InitVariantFromBuffer / VariantToGUID (P2PmsgData_var).
+    target_link_libraries(msgcore PRIVATE
+        ws2_32 MsWsock Propsys
+        comsuppw$<$<CONFIG:Debug>:d>)
+else()
+    # GCC/Clang reject a handful of constructs MSVC silently accepts in this legacy
+    # codebase (distinct-pointer-type comparisons, NULL-in-arithmetic, etc.). -fpermissive
+    # downgrades them to warnings without altering semantics, matching the manual Linux build.
+    target_compile_options(msgcore PRIVATE -fpermissive)
+endif()
+
+# ---------------------------------------------------------------------------
+# The DebugLib/ReleaseLib shape (MSCS_BUILD_STATIC_LIBS, off by default).
+#
+# Read out of Msgcore(2022).vcxproj rather than guessed: those configurations are
+# ConfigurationType=StaticLibrary with UseOfMfc still Dynamic, and their preprocessor set is
+# WIN32;_WINDOWS;_DEBUG;Msgcore_STATIC;TargetCore_STATIC -- so Msgcore_STATIC REPLACES
+# Msgcore_EXPORTS (there is nothing to export from an archive) and _AFXEXT is absent, because
+# _AFXEXT marks an MFC EXTENSION DLL and this is not a DLL. Msgcore.h already has the arm:
+# `#if defined(Msgcore_STATIC)` -> neither dllexport nor dllimport. Same TU list either way;
+# unlike TargetCore there is no dllmain.cpp here to exclude.
+#
+# Not installed and not exported. The install/export set below describes the shared library a
+# consumer links at run time; adding a second archive to it would put two artifacts under one
+# package with no way for find_package() to say which it meant.
+# ---------------------------------------------------------------------------
+if(MSCS_BUILD_STATIC_LIBS)
+    add_library(msgcore_static STATIC ${MSGCORE_SOURCES})
+    # C++17 for the same reason as the shared target above -- and it matters more
+    # here, not less: DebugLib/ReleaseLib are the .vcxproj configurations this
+    # archive mirrors, and they are stdcpp17 too.
+    target_compile_features(msgcore_static PUBLIC cxx_std_17)
+    set_target_properties(msgcore_static PROPERTIES
+                          CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    target_link_libraries(msgcore_static PUBLIC p2pplatform)
+    target_compile_definitions(msgcore_static PUBLIC Msgcore_STATIC)
+    target_precompile_headers(msgcore_static PRIVATE stdafx.h)
+    if(WIN32)
+        target_compile_definitions(msgcore_static PRIVATE WIN32 _WINDOWS _UNICODE UNICODE)
+        target_link_libraries(msgcore_static PUBLIC
+            ws2_32 MsWsock Propsys
+            comsuppw$<$<CONFIG:Debug>:d>)
+    else()
+        target_compile_options(msgcore_static PRIVATE -fpermissive)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# Installation
+#
+# Added 2026-08-19, as the Msgcore half of the sibling repository's "install tree
+# that loads" work. Until then this file had NO install() rule of any kind.
+# TargetCore had
+# had one since 2026-08-16 and its own comment said what that meant: the library
+# it stages links THIS one, so `cmake --install` produced an artifact that could
+# not load. That is the hole this closes, and it is the reason the step exists.
+#
+# WHAT IS INSTALLED: the shared library, Msgcore_c.h, Msgcore_version.h, and the
+# licence pair.
+#
+# Msgcore_version.h is not optional and its absence was a real defect on the
+# TargetCore side: Msgcore_c.h opens with #include "Msgcore_version.h", so a
+# staged Msgcore_c.h without it does not preprocess. A header that cannot be
+# included is not a shipped header, whatever the install manifest says.
+#
+# The C++ headers are deliberately NOT installed. Every one of them reaches
+# stdafx.h, which reaches ../Platform and MFC, so installing them would publish
+# a surface that cannot compile outside this solution. Shipping a header that
+# cannot be included is worse than shipping none -- the same call TargetCore
+# makes, for the same reason, and the two must agree or the flat C API is the
+# only usable surface on one side and not the other.
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+# Version identity is read from the header rather than written twice. This file
+# is not the source of truth for the number and must not become a second place
+# it can be wrong; Msgcore_version.h says so itself.
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/Msgcore_version.h _mc_ver_major
+     REGEX "^#define[ \t]+MSGCORE_VERSION_MAJOR")
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/Msgcore_version.h _mc_ver_minor
+     REGEX "^#define[ \t]+MSGCORE_VERSION_MINOR")
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/Msgcore_version.h _mc_ver_patch
+     REGEX "^#define[ \t]+MSGCORE_VERSION_PATCH")
+string(REGEX REPLACE "^.*MSGCORE_VERSION_MAJOR[ 	]+([0-9]+).*$" "\\1" _mc_ver_major "${_mc_ver_major}")
+string(REGEX REPLACE "^.*MSGCORE_VERSION_MINOR[ 	]+([0-9]+).*$" "\\1" _mc_ver_minor "${_mc_ver_minor}")
+string(REGEX REPLACE "^.*MSGCORE_VERSION_PATCH[ 	]+([0-9]+).*$" "\\1" _mc_ver_patch "${_mc_ver_patch}")
+set(MSGCORE_VERSION "${_mc_ver_major}.${_mc_ver_minor}.${_mc_ver_patch}")
+
+install(TARGETS msgcore EXPORT MsgcoreTargets
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}      # .dll  (Windows)
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}      # .so   (Linux)
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})     # .lib import library
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Msgcore_c.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/Msgcore_version.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+# The licence and the attribution notice travel with the binary: Apache-2.0
+# section 4 requires the consumer receive both. The three components carry
+# THREE DIFFERENT NOTICE files -- checked, not assumed -- so each installs its
+# own into its own directory rather than one overwriting another.
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE
+              ${CMAKE_CURRENT_SOURCE_DIR}/NOTICE
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/licenses/msgcore)
+
+# find_package(Msgcore) support. Namespaced Msgcore::msgcore so a consumer
+# cannot confuse the imported target with a target of its own, and so the
+# failure mode of a missing find_package is a hard "not a target" rather than a
+# link line that silently searches the system for -lmsgcore.
+install(EXPORT MsgcoreTargets
+        FILE MsgcoreTargets.cmake
+        NAMESPACE Msgcore::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Msgcore)
+configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/MsgcoreConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/MsgcoreConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Msgcore)
+# SameMajorVersion: the component is 1.0.0 and its ABI promise is not yet
+# written down (that is step 15). Until it is, claiming ExactVersion would be a
+# stronger statement than anything in this tree supports, and AnyNewerVersion a
+# weaker one than a pre-policy library deserves.
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/MsgcoreConfigVersion.cmake
+    VERSION ${MSGCORE_VERSION}
+    COMPATIBILITY SameMajorVersion)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/MsgcoreConfig.cmake
+              ${CMAKE_CURRENT_BINARY_DIR}/MsgcoreConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Msgcore)

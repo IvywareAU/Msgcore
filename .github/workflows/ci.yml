@@ -1,0 +1,535 @@
+# Copyright © 2026 Khrustal & Mann
+#              MELBOURNE, VICTORIA, AUSTRALIA, 3000
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied. See the License for the specific language governing
+# permissions and limitations under the License.
+#
+# Msgcore CI -- the release-readiness register, item 14, jobs 1, 2 and 3.
+#
+# NOTES: Every job runs on a FRESH CLONE with WDMSCS_LIB, WDMSCS_DEBUG and
+#        WDMSCS_VSUTILS absent from the environment. That is not incidental --
+#        it is the whole point. B1/B2/B3/B8 were all invisible from inside the
+#        MSCS tree and only appeared in a cleared-environment clone, so a job
+#        that inherited those variables would re-hide exactly the class of
+#        regression this pipeline exists to catch. The guard step below fails
+#        loudly rather than trusting the runner image to have left them unset.
+#      : msbuild is located with vswhere rather than a setup-msbuild action, to
+#        keep the pipeline free of third-party actions it would have to pin and
+#        audit. tests\build_run_c4.bat already locates its own toolchain the
+#        same way, so the two agree by construction.
+#      : The Linux/CMake path is deliberately NOT built here. Platform/
+#        CMakeLists.txt still has every Linux implementation TU commented out
+#        (Phase 1 unwritten), so libmsgcore.so cannot link yet. Add a job when
+#        the port reaches Phase 1 -- a red build for unwritten code teaches
+#        nobody anything.
+#      : The ASan/libFuzzer job (item 14, fourth bullet) is not here. It lives
+#        in fuzz.yml because it is nightly rather than per-push -- a job that
+#        takes an hour and whose result is "no new crash yet" does not belong
+#        on the path between a commit and a green tick.
+
+name: CI
+
+# Every branch, not just master. tools/hooks/pre-push refuses to put a commit
+# on master until that exact SHA has gone green, and the only way to earn a
+# green is to push the branch first -- so a trigger restricted to master would
+# leave the hook demanding a run that could never happen.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      platform_ref:
+        description: Ref of the sibling Platform repository (blank = its default branch).
+        required: false
+        default: ""
+
+# A superseded run of an in-flight branch tells you nothing worth paying for.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# PLATFORM_REPO is checked out beside this repository by every job that compiles.
+# See the layout comment in job 1.
+env:
+  PLATFORM_REPO: IvywareAU/Platform
+
+# working-directory, because the checkouts nest this repository one level down to
+# make room for its sibling. Steps that must run BEFORE that directory exists --
+# the preflight and the layout check -- override it back to the workspace root.
+defaults:
+  run:
+    shell: pwsh
+    working-directory: mscs/Msgcore
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1 -- build, all eight configurations, project and solution, against the
+  #          sibling Platform checked out beside this repository.
+  # ---------------------------------------------------------------------------
+  build:
+    name: ${{ matrix.configuration }}|${{ matrix.platform }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false        # one broken configuration must not mask the other seven
+      matrix:
+        include:
+          # Baselines are the "Warning lines" column of the release-readiness register's
+          # build table -- occurrence counts, the figure the per-code breakdown
+          # sums to.
+          #
+          # RE-RECORDED at the unified regime (item 10). All eight configurations
+          # now compile at /W4 + /std:c++17 + /std:c17 + /sdl; the x64 four used
+          # to be /W3 + stdcpplatest with no /sdl, which is why only they moved
+          # (37 -> 76 debug-side, 37 -> 59 release-side). Win32 fell 140 -> 138
+          # and 123 -> 121 because item 10 fixed two real defects rather than
+          # silencing two warnings -- see the C4456 and C4389 notes in
+          # The release-readiness register, Stage D.
+          #
+          # The platforms still differ (76/59 vs 138/121) from identical source
+          # and now-identical switches. That is the C4244 residue: 37 truncations
+          # on x64 against 102 on Win32, which is a property of the pointer width,
+          # not of the diagnostic regime. Triaging that set is the one part of
+          # item 10 left open, and these ceilings are what stop it growing.
+          - { configuration: Debug,      platform: x64,   baseline: 76  }
+          - { configuration: Release,    platform: x64,   baseline: 59  }
+          - { configuration: DebugLib,   platform: x64,   baseline: 76  }
+          - { configuration: ReleaseLib, platform: x64,   baseline: 59  }
+          - { configuration: Debug,      platform: Win32, baseline: 138 }
+          - { configuration: DebugLib,   platform: Win32, baseline: 138 }
+          - { configuration: Release,    platform: Win32, baseline: 121 }
+          - { configuration: ReleaseLib, platform: Win32, baseline: 121 }
+
+    steps:
+      # -- the two-repository layout -----------------------------------------
+      # Platform/ is a SIBLING repository, not a subdirectory of this one, so a
+      # single-repository checkout compiles nothing: stdafx.h opens with
+      # #include "../Platform/platform.h". The runner assembles the pair by name,
+      # in the layout that include expects:
+      #
+      #     mscs/Platform    the Win32->POSIX shim layer
+      #     mscs/Msgcore     this repository, at the ref that triggered the run
+      #
+      # Both repositories are private and the automatic GITHUB_TOKEN is scoped to
+      # this one alone, so the sibling checkout needs a PAT -- MSCS_SOLUTION_TOKEN,
+      # the same secret TargetCore's solution-build.yml uses. Without it the
+      # checkout fails with a 404 that reads like a deleted repository, which is
+      # what the preflight below exists to turn into a sentence.
+      - name: Preflight - the cross-repository token
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          TOKEN: ${{ secrets.MSCS_SOLUTION_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "MSCS_SOLUTION_TOKEN is not set on this repository."
+            echo
+            echo "Platform is private, and the automatic GITHUB_TOKEN cannot read"
+            echo "across repositories. The Platform checkout below would fail with"
+            echo "a 404 that reads like a deleted repository."
+            echo
+            echo "Fix: create a PAT with read access to Platform, then:"
+            echo "    gh secret set MSCS_SOLUTION_TOKEN --repo IvywareAU/Msgcore"
+            exit 1
+          fi
+          echo "ok  MSCS_SOLUTION_TOKEN is present."
+
+      - name: Check out Platform
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.PLATFORM_REPO }}
+          ref: ${{ inputs.platform_ref }}
+          token: ${{ secrets.MSCS_SOLUTION_TOKEN }}
+          path: mscs/Platform
+
+      # This repository last, at the ref that triggered the run.
+      - name: Check out Msgcore
+        uses: actions/checkout@v5
+        with:
+          path: mscs/Msgcore
+
+      # A missing sibling fails loudly and specifically, and never reads as a
+      # defect in this repository. It never degrades to a skip either: a job that
+      # prints "skipped" and exits 0 puts a green tick on every commit for having
+      # verified nothing.
+      - name: Verify the sibling layout
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          missing=0
+          for f in mscs/Platform/platform.h mscs/Platform/mfcshim.h mscs/Msgcore/stdafx.h; do
+            if [ -e "$f" ]; then echo "ok       $f"; else echo "MISSING  $f"; missing=1; fi
+          done
+          if [ "$missing" != 0 ]; then
+            echo
+            echo "::error::The sibling layout is not assembled -- this is not a Msgcore defect."
+            exit 1
+          fi
+
+      - name: Assert the MSCS tree variables are absent
+        run: |
+          $leaked = @()
+          foreach ($name in 'WDMSCS_LIB', 'WDMSCS_DEBUG', 'WDMSCS_VSUTILS') {
+              $value = [Environment]::GetEnvironmentVariable($name)
+              if (-not [string]::IsNullOrEmpty($value)) { $leaked += "$name=$value" }
+          }
+          if ($leaked.Count) {
+              Write-Host "::error::Inherited MSCS tree variables: $($leaked -join ', ')"
+              Write-Host "This job must build from a clean environment. See Directory.Build.props."
+              exit 1
+          }
+          Write-Host "Clean environment: none of WDMSCS_LIB/WDMSCS_DEBUG/WDMSCS_VSUTILS is set."
+
+      - name: Locate MSBuild
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
+          $msbuild = & $vswhere -latest -products * `
+              -requires Microsoft.Component.MSBuild `
+              -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          if (-not $msbuild) { throw "No MSBuild found by vswhere." }
+          Write-Host "MSBuild: $msbuild"
+          "MSBUILD=$msbuild" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build Msgcore(2022).vcxproj
+        run: |
+          # GitHub's pwsh shell sets $ErrorActionPreference='Stop', and PS 7.4
+          # defaults $PSNativeCommandUseErrorActionPreference to true. Left
+          # alone, the first line msbuild writes to stderr terminates the step
+          # on the spot -- before the exit-code check below runs, so the job
+          # fails with no baseline comparison and no diagnosis. Both are reset
+          # here; the explicit $LASTEXITCODE check is what decides the outcome.
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+
+          # /clp:NoSummary is load-bearing, not cosmetic. At normal verbosity
+          # MSBuild re-lists every warning in its end-of-build summary block, so
+          # a naive line count returns exactly twice the real figure -- which is
+          # how the first assessment arrived at 74/282/248 for a tree that then
+          # emitted 37/142/125 (today 76/59 on x64 and 138/121 on Win32, after
+          # item 10 unified the switch set; 37/140/123 immediately before it,
+          # two C4310 having gone with the M5 pass). Suppressing the summary
+          # makes each warning appear once.
+          & $env:MSBUILD 'Msgcore(2022).vcxproj' `
+              /nologo /m:1 /v:normal /clp:NoSummary `
+              /p:Configuration=${{ matrix.configuration }} `
+              /p:Platform=${{ matrix.platform }} `
+              2>&1 | Tee-Object -FilePath build.log
+          $rc = $LASTEXITCODE
+          if ($rc -ne 0) {
+              Write-Host "::error::Build failed (msbuild exit $rc)."
+              exit $rc
+          }
+
+      - name: Check the warning count against the baseline
+        run: |
+          $baseline = ${{ matrix.baseline }}
+          # ': warning C####' only -- compiler diagnostics. MSB#### warnings are
+          # deliberately excluded: MSB8029 in particular fires purely because of
+          # WHERE a tree was cloned, and is not a property of the source.
+          $lines = @(Select-String -Path build.log -Pattern ': warning C\d+')
+          $count = $lines.Count
+          Write-Host "Compiler warning lines: $count (baseline $baseline)"
+
+          if ($count -gt $baseline) {
+              # Show what is new, grouped by code -- 'you added warnings' is not
+              # actionable on its own.
+              Write-Host ""
+              Write-Host "Breakdown by code:"
+              $lines `
+                | ForEach-Object { if ($_.Line -match ': warning (C\d+)') { $Matches[1] } } `
+                | Group-Object `
+                | Sort-Object Count -Descending `
+                | ForEach-Object { Write-Host ("  {0} x{1}" -f $_.Name, $_.Count) }
+              Write-Host ""
+              Write-Host "::error::Warning count rose from $baseline to $count. CONTRIBUTING.md: do not add a warning."
+              exit 1
+          }
+
+          if ($count -lt $baseline) {
+              # Not a failure -- the counts are being driven down on purpose.
+              # But the baseline is now stale, and a stale ceiling silently
+              # re-admits every warning between $count and $baseline.
+              Write-Host "::notice::Warning count fell from $baseline to $count. Update the baseline in the release-readiness register and this matrix in the same commit."
+          }
+
+      # The solution, not just the project. These are different entry points and
+      # only one of them was ever built here: `c88f9f5` removed com/ from the
+      # repository and left Msgcore(2022).sln still naming
+      # com\MsgcoreCom(2022).vcxproj, so every configuration of the solution
+      # failed with MSB3202 ("The project file was not found") for a day while
+      # this job stayed green -- because it builds the .vcxproj directly, and so
+      # does the command line the README gives. What it broke was the path
+      # nothing here was checking: cloning the repository and opening it in
+      # Visual Studio, which is how most Windows developers will meet it.
+      #
+      # The build above has already produced this configuration's outputs, so
+      # this is an incremental no-op that costs seconds. It is not the compile
+      # that matters here -- it is that the solution parses and every project it
+      # names resolves.
+      #
+      # Note the platform mapping. The solution's platform is x86 where the
+      # project's is Win32, so passing this matrix's platform straight through
+      # fails on the four Win32 rows with MSB4126, "The specified solution
+      # configuration Release|Win32 is invalid" -- which reads like a broken
+      # solution and is only a naming difference between the two files.
+      - name: Build Msgcore(2022).sln
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+
+          $slnPlatform = if ('${{ matrix.platform }}' -eq 'Win32') { 'x86' } else { '${{ matrix.platform }}' }
+          Write-Host "Solution platform: $slnPlatform (project platform: ${{ matrix.platform }})"
+
+          & $env:MSBUILD 'Msgcore(2022).sln' `
+              /nologo /m:1 /v:minimal `
+              /p:Configuration=${{ matrix.configuration }} `
+              /p:Platform=$slnPlatform `
+              2>&1 | Tee-Object -FilePath sln.log
+          $rc = $LASTEXITCODE
+          if ($rc -ne 0) {
+              Write-Host "::error::Solution build failed (msbuild exit $rc). The project builds and the solution does not, so check what Msgcore(2022).sln names against what the repository contains."
+              exit $rc
+          }
+
+      # The release-readiness register, item 11. Only the two DLL configurations are
+      # checked, because DebugLib/ReleaseLib produce a static library and a
+      # static library has no export table to drift. Running it on all four
+      # DLL builds rather than one is deliberate and not redundant: it is how
+      # the Debug|Win32 /sdl divergence was found in the first place, and one
+      # configuration per platform would have missed it.
+      - name: Check the exported surface against the manifests
+        if: matrix.configuration == 'Debug' || matrix.configuration == 'Release'
+        run: |
+          pwsh tools/ci/check_exports.ps1 `
+              -Dll 'out\${{ matrix.platform }}\${{ matrix.configuration }}\Msgcore.dll' `
+              -Platform ${{ matrix.platform }} `
+              -Configuration ${{ matrix.configuration }}
+
+      - name: Upload the build log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: buildlog-${{ matrix.configuration }}-${{ matrix.platform }}
+          path: mscs/Msgcore/build.log
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Job 1b -- the COM server -- was here, and is deleted.
+  #
+  # `c88f9f5` ("Move com\ to MsgFacade") removed com/ from this repository, and
+  # this job kept building com\MsgcoreCom(2022).vcxproj: MSB1009, "Project file
+  # does not exist". It went unnoticed because that commit never ran CI, and
+  # neither did the three after it -- the first run to cover any of them was on
+  # a branch five commits later, which reported the whole backlog at once.
+  #
+  # The job is deleted rather than repointed. A COM server that lives in
+  # MsgFacade is MsgFacade's to build, and its zero-warning baseline is worth
+  # keeping there rather than asserting it from a repository that no longer
+  # contains the sources. Nothing here can now regress it, which is the honest
+  # position and not a loss of coverage this repository ever really had.
+  # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  # Job 2 -- runtime test, both link modes.
+  # ---------------------------------------------------------------------------
+  test:
+    name: C4 load test (${{ matrix.mode }})
+    runs-on: windows-2022
+    needs: build          # a runtime failure is unreadable if the build is broken
+    strategy:
+      fail-fast: false
+      matrix:
+        # dll   links lib\x64\Debug\Msgcore.lib and needs out\x64\Debug\Msgcore.dll
+        # static links out\x64\DebugLib\Msgcore.lib directly
+        include:
+          - { mode: dll,    configuration: Debug    }
+          - { mode: static, configuration: DebugLib }
+
+    steps:
+      # -- the two-repository layout -----------------------------------------
+      # Platform/ is a SIBLING repository, not a subdirectory of this one, so a
+      # single-repository checkout compiles nothing: stdafx.h opens with
+      # #include "../Platform/platform.h". The runner assembles the pair by name,
+      # in the layout that include expects:
+      #
+      #     mscs/Platform    the Win32->POSIX shim layer
+      #     mscs/Msgcore     this repository, at the ref that triggered the run
+      #
+      # Both repositories are private and the automatic GITHUB_TOKEN is scoped to
+      # this one alone, so the sibling checkout needs a PAT -- MSCS_SOLUTION_TOKEN,
+      # the same secret TargetCore's solution-build.yml uses. Without it the
+      # checkout fails with a 404 that reads like a deleted repository, which is
+      # what the preflight below exists to turn into a sentence.
+      - name: Preflight - the cross-repository token
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          TOKEN: ${{ secrets.MSCS_SOLUTION_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "MSCS_SOLUTION_TOKEN is not set on this repository."
+            echo
+            echo "Platform is private, and the automatic GITHUB_TOKEN cannot read"
+            echo "across repositories. The Platform checkout below would fail with"
+            echo "a 404 that reads like a deleted repository."
+            echo
+            echo "Fix: create a PAT with read access to Platform, then:"
+            echo "    gh secret set MSCS_SOLUTION_TOKEN --repo IvywareAU/Msgcore"
+            exit 1
+          fi
+          echo "ok  MSCS_SOLUTION_TOKEN is present."
+
+      - name: Check out Platform
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.PLATFORM_REPO }}
+          ref: ${{ inputs.platform_ref }}
+          token: ${{ secrets.MSCS_SOLUTION_TOKEN }}
+          path: mscs/Platform
+
+      # This repository last, at the ref that triggered the run.
+      - name: Check out Msgcore
+        uses: actions/checkout@v5
+        with:
+          path: mscs/Msgcore
+
+      # A missing sibling fails loudly and specifically, and never reads as a
+      # defect in this repository. It never degrades to a skip either: a job that
+      # prints "skipped" and exits 0 puts a green tick on every commit for having
+      # verified nothing.
+      - name: Verify the sibling layout
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          missing=0
+          for f in mscs/Platform/platform.h mscs/Platform/mfcshim.h mscs/Msgcore/stdafx.h; do
+            if [ -e "$f" ]; then echo "ok       $f"; else echo "MISSING  $f"; missing=1; fi
+          done
+          if [ "$missing" != 0 ]; then
+            echo
+            echo "::error::The sibling layout is not assembled -- this is not a Msgcore defect."
+            exit 1
+          fi
+
+      - name: Assert the MSCS tree variables are absent
+        run: |
+          foreach ($name in 'WDMSCS_LIB', 'WDMSCS_DEBUG', 'WDMSCS_VSUTILS') {
+              if (-not [string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($name))) {
+                  Write-Host "::error::$name is set; this job must build from a clean environment."
+                  exit 1
+              }
+          }
+
+      - name: Locate MSBuild
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild = & $vswhere -latest -products * `
+              -requires Microsoft.Component.MSBuild `
+              -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          if (-not $msbuild) { throw "No MSBuild found by vswhere." }
+          "MSBUILD=$msbuild" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build ${{ matrix.configuration }}|x64
+        run: |
+          $ErrorActionPreference = 'Continue'          # see the note in job 1
+          $PSNativeCommandUseErrorActionPreference = $false
+
+          & $env:MSBUILD 'Msgcore(2022).vcxproj' /nologo /m:1 /v:minimal `
+              /p:Configuration=${{ matrix.configuration }} /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run the C4 IOMAGE-load rejection test
+        run: |
+          $ErrorActionPreference = 'Continue'          # see the note in job 1
+          $PSNativeCommandUseErrorActionPreference = $false
+
+          # The script locates its own VS toolchain and returns a meaningful
+          # exit code, so there is nothing to interpret here beyond passing it
+          # through. It writes everything to tests\out\.
+          & .\tests\build_run_c4.bat ${{ matrix.mode }}
+          $rc = $LASTEXITCODE
+          if ($rc -ne 0) {
+              Write-Host "::error::C4 load test failed in ${{ matrix.mode }} mode (exit $rc)."
+              exit $rc
+          }
+          Write-Host "C4 load test passed in ${{ matrix.mode }} mode."
+
+      # The release-readiness register, item 15 (Stage E). The C4 test above is a security
+      # regression harness for the load path; this is the unit suite -- 82 cases
+      # and 328 checks over the C++ surface and the flat C ABI, carried in from
+      # MscsUnitTests. Run in BOTH link modes for the same reason C4 is: an
+      # offset minted against one copy of the heap does not resolve against
+      # another (LINKAGE.md), so a suite that only ran one way would miss a
+      # regression that breaks the other.
+      #
+      # Exit code 2 means "everything that ran passed, but a suite was compiled
+      # out". That is deliberately NOT a pass -- see tf_runner_finish -- and the
+      # non-zero check below treats it as the failure it is.
+      - name: Run the Msgcore unit suites
+        run: |
+          $ErrorActionPreference = 'Continue'          # see the note in job 1
+          $PSNativeCommandUseErrorActionPreference = $false
+
+          & .\tests\build_run_suite.bat ${{ matrix.mode }}
+          $rc = $LASTEXITCODE
+          if ($rc -eq 2) {
+              Write-Host "::error::Unit suites reported INCOMPLETE in ${{ matrix.mode }} mode -- a suite was compiled out."
+              exit $rc
+          }
+          if ($rc -ne 0) {
+              Write-Host "::error::Unit suites failed in ${{ matrix.mode }} mode (exit $rc)."
+              exit $rc
+          }
+          Write-Host "Unit suites passed in ${{ matrix.mode }} mode."
+
+  # --------------------------------------------------------------------------
+  #  Job 3 -- hygiene. The release-readiness register, item 14, third bullet.
+  #
+  #  Neither check needs a compiler, so this runs on ubuntu-latest: it is the
+  #  cheapest runner and it costs a tenth of a Windows one. Both scripts are
+  #  pwsh, which is preinstalled on every GitHub runner image, and both go
+  #  through git rather than the filesystem -- so nothing here depends on the
+  #  case-insensitive path semantics that would make the .md check meaningless.
+  #  Running it on Linux is in fact the stricter choice: a citation whose case
+  #  is wrong resolves on Windows and 404s here, and here is where the GitHub
+  #  web view resolves it too.
+  #
+  #  Deliberately NOT `needs:` anything. A dangling citation is worth reporting
+  #  on a branch whose build is broken; gating it behind the matrix would just
+  #  hide one class of problem behind another.
+  # --------------------------------------------------------------------------
+  hygiene:
+    name: Hygiene (citations, ASSERT forms)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: mscs/Msgcore
+
+      - name: Every cited .md is in the repository
+        run: pwsh tools/ci/check_md_citations.ps1
+
+      # Item 19. CONTRIBUTING.md names "structural validation inside ASSERT" as
+      # reject-on-sight for new code, which until now depended entirely on a
+      # reviewer noticing. This counts the three forms and fails when any of
+      # them rises, so the C4 root cause cannot quietly re-accumulate. Another
+      # grep with no compiler, so it belongs on the cheap runner.
+      - name: No ASSERT-family form has grown
+        run: pwsh tools/ci/check_asserts.ps1
+
+      # The export manifest -- item 14's third hygiene check, delivered by item
+      # 11 -- is NOT here. It needs `dumpbin` and a built DLL, so it runs as a
+      # step inside job 1 where both already exist, on each of the four
+      # DLL-producing configurations.

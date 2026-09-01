@@ -1,0 +1,48 @@
+<Project>
+  <!--
+    Repo-root MSBuild targets for the Msgcore repository — companion to
+    Directory.Build.props, which defaults $(WDMSCS_LIB) for a standalone clone.
+
+    As with the .props, MSBuild imports only the NEAREST Directory.Build.targets, so this
+    file shadows MSCS\Directory.Build.targets for the projects in this repository. Chain to
+    the outer file when it exists so nothing it does is lost inside the MSCS tree; the two
+    targets below then guard only the standalone case, keyed off $(MsgcoreStandalone) from
+    Directory.Build.props. They are deliberately NOT named after the outer file's targets:
+    same names would silently redefine them rather than run alongside.
+  -->
+
+  <PropertyGroup>
+    <MsgcoreOuterBuildTargets>$([MSBuild]::GetPathOfFileAbove('Directory.Build.targets', '$(MSBuildThisFileDirectory)../'))</MsgcoreOuterBuildTargets>
+  </PropertyGroup>
+
+  <Import Project="$(MsgcoreOuterBuildTargets)"
+          Condition="'$(MsgcoreOuterBuildTargets)' != '' and Exists('$(MsgcoreOuterBuildTargets)')" />
+
+  <!--
+    Ensure the per-platform import-library directory exists before the linker writes into it.
+    link.exe normally creates it, so this is belt-and-suspenders for fresh checkouts and CI
+    where lib\ may not exist at all.
+  -->
+  <Target Name="MsgcoreEnsureWDMSCSLibDir" BeforeTargets="Link;Lib"
+          Condition="'$(MsgcoreStandalone)' == 'true' and '$(WDMSCS_LIB)' != ''">
+    <MakeDir Directories="$(WDMSCS_LIB)" />
+  </Target>
+
+  <!--
+    Fail the build rather than write the import library somewhere nobody will look for it.
+    <ImportLibrary> is $(WDMSCS_LIB)\$(TargetName).lib, so a WDMSCS_LIB that is empty or not
+    fully qualified resolves against the drive root or the project directory, and link.exe
+    writes the .lib + .exp there WITHOUT a warning, so the build goes green and consumers link
+    a stale copy.
+
+    "Fully qualified" is tested as a drive letter or a UNC prefix, NOT with
+    Path.IsPathRooted: that returns TRUE for "\Msgcore.lib", the very case this catches.
+  -->
+  <Target Name="MsgcoreValidateWDMSCSLib" BeforeTargets="Link;Lib"
+          Condition="'$(MsgcoreStandalone)' == 'true'">
+    <Error Condition="'$(WDMSCS_LIB)' == ''"
+           Text="WDMSCS_LIB is empty. &lt;ImportLibrary&gt; would become '\$(TargetName).lib' and the linker would write the import library and its .exp to the ROOT OF THE CURRENT DRIVE. Directory.Build.props defaults this variable, so an empty value means it was overridden with nothing — set WDMSCS_LIB to an absolute directory, or unset it entirely and let the default apply." />
+    <Error Condition="'$(WDMSCS_LIB)' != '' and !$(WDMSCS_LIB.Contains(':')) and !$(WDMSCS_LIB.StartsWith('\\'))"
+           Text="WDMSCS_LIB ('$(WDMSCS_LIB)') is not a fully qualified path, so the import library would be written relative to the drive root or the project directory. Use an absolute path." />
+  </Target>
+</Project>

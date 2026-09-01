@@ -1,0 +1,67 @@
+Msgcore
+Copyright 2000-2026 Ivyware Pty Ltd, Khrustal & Mann
+             MELBOURNE, VICTORIA, AUSTRALIA, 3000
+
+This product includes software developed by Ivyware Pty Ltd and by
+Khrustal & Mann.
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file in
+this directory, or http://www.apache.org/licenses/LICENSE-2.0
+
+
+-------------------------------------------------------------------------
+Files NOT covered by the Apache License, Version 2.0
+-------------------------------------------------------------------------
+
+The following files are Microsoft Corporation project-template, wizard-
+generated, or sample-derived files. They remain subject to Microsoft's own
+terms and carry their own notices, which must not be removed:
+
+    targetver.h                        Visual Studio project template.
+    Resource.h                         Visual C++ generated include file.
+    Msgcore.rc                         Visual C++ generated resource script.
+                                       See the note below - part of this file
+                                       is not Microsoft's.
+    stdafx.h                           Visual Studio project template.
+    stdafx.cpp                         Visual Studio project template.
+    Msgcore(2022).sln                  Visual Studio solution file.
+    Msgcore(2022).vcxproj              Visual Studio project files.
+    Msgcore(2022).vcxproj.filters
+
+Msgcore.rc is a mixed file. Its wizard-generated skeleton is Microsoft's, as
+above; the VERSIONINFO block, and the values it reads from Msgcore_version.h,
+are the work of Khrustal & Mann and ARE covered by the Apache License, Version
+2.0. Msgcore_version.h itself carries the Apache header in full.
+
+Two files that earlier revisions listed here are no longer tracked at all, and
+so need no exception: Msgcore.aps (the resource editor's binary cache, now
+ignored - it is regenerated from the .rc) and Msgcore(2022).vcxproj.user (per-
+user IDE settings, which .gitignore always intended to exclude).
+
+The COM server (MsgcoreCom) and its files - com/Targetver.h and the
+com/MsgStore.rgs registrar script - were listed here until c88f9f5 moved com/
+to the MsgFacade repository. They are not distributed with this software any
+more, so their exceptions have moved with them rather than being carried here
+against files no clone contains.
+
+
+-------------------------------------------------------------------------
+Third-party components required at build or run time
+-------------------------------------------------------------------------
+
+This software is built against, and links to, components that are licensed
+separately and are NOT distributed under the Apache License, Version 2.0:
+
+    Microsoft Foundation Classes (MFC)  - Microsoft, licensed separately.
+                                          Built as an MFC extension DLL
+                                          against the shared MFC runtime.
+    Microsoft Visual C++ runtime        - Microsoft, licensed separately.
+                                          (mfc140u, msvcp140, vcruntime140,
+                                          ucrtbase)
+    Windows SDK                         - Microsoft, part of the operating
+                                          system. (ws2_32, MsWsock, Propsys,
+                                          and the COM support runtime
+                                          comsuppw / comsuppwd)
+
+These are dependencies, not bundled code. No source from any of them is
+included in this repository.
