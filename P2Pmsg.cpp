@@ -908,7 +908,13 @@ P3PmsgData::c_vBlob ( ) const
     VBLockData *pData = P2PmsgObject_pData(*pOBJ__);
     if ( !VBLockData_IsBlob(pData) )
     {
-ASSERT(0);
+      //  No ASSERT(0). uDataType is a byte off the wire, and c_wstr() a few
+      //  lines up makes the same check against the same byte and simply throws
+      //  -- so the refusal below IS the design, and asserting in front of it
+      //  only decided that Debug aborts where Release refuses. Wire data
+      //  reaching a check meant for this library's own heaps is the whole of
+      //  D64; 38 of these in a 30-minute frame soak, and c_vBlobCopy and
+      //  c_vGUID below carried the same construct.
       EVERR -> Module ( __FUNCTION__ )
             -> Message( L"Incompatible c_vBlob() type (%s)", ToStringType() )
             -> Throw();
@@ -949,7 +955,7 @@ P3PmsgData::c_vBlobCopy ( void *pvOut, size_t nCount ) const
     VBLockData *pData = P2PmsgObject_pData(*pOBJ__);
     if ( !VBLockData_IsBlob(pData) )
     {
-ASSERT(0);
+      // See c_vBlob above: the throw is the refusal, the assert only aborted Debug.
       EVERR -> Module ( __FUNCTION__ )
             -> Message( L"Incompatible c_vBlobCopy() type (%s)", ToStringType() )
             -> Throw();
@@ -972,7 +978,7 @@ P3PmsgData::c_vGUID ( ) const
     VBLockData *pData = P2PmsgObject_pData(*pOBJ__);
     if ( pData->uDataType != VBLockData_GUID )
     {
-ASSERT(0);
+      // See c_vBlob above: the throw is the refusal, the assert only aborted Debug.
       EVERR -> Module ( __FUNCTION__ )
             -> Message( L"Incompatible c_vGUID() type (%s)", ToStringType() )
             -> Throw();
@@ -1485,7 +1491,12 @@ P3PmsgData::ToStringType ( LPCTSTR lpszFormat ) const
 
     if ( uDType == VBLockData_GUID )
       return L"GUID";
-    ASSERT(0);
+    //  No ASSERT(0). This function's whole contract is "name this byte for a
+    //  human", and "Undef" is the name it already has for a byte it cannot
+    //  place. Every caller is a Message() building the text of a REFUSAL --
+    //  including the c_vBlob/c_wstr family above, which reaches here precisely
+    //  BECAUSE the type is unknown. So the assert fired on the error path of a
+    //  correct refusal and aborted Debug in the act of reporting cleanly.
     return L"Undef";
 }
 

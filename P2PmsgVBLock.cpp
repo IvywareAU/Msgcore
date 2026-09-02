@@ -692,7 +692,11 @@ VBLock_pData ( VBLock *pVBLock )
       return VBLockList_pData ( uVBLock, VBLock_pList(pVBLock) );
     if ( (uVBLock&VBLock_TypeMask) == VBLock_Vect )
       return VBLockVect_pData ( uVBLock, VBLock_pVect(pVBLock) );
-    ASSERT(0);
+    //  No ASSERT(0) here. The block type is a byte off the wire and an unknown
+    //  one is a hostile image, not a broken invariant -- and the refusal is
+    //  already written, three lines down, unconditionally. Asserting first only
+    //  decided that Debug would abort where Release correctly refuses, which is
+    //  the whole of D64 in miniature. 160 of these in a 30-minute frame soak.
 VBLock_IsAlloc(pVBLock);
 VBLock_IsLinked(pVBLock);
     EVERR->MODULE
@@ -929,9 +933,30 @@ VBLockName_IsChained ( const VBLockName *pName ) noexcept
     return FALSE;
 }
 
+//
+//  The floor a VBLockName may not be smaller than, for an addressing mode
+//  NOTES: Masks its argument, which the VBLockRoot_* family a few hundred lines
+//         up has always done and this one never did. It matters because of who
+//         calls it: VBLock_pData hands the navigation family the block header
+//         BYTE, not the mode -- uVBLockDefs carries type in bits 2-5 and heap
+//         status in bits 6-7, so a live Addr64 field block arrives here as 0xC7
+//         and matched NONE of the three tests below. The function then returned
+//         its 1-byte default, and every caller that treats this as a floor was
+//         holding a floor of one byte. That includes the VBLock_ChkContained in
+//         VBLockField_pData, whose whole job since 2026-08-21 is to bound the
+//         name header before Sizenn dereferences it: it was bounding 1 byte
+//         where it meant to bound 13. Measured, not reasoned -- gdb on the
+//         UNMUTATED case 0 vector shows uVBLock=199 arriving at that call.
+//       : Masking cannot refuse anything a valid image contains: a caller that
+//         already passed a mode passes it unchanged, and one that passed the
+//         raw header now gets the answer for the mode that header declares.
+//       : Addr08 keeps the default. It is the mode this library does not write
+//         -- VBLockRoot_Init ASSERTs on it -- so inventing a floor for it here
+//         would be inventing a number no image has ever been laid out to.
 VBLsize
 VBLockName_Sizeof_Min ( UCHAR uVBLock ) noexcept
 {
+    uVBLock = uVBLock & VBLock_AddrMask;
     VBLsize nSizeof_Min = sizeof(VBLockName) - sizeof(VBLockName::u);
     if ( uVBLock == VBLock_Addr16 ) {
       nSizeof_Min += sizeof(VBLockName::u.vBlob08) + sizeof(P2PWCHAR);
@@ -955,6 +980,11 @@ VBLockName_Sizeof ( UCHAR uVBLock, size_t nNameSize )
     // NOTES: VBlockName.u.vBlnx is greater than VBlockName.u.vBlob
     //        for VBlockName.u.vBlob.nBlobUsed < 3
     //      : For this reason always size on the basis cwName >= 2|4 (wchar's)
+    //      : Masked for the same reason VBLockName_Sizeof_Min is. This is the
+    //        rule a name is LAID OUT by; that one is the floor it is CHECKED
+    //        against, and the two disagreeing on what mode they were handed is
+    //        how a block gets written to one plan and walked to another.
+    uVBLock = uVBLock & VBLock_AddrMask;
     if ( uVBLock == VBLock_Addr32 ) {
       nNameSize = max ( nNameSize, 2 );
       ASSERT( sizeof(VBLnx08::nBlobSize)+sizeof(VBLnx08::u.aChain2Next32) <= sizeof(soName.u.vBlob08)+sizeof(P2PWCHAR) );
@@ -993,21 +1023,37 @@ VBLockName_Sizeof ( UCHAR uVBLock, const VBLockName *pName )
     return nSizeof;
 }
 
+//
+//  Sizeof the allocation a VBLockName occupies, as the name itself declares it
+//  NOTES: PURE. It reads the header and returns a number. It used to repair the
+//         header instead: on nBlobSize == 0 it cast the const away and wrote
+//         nBlobUsed over it, behind an ASSERT(0). Three things were wrong with
+//         that, and the third is the one that matters.
+//         (1) nBlobSize == 0 is not a state this library can produce.
+//         VBLockName_Init derives it from nSizenn, which it has already floored
+//         at VBLockName_Sizeof_Min, so the repair only ever fired on an image
+//         that came off a socket -- and repairing a hostile image into agreement
+//         with itself is not a repair, it is agreeing with the attacker.
+//         (2) nBlobSize is at the same offset in vBlob08, vBlin08 and vBlnx08,
+//         so READING it is variant-safe. nBlobUsed is not: in the two chained
+//         variants those bytes are the first byte of aChain2Next, so for a
+//         chained name the repair copied a piece of an address into a length.
+//         (3) The only caller that reached this on the receive path is the
+//         ASSERT at the foot of VBLockName_Sizenn, which is compiled out of
+//         Release. So a mutation of the image under walk lived inside an
+//         assertion, and Debug and Release walked the same bytes DIFFERENTLY --
+//         Debug repaired the header and got one extent from the next call,
+//         Release got another. A fuzz harness running Debug was not measuring
+//         what ships. That is D64; `p2p_fuzzframe 0x5EEDF00D --replay 0 307`
+//         and `--replay 11 360` are the inputs that found it.
+//       : The invariants the two ASSERTs stated are real. They are now stated
+//         once, as a refusal that survives Release, in VBLockName_ChkWellFormed.
 VBLsize
 VBLockName_Sizeof_Alloc ( UCHAR uVBLock, const VBLockName *pName )
 {
     VBLsize nSizeof_Alloc  = sizeof(soName) - sizeof(soName.u)
                            + sizeof(pName->u.vBlob08);
-//VBLsize nSizeofBlob08 =sizeof(pName->u.vBlob08);
-//VBLsize nSizeofBlnx08 =sizeof(pName->u.vBlnx08);
-    if ( pName->u.vBlob08.nBlobSize == 0 ) {
-      ASSERT(0);
-      ((VBLockName*)pName)->u.vBlob08.nBlobSize = pName->u.vBlob08.nBlobUsed;
-    }
-    const P2PWCHAR *lpszName = &pName->u.vBlob08.cBlob;   // ptr into 16-bit store (§4.2)
-    (void)lpszName;
-    ASSERT(VBLockName_IsChained(pName)||pName->u.vBlob08.nBlobSize>=pName->u.vBlob08.nBlobUsed);
-    nSizeof_Alloc += pName->u.vBlob08.nBlobSize * sizeof(P2PWCHAR);
+            nSizeof_Alloc += pName->u.vBlob08.nBlobSize * sizeof(P2PWCHAR);
     return nSizeof_Alloc;
 }
 
@@ -1049,6 +1095,62 @@ VBLockName_Sizenn ( UCHAR uVBLock, const VBLockName *pName )
 ASSERT(nSizenn>=VBLockName_Sizeof_Min(uVBLock));
 ASSERT(nSizenn==VBLockName_Sizeof_Alloc(uVBLock,pName));
     return nSizenn;
+}
+
+//
+//  Throws unless a VBLockName header could have been written by this library
+//  NOTES: The two ASSERTs at the foot of VBLockName_Sizenn state real
+//         invariants and state them where they cannot act: an ASSERT is a
+//         Debug-only claim, and the receive path runs in Release. This says
+//         the same things once, as a refusal.
+//       : nBlobSize == 0 -- VBLockName_Init floors nSizenn at Sizeof_Min and
+//         derives nBlobSize from what is left, so zero is a value only a wire
+//         image carries. It is refused before anything divides by it or steps
+//         over it.
+//       : nSizenn < Sizeof_Min -- the layout rule and the navigation rule have
+//         to agree about how far a name reaches. P2PmsgField_SizeofItem and
+//         P2PmsgItem_InitField lay one out at max(Sizenn,Sizeof_Min);
+//         VBLockField_pData walks over it at bare Sizenn. For an image this
+//         library wrote those are the same number. For one it did not, the
+//         name is laid out to one plan and walked to another, and the
+//         VBLockData found on the far side is whatever happens to be there.
+//       : nBlobUsed > nBlobSize -- only meaningful unchained, because in the
+//         chained variants those bytes are part of aChain2Next rather than a
+//         count. Same reason VBLockName_Sizeof_Alloc must not touch them.
+//       : Bound the header BEFORE calling this. It dereferences the name, so
+//         on the load path VBLock_ChkContained has to have run first -- which
+//         is why the call site is next to that one, not inside Sizenn where
+//         every in-memory caller would pay for it.
+void
+VBLockName_ChkWellFormed ( UCHAR uVBLock, const VBLockName *pName
+                         , LPCSTR lpszWhere )
+{
+    if ( pName == nullptr )
+      EVERR->Module ( lpszWhere )
+           ->Message ( "VBLockName absent where the block declares one" )
+           ->Throw ( );
+    if ( pName->u.vBlob08.nBlobSize == 0 )
+      EVERR->Module ( lpszWhere )
+           ->Message ( "VBLockName declares a blob of 0" )
+           ->Throw ( );
+    //  Sizeof_Alloc, not Sizenn, and the difference is not style: Sizenn ASSERTs
+    //  this very floor at its foot, so asking it would trip the trap this call
+    //  exists to replace before it could return the refusal. The two compute the
+    //  same number -- Sizenn says so itself in its second ASSERT.
+    const VBLsize nSizenn = VBLockName_Sizeof_Alloc ( uVBLock, pName );
+    const VBLsize nMin    = VBLockName_Sizeof_Min   ( uVBLock );
+    if ( nSizenn < nMin )
+      EVERR->Module ( lpszWhere )
+           ->Message ( "VBLockName of %u below the floor of %u for its mode"
+                     , (UINT)nSizenn, (UINT)nMin )
+           ->Throw ( );
+    if ( !VBLockName_IsChained ( pName ) &&
+         pName->u.vBlob08.nBlobUsed > pName->u.vBlob08.nBlobSize )
+      EVERR->Module ( lpszWhere )
+           ->Message ( "VBLockName uses %u of a blob of %u"
+                     , (UINT)pName->u.vBlob08.nBlobUsed
+                     , (UINT)pName->u.vBlob08.nBlobSize )
+           ->Throw ( );
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -2246,6 +2348,16 @@ VBLockField_pData ( UCHAR uVBLock, const VBLockField *pField, const VBLock *pOwn
     //  demanding that much be present rejects nothing a valid image contains.
     VBLock_ChkContained ( pOwner, pName, VBLockName_Sizeof_Min(uVBLock)
                         , __FUNCTION__ );
+    //  Then bounded AGAINST ITSELF, once the bytes are known to be there. The
+    //  step below turns the name's own declared length into the address of the
+    //  VBLockData; ChkContained above says those header bytes are inside the
+    //  block, and ChkContained below says the answer is too, but neither says
+    //  the length is one this library could have written -- so a zero-length
+    //  name puts the data pointer at a fixed small offset and the walk carries
+    //  on reading whatever lives there as a VBLockData. That is the second half
+    //  of D64: `p2p_fuzzframe 0x5EEDF00D --replay 0 307` arrives here with
+    //  nBlobSize == 0 and, in Release, was not stopped by anything.
+    VBLockName_ChkWellFormed ( uVBLock, pName, __FUNCTION__ );
     char *pData  = (char *)pName;
           pData += VBLockName_Sizenn ( uVBLock, pName );
     VBLock_ChkContained ( pOwner, pData

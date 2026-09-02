@@ -693,6 +693,12 @@ VBLsize
 VBLockName_Sizenn ( UCHAR uVBLock, const VBLockName *pName );
 VBLsize
 VBLockName_Sizeof_Alloc ( UCHAR uVBLock, const VBLockName *pName );
+// The invariants VBLockName_Sizenn only ASSERTs, asked where they can act:
+// throws unless the header is one VBLockName_Init could have written. Bound the
+// header first -- this dereferences it. See the notes on the definition (D64).
+void
+VBLockName_ChkWellFormed ( UCHAR uVBLock, const VBLockName *pName
+                         , LPCSTR lpszWhere );
 VBLsize
 VBLockName_BlobSize ( const VBLockName *pName );
 VBLsize
