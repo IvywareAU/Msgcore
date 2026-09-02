@@ -35,9 +35,11 @@ through the COM server, which lives in the `MsgFacade` repository rather than th
 
 ## Status
 
-A fresh clone compiles: all eight configurations, plus the test, with nothing outside the
-repository required. The Apache-2.0 grant in `LICENSE` is made with the authority of all
-copyright holders named in `NOTICE`.
+A fresh clone, checked out beside its sibling `Platform/` (see *The sibling dependency*
+below), compiles: all eight configurations, plus the tests, with nothing else required — no
+installed MSCS tree, no environment variables, no `AdditionalIncludeDirectories`. The
+Apache-2.0 grant in `LICENSE` is made with the authority of all copyright holders named in
+`NOTICE`.
 
 **What this library has not got is a test suite.** One regression test covers the load
 path, and the unit suites cover the container, allocator, addressing and flat-ABI surface
@@ -46,7 +48,8 @@ container and parser code without being complete coverage of it. CI builds all e
 configurations on every push — the solution as well as the project, so a clone that is
 opened in Visual Studio is covered and not merely one built from the command line — and
 runs both test programs in both link modes, so the claim in the paragraph above is checked
-continuously, on a clean clone, rather than asserted.
+continuously rather than asserted: every job assembles the two repositories by name into
+fresh clones with `WDMSCS_*` cleared from the environment.
 
 A weekly job fuzzes the load path under AddressSanitizer. Within ninety seconds of first
 being switched on it found a heap-buffer-overflow in `P2PmsgMgr::Load` — a file whose
