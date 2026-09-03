@@ -80,7 +80,7 @@ it is the first thing to read if you are considering depending on it.
 | | |
 |---|---|
 | Toolchain | Visual Studio 2022 (v143), "Desktop development with C++" — or, for Linux, GCC/Clang through the top-level CMake build |
-| Libraries | MFC (shared/DLL) on Windows; the `../Platform` shim stands in for it on Linux |
+| Libraries | MFC (shared/DLL) on Windows; the `Platform/` shim stands in for it on Linux |
 | Platforms | Windows `x64` and `Win32`; Linux `x86-64` |
 | Floor | Windows 8.1 (`_WIN32_WINNT=0x0603`) |
 | Language | C++17 (`/std:c++17`) and C17 (`/std:c17`) — on all eight `.vcxproj` configurations **and under CMake**, on both platforms |

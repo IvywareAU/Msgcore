@@ -131,7 +131,7 @@ set_target_properties(msgcore PROPERTIES
 # $<BUILD_INTERFACE:> and not a bare `p2pplatform`, and the reason is the whole
 # reason this target can be exported at all. p2pplatform is a BUILD-TIME
 # dependency: an INTERFACE library whose only content is an include directory
-# pointing into MSCS/Platform/, so that the legacy TUs here resolve <afxwin.h>
+# pointing into Platform/ in this tree, so that the legacy TUs resolve <afxwin.h>
 # and friends. Nothing of it survives into libmsgcore.so / Msgcore.dll except
 # the code it caused to be compiled -- an installed consumer needs none of its
 # headers, because the only header that ships is the self-contained Msgcore_c.h.
