@@ -35,8 +35,8 @@ through the COM server, which lives in the `MsgFacade` repository rather than th
 
 ## Status
 
-A fresh clone, checked out beside its sibling `Platform/` (see *The sibling dependency*
-below), compiles: all eight configurations, plus the tests, with nothing else required — no
+A fresh clone compiles on its own (see *The platform layer* below): all eight
+configurations, plus the tests, with nothing else required — no sibling checkout, no
 installed MSCS tree, no environment variables, no `AdditionalIncludeDirectories`. The
 Apache-2.0 grant in `LICENSE` is made with the authority of all copyright holders named in
 `NOTICE`.
@@ -237,7 +237,7 @@ Msgexception.*                the P2Pevent exception and diagnostic system
 Msgcore_c.h  Msgcore_c.cpp    the flat C ABI  (Msgcore_c_u8.cpp: UTF-8 entry points)
 Kernel32_Ext.*  MsgCollectors.*
 tests/                        the unit suites and the C4 load-rejection regressions
-(../Platform/)                 sibling shim-layer repository, not in this tree (see below)
+Platform/                     the Win32->POSIX shim layer, in this tree (see below)
 Directory.Build.props/.targets   the WDMSCS_LIB default and its guard
 CMakeLists.txt                configures standalone; the .vcxproj is authoritative on Windows
 ```
@@ -274,17 +274,16 @@ puts UTF-16 code units into a byte stream under MSVC and locale-converted narrow
 glibc — measured, after a test searching for a wide substring passed on one platform and failed
 on the other.
 
-### The sibling dependency: `Platform/`
+### The platform layer: `Platform/`
 
-`stdafx.h` includes `../Platform/platform.h`, and on non-Windows `../Platform/mfcshim.h`.
-Every translation unit includes `stdafx.h`, so this is a hard dependency of the very first
-file compiled. **A clone of this repository alone does not build.** The expected layout —
-the same one TargetCore uses, and peers rather than submodules:
+`stdafx.h` includes `Platform/platform.h`, and on non-Windows `Platform/mfcshim.h`. Every
+translation unit includes `stdafx.h`, so this is a hard dependency of the very first file
+compiled — and it is **in this repository**, so a clone of this repository alone builds:
 
 ```text
-<parent>\
+Msgcore\
 ├── Platform\     ← platform.h, mfcshim.h, p2ptypes.h, p2pstr.h, …
-└── Msgcore\      ← this repository
+└── …             ← the rest of this repository
 ```
 
 On Windows `platform.h` is pure pass-through: WinSock2, ws2tcpip, mswsock, windows.h and
@@ -293,27 +292,31 @@ same include routes to the shim implementations and `mfcshim.h` supplies the `CO
 `CList` / `CMap` / `CString` / `ASSERT` subset the legacy sources expect.
 
 Nothing has to be configured for this. A quoted include resolves relative to `stdafx.h`
-first, so `"../Platform/..."` reaches the sibling with no `-I`: `Msgcore(2022).vcxproj`
-carries no `AdditionalIncludeDirectories` at all and needs none. Under CMake, the guarded
-`add_subdirectory()` in `CMakeLists.txt` adds `../Platform` when the surrounding MSCS tree
-has not already defined `p2pplatform`, and fails with a sentence naming the missing path
-rather than a header-not-found cascade.
+first, so `"Platform/..."` resolves with no `-I`: `Msgcore(2022).vcxproj` carries no
+`AdditionalIncludeDirectories` at all and needs none. Under CMake, the guarded
+`add_subdirectory(Platform)` in `CMakeLists.txt` defines `p2pplatform` unless the
+surrounding MSCS tree already has.
 
-**This replaced a vendored copy of `Platform/` that lived inside this repository.** That
-copy bought one thing — a lone clone compiled — and cost a permanent hazard: two physical
-`p2ptypes.h` on one include path under the parent tree, which `#pragma once` cannot
-deduplicate, so the subdirectory build failed with ~40 `redefinition` errors until
-`MSGCORE_PLATFORM_FROM_PARENT` was added to select between them. It also had to be kept in
-sync by hand, checked on every push against a manifest of blob hashes
-(`tools/ci/platform-vendor.manifest`, now deleted). One copy needs no macro, cannot drift,
-and needs no check.
+**This is the only copy of `Platform/`, and that is what makes it safe.** It has been all
+three arrangements: vendored here, a sibling repository, and vendored here again. The
+sibling layout was adopted on 2026-08-20 because the *first* vendored copy was a second
+copy — the parent tree had one too, a quoted include resolves relative to the citing file,
+and one Linux translation unit therefore reached two physical `p2ptypes.h`. `#pragma once`
+cannot deduplicate two files, so the subdirectory build failed with ~40 `redefinition`
+errors until `MSGCORE_PLATFORM_FROM_PARENT` was added to select between them. It also had
+to be kept in sync by hand, checked on every push against a manifest of blob hashes.
 
-What paid for it was CI. The build, test and fuzz workflows assemble both repositories by
-name before compiling — `mscs/Platform` and `mscs/Msgcore` — using the `MSCS_SOLUTION_TOKEN`
-secret, since both repositories are private and the automatic `GITHUB_TOKEN` cannot read
-across repositories. **Every workflow still compiles the library and runs the suites on
-every push**; what changed is that the runner now checks out two repositories instead of
-one. A missing sibling fails the run loudly and specifically, and never degrades to a skip.
+Neither cost survives, because there is no second copy and no upstream to drift from: the
+`Platform` repository is retired, `MSCS/Platform/` is deleted, and the parent tree adds
+this directory as its `p2pplatform`. No macro, no manifest, no drift check. The other two
+consumers reach this same tree from where they sit, as `"../Msgcore/Platform/..."` —
+`TargetCore/stdafx.h` and `MscsUnitTests/stdafx.h`.
+
+What this bought back is CI that checks out one repository. The build, test and fuzz
+workflows no longer assemble `mscs/Platform` beside `mscs/Msgcore`, and no longer need the
+`MSCS_SOLUTION_TOKEN` secret to read a second private repository. **Every workflow still
+compiles the library and runs the suites on every push**; there is simply nothing to
+assemble first, and no layout that can fail to be assembled.
 
 ## Tests
 

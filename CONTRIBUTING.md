@@ -2,13 +2,15 @@
 
 ## Before you spend time on a change
 
-This repository is **pre-release and not self-contained** — a fresh clone does not compile.
-It needs the sibling `Platform/` repository checked out beside it, and the parent tree's
-`Directory.Build.props`, which is not published here. See
-[The sibling dependency](Readme.md#the-sibling-dependency-platform) for the expected layout.
-The release-readiness register has the current state of that and everything else. Until it
-is resolved, an outside contributor cannot build what they are changing, which makes
-anything beyond a documentation fix hard to do well.
+This repository is **pre-release**. The CMake build of a fresh clone is self-contained —
+the `Platform/` shim layer lives in this tree, so no sibling checkout is needed. See
+[The platform layer](Readme.md#the-platform-layer-platform).
+
+The **MSBuild** build is a different matter and still is not self-contained: it needs the
+parent tree's `Directory.Build.props`, which is not published here. The release-readiness
+register has the current state of that and everything else. Until it is resolved, an
+outside contributor cannot build the Windows product they are changing, which makes
+anything beyond a documentation fix hard to do well against that build.
 
 Issues and reports are welcome regardless. For **security** issues, do not open a public
 issue — see [`SECURITY.md`](SECURITY.md).

@@ -83,12 +83,17 @@ Set-Location $repo
 $baselinePath = 'tools/ci/assert-baseline.txt'
 
 # tests/ asserts are the test's own scaffolding and carry none of the shipped-binary
-# risk. Platform/ was excluded here too while it was vendored into this repository --
-# upstream's tree, not ours to triage. It is a sibling repository now, so git ls-files
-# never returns it and the filter is gone rather than left to look like it still does
-# something. The baseline is unaffected: those files were never counted.
+# risk. Platform/ is excluded for a different reason, and not the old one: it was
+# excluded as upstream's tree while vendored, dropped when it became a sibling
+# repository, and is back in this tree since 2026-09-03 with no upstream left. The
+# reason now is that the shim layer's only ASSERT-family match is the mfcshim.h line
+# that DEFINES the macro on Linux -- `#define ASSERT(expr) assert(expr)` -- which the
+# regex cannot tell from a call and would bank as a `predicate` site. Counting a macro
+# definition as an assertion makes the number mean less, and this baseline is only
+# worth having while it means one thing. The baseline is unaffected either way: those
+# files have never been counted in it.
 $files = @(git ls-files '*.cpp' '*.h') |
-            Where-Object { $_ -notlike 'tests/*' }
+            Where-Object { $_ -notlike 'Platform/*' -and $_ -notlike 'tests/*' }
 
 $sites = [System.Collections.Generic.List[object]]::new()
 foreach ($f in $files) {
@@ -115,7 +120,7 @@ foreach ($k in 'callwrap', 'marker', 'predicate') {
     $counts[$k] = @($sites | Where-Object { $_.Kind -eq $k }).Count
 }
 
-Write-Host "Live ASSERT-family sites (tracked sources, excluding tests/):"
+Write-Host "Live ASSERT-family sites (tracked sources, excluding Platform/ and tests/):"
 foreach ($k in $counts.Keys) { Write-Host ("  {0,-10} {1}" -f $k, $counts[$k]) }
 Write-Host ("  {0,-10} {1}" -f 'TOTAL', $sites.Count)
 

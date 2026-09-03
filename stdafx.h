@@ -21,35 +21,42 @@
 #endif // _WIN32
 
 // Linux port: the Win32 socket/IOCP/file surface is routed through the platform
+// Linux port: the Win32 socket/IOCP/file surface is routed through the platform
 // shim layer. On _WIN32 platform.h is pure pass-through (WinSock2/ws2tcpip/mswsock/
 // windows + atlstr), so the Windows build is unchanged.
 //
-// Platform/ is a SIBLING repository, not a subdirectory of this one -- the same
-// arrangement TargetCore uses (TargetCore/stdafx.h:32). The expected layout is
+// Platform/ is PART OF THIS REPOSITORY, at Platform/. It was a sibling repository
+// between 2026-08-20 and 2026-09-03, and a vendored copy of one before that. What
+// changed is not the layout but the ownership: the upstream repository is retired,
+// so this tree is the only Platform there is.
 //
-//     <parent>/
-//     |-- Platform/     the Win32->POSIX shim layer
-//     `-- Msgcore/      this repository
+// That is what makes a copy safe this time, and it is worth being precise about why
+// the last one was not. Vendoring failed in 6962947 for ONE reason -- there were TWO
+// physical copies, this one and the parent tree's, and a quoted include always
+// resolves relative to the citing file. A single translation unit reached two
+// p2ptypes.h, which #pragma once cannot deduplicate, and the Linux subdirectory build
+// died in ~40 redefinition errors until MSGCORE_PLATFORM_FROM_PARENT was added to
+// choose between them. Windows never saw it, because the win-compat forwarders that
+// pull in the second copy are generated only on Linux. There is no second copy to
+// choose between now -- MSCS/Platform/ is deleted and the parent tree adds
+// Msgcore/Platform as its p2pplatform -- so that macro is not coming back.
 //
-// A quoted include resolves relative to THIS file first, so "../Platform/..."
-// reaches the sibling with no -I and no project setting: Msgcore(2022).vcxproj
-// carries no AdditionalIncludeDirectories at all and needs none.
+// A quoted include resolves relative to THIS file first, so "Platform/..." needs no
+// -I and no project setting: Msgcore(2022).vcxproj carries no
+// AdditionalIncludeDirectories at all and needs none.
 //
-// This replaced a copy of Platform/ vendored INSIDE this repository. That copy
-// bought one thing -- a lone clone compiled -- and cost a permanent hazard: two
-// physical p2ptypes.h on one include path, which #pragma once cannot deduplicate,
-// so the subdirectory build died in ~40 redefinition errors until
-// MSGCORE_PLATFORM_FROM_PARENT was added to choose between them. One copy needs
-// no such macro and cannot drift. What replaced the standalone-clone property is
-// a two-repository checkout in CI -- see Readme.md, "The sibling dependency".
-#include "../Platform/platform.h"
+// The other two consumers reach this same single copy from where they sit, as
+// "../Msgcore/Platform/..." -- TargetCore/stdafx.h and MscsUnitTests/stdafx.h. And a
+// clone of THIS repository alone compiles again, which is the property the sibling
+// layout had to buy back with a two-repository CI checkout and a cross-repository PAT.
+#include "Platform/platform.h"
 
 #ifdef _WIN32
 #include <atlstr.h>
 #include <AfxMt.h>                     // Multi-tasking
 #include <AfxTempl.h>                  // Templates
 #else
-#include "../Platform/mfcshim.h"       // CObject/CList/CMap/CString/ASSERT on Linux
+#include "Platform/mfcshim.h"          // CObject/CList/CMap/CString/ASSERT on Linux
 #endif // _WIN32
 
 // TODO: reference additional headers your program requires here

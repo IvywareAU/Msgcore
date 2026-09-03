@@ -48,34 +48,19 @@ on:
   pull_request:
     branches: [master, main]
   workflow_dispatch:
-    inputs:
-      platform_ref:
-        description: Ref of the sibling Platform repository (blank = its default branch).
-        required: false
-        default: ""
 
 # A superseded run of an in-flight branch tells you nothing worth paying for.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# PLATFORM_REPO is checked out beside this repository by every job that compiles.
-# See the layout comment in job 1.
-env:
-  PLATFORM_REPO: IvywareAU/Platform
-
-# working-directory, because the checkouts nest this repository one level down to
-# make room for its sibling. Steps that must run BEFORE that directory exists --
-# the preflight and the layout check -- override it back to the workspace root.
 defaults:
   run:
     shell: pwsh
-    working-directory: mscs/Msgcore
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Job 1 -- build, all eight configurations, project and solution, against the
-  #          sibling Platform checked out beside this repository.
+  # Job 1 -- clean-clone build, all eight configurations, project and solution.
   # ---------------------------------------------------------------------------
   build:
     name: ${{ matrix.configuration }}|${{ matrix.platform }}
@@ -111,70 +96,13 @@ jobs:
           - { configuration: ReleaseLib, platform: Win32, baseline: 121 }
 
     steps:
-      # -- the two-repository layout -----------------------------------------
-      # Platform/ is a SIBLING repository, not a subdirectory of this one, so a
-      # single-repository checkout compiles nothing: stdafx.h opens with
-      # #include "../Platform/platform.h". The runner assembles the pair by name,
-      # in the layout that include expects:
-      #
-      #     mscs/Platform    the Win32->POSIX shim layer
-      #     mscs/Msgcore     this repository, at the ref that triggered the run
-      #
-      # Both repositories are private and the automatic GITHUB_TOKEN is scoped to
-      # this one alone, so the sibling checkout needs a PAT -- MSCS_SOLUTION_TOKEN,
-      # the same secret TargetCore's solution-build.yml uses. Without it the
-      # checkout fails with a 404 that reads like a deleted repository, which is
-      # what the preflight below exists to turn into a sentence.
-      - name: Preflight - the cross-repository token
-        shell: bash
-        working-directory: ${{ github.workspace }}
-        env:
-          TOKEN: ${{ secrets.MSCS_SOLUTION_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "MSCS_SOLUTION_TOKEN is not set on this repository."
-            echo
-            echo "Platform is private, and the automatic GITHUB_TOKEN cannot read"
-            echo "across repositories. The Platform checkout below would fail with"
-            echo "a 404 that reads like a deleted repository."
-            echo
-            echo "Fix: create a PAT with read access to Platform, then:"
-            echo "    gh secret set MSCS_SOLUTION_TOKEN --repo IvywareAU/Msgcore"
-            exit 1
-          fi
-          echo "ok  MSCS_SOLUTION_TOKEN is present."
-
-      - name: Check out Platform
-        uses: actions/checkout@v5
-        with:
-          repository: ${{ env.PLATFORM_REPO }}
-          ref: ${{ inputs.platform_ref }}
-          token: ${{ secrets.MSCS_SOLUTION_TOKEN }}
-          path: mscs/Platform
-
-      # This repository last, at the ref that triggered the run.
-      - name: Check out Msgcore
-        uses: actions/checkout@v5
-        with:
-          path: mscs/Msgcore
-
-      # A missing sibling fails loudly and specifically, and never reads as a
-      # defect in this repository. It never degrades to a skip either: a job that
-      # prints "skipped" and exits 0 puts a green tick on every commit for having
-      # verified nothing.
-      - name: Verify the sibling layout
-        shell: bash
-        working-directory: ${{ github.workspace }}
-        run: |
-          missing=0
-          for f in mscs/Platform/platform.h mscs/Platform/mfcshim.h mscs/Msgcore/stdafx.h; do
-            if [ -e "$f" ]; then echo "ok       $f"; else echo "MISSING  $f"; missing=1; fi
-          done
-          if [ "$missing" != 0 ]; then
-            echo
-            echo "::error::The sibling layout is not assembled -- this is not a Msgcore defect."
-            exit 1
-          fi
+      # One repository, and that is the whole layout. Platform/ is IN this
+      # repository -- stdafx.h opens with #include "Platform/platform.h" -- so an
+      # ordinary checkout compiles. There is no sibling to assemble, no
+      # MSCS_SOLUTION_TOKEN preflight, and no layout that can fail to be
+      # assembled; all three were removed with the sibling arrangement on
+      # 2026-09-03, when the upstream Platform repository was retired.
+      - uses: actions/checkout@v5
 
       - name: Assert the MSCS tree variables are absent
         run: |
@@ -321,7 +249,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: buildlog-${{ matrix.configuration }}-${{ matrix.platform }}
-          path: mscs/Msgcore/build.log
+          path: build.log
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
@@ -357,70 +285,13 @@ jobs:
           - { mode: static, configuration: DebugLib }
 
     steps:
-      # -- the two-repository layout -----------------------------------------
-      # Platform/ is a SIBLING repository, not a subdirectory of this one, so a
-      # single-repository checkout compiles nothing: stdafx.h opens with
-      # #include "../Platform/platform.h". The runner assembles the pair by name,
-      # in the layout that include expects:
-      #
-      #     mscs/Platform    the Win32->POSIX shim layer
-      #     mscs/Msgcore     this repository, at the ref that triggered the run
-      #
-      # Both repositories are private and the automatic GITHUB_TOKEN is scoped to
-      # this one alone, so the sibling checkout needs a PAT -- MSCS_SOLUTION_TOKEN,
-      # the same secret TargetCore's solution-build.yml uses. Without it the
-      # checkout fails with a 404 that reads like a deleted repository, which is
-      # what the preflight below exists to turn into a sentence.
-      - name: Preflight - the cross-repository token
-        shell: bash
-        working-directory: ${{ github.workspace }}
-        env:
-          TOKEN: ${{ secrets.MSCS_SOLUTION_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "MSCS_SOLUTION_TOKEN is not set on this repository."
-            echo
-            echo "Platform is private, and the automatic GITHUB_TOKEN cannot read"
-            echo "across repositories. The Platform checkout below would fail with"
-            echo "a 404 that reads like a deleted repository."
-            echo
-            echo "Fix: create a PAT with read access to Platform, then:"
-            echo "    gh secret set MSCS_SOLUTION_TOKEN --repo IvywareAU/Msgcore"
-            exit 1
-          fi
-          echo "ok  MSCS_SOLUTION_TOKEN is present."
-
-      - name: Check out Platform
-        uses: actions/checkout@v5
-        with:
-          repository: ${{ env.PLATFORM_REPO }}
-          ref: ${{ inputs.platform_ref }}
-          token: ${{ secrets.MSCS_SOLUTION_TOKEN }}
-          path: mscs/Platform
-
-      # This repository last, at the ref that triggered the run.
-      - name: Check out Msgcore
-        uses: actions/checkout@v5
-        with:
-          path: mscs/Msgcore
-
-      # A missing sibling fails loudly and specifically, and never reads as a
-      # defect in this repository. It never degrades to a skip either: a job that
-      # prints "skipped" and exits 0 puts a green tick on every commit for having
-      # verified nothing.
-      - name: Verify the sibling layout
-        shell: bash
-        working-directory: ${{ github.workspace }}
-        run: |
-          missing=0
-          for f in mscs/Platform/platform.h mscs/Platform/mfcshim.h mscs/Msgcore/stdafx.h; do
-            if [ -e "$f" ]; then echo "ok       $f"; else echo "MISSING  $f"; missing=1; fi
-          done
-          if [ "$missing" != 0 ]; then
-            echo
-            echo "::error::The sibling layout is not assembled -- this is not a Msgcore defect."
-            exit 1
-          fi
+      # One repository, and that is the whole layout. Platform/ is IN this
+      # repository -- stdafx.h opens with #include "Platform/platform.h" -- so an
+      # ordinary checkout compiles. There is no sibling to assemble, no
+      # MSCS_SOLUTION_TOKEN preflight, and no layout that can fail to be
+      # assembled; all three were removed with the sibling arrangement on
+      # 2026-09-03, when the upstream Platform repository was retired.
+      - uses: actions/checkout@v5
 
       - name: Assert the MSCS tree variables are absent
         run: |
@@ -515,8 +386,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
-        with:
-          path: mscs/Msgcore
 
       - name: Every cited .md is in the repository
         run: pwsh tools/ci/check_md_citations.ps1

@@ -1,0 +1,63 @@
+Platform (p2pplatform) — the Win32→POSIX shim layer for Msgcore + TargetCore
+Copyright © 2026 Khrustal & Mann
+             MELBOURNE, VICTORIA, AUSTRALIA, 3000
+
+This product includes software developed by Khrustal & Mann.
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file in
+this directory, or http://www.apache.org/licenses/LICENSE-2.0
+
+
+-------------------------------------------------------------------------
+Files NOT covered by the Apache License, Version 2.0
+-------------------------------------------------------------------------
+
+None. Every tracked file in this repository is original work of Khrustal &
+Mann and carries the Apache-2.0 header in full. Unlike the sibling
+repositories, this one contains no Visual Studio project-template, wizard-
+generated or sample-derived file: it was written for the Linux port and has
+no .sln/.vcxproj, no .rc, no Resource.h and no stdafx.h of its own.
+
+win-compat/ is not tracked. It is generated at CMake configure time by
+gen_wincompat.sh, which writes forwarding headers named after the Windows
+headers legacy code includes. Those files are the output of our script and
+contain no Microsoft source.
+
+
+-------------------------------------------------------------------------
+Interoperability note
+-------------------------------------------------------------------------
+
+This layer reproduces the *names, signatures and documented behaviour* of a
+subset of the Win32 API (CreateIoCompletionPort, GetQueuedCompletionStatus,
+OVERLAPPED, CreateFileW, WSA*, AcceptEx/ConnectEx, DCB/SetCommState, the SCM
+entry points, and the MFC/ATL surface the two libraries use) so that
+unmodified legacy sources compile against POSIX. It is an independent
+implementation written for interoperability. No Microsoft source, header or
+sample code is included in, or was copied into, this repository.
+
+On _WIN32 nothing here is used: every header includes the genuine Microsoft
+header and defines nothing else.
+
+
+-------------------------------------------------------------------------
+Third-party components required at build or run time
+-------------------------------------------------------------------------
+
+This software is built against, and links to, components that are licensed
+separately and are NOT distributed under the Apache License, Version 2.0:
+
+    liburing                            - LGPL-2.1 / MIT dual licence.
+                                          Linked by p2piocp.cpp (io_uring).
+    OpenSSL 3 (libcrypto)               - Apache License 2.0. Selected by
+                                          p2pcrypto.h on Linux; the crypto
+                                          itself lives in P2PCngCrypto.
+    Microsoft Foundation Classes (MFC)  - Microsoft, licensed separately.
+    Microsoft ATL (atlstr.h / CString)  - Microsoft, licensed separately.
+    Microsoft Visual C++ runtime        - Microsoft, licensed separately.
+    Windows SDK / CNG (bcrypt)          - Microsoft, part of the operating
+                                          system. Reached only through the
+                                          _WIN32 pass-through branches.
+
+These are dependencies, not bundled code. No source from any of them is
+included in this repository.
