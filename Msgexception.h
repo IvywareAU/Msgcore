@@ -471,7 +471,7 @@ fprintf ( stdout, (LPCSTR)strDiagnosticA ); }
 CString strFormatA=lpszFormatA;if(strFormatA.GetLength()>0)strVargsA.Format(lpszFormatA,__VA_ARGS__); \
 EVLOG->Module(__FUNCTION__)->Message(strVargsA)->Cancel(); }
 #else
-#define DiagnosticA(...) ((void*)0)
+#define P2PmsgcorelogA(...) ((void*)0)
 #endif
 
 //

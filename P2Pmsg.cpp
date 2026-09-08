@@ -2197,8 +2197,6 @@ P3PmsgName::c_name ( ) const
     //  Name stored as 16-bit P2PWCHAR; widen to wchar_t on read (§4.2). For names
     //  nBlobUsed is the character count (set by the name-write path above).
     VBLockName *pName = P3PmsgName_GetVBLockName(m_pObject);
-    LPCWSTR lpszName1 = p2p_wstr_from_store (&pName->u.vBlob08.cBlob, pName->u.vBlob08.nBlobUsed);
-    LPCWSTR lpszName2 = (LPCWSTR)&pName->u.vBlob08.cBlob;
     return (LPCTNAM)p2p_wstr_from_store ( &pName->u.vBlob08.cBlob, pName->u.vBlob08.nBlobUsed );
 }
 UCHAR
