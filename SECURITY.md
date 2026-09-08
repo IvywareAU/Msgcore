@@ -191,14 +191,20 @@ Publishing these rather than waiting to be told:
 
 ## Supported versions
 
-`v3.0.0` is tagged and is the first public release. `Msgcore_version.h` reports
-`3.0.0.0`, and the built DLLs carry it in their `VERSIONINFO` resource, so a binary can
-be traced back to the source state that produced it.
+`v3.1.0` is the current release; `v3.0.0` was the first public one. `Msgcore_version.h`
+reports `3.1.0.0`, and the built DLLs carry it in their `VERSIONINFO` resource, so a
+binary can be traced back to the source state that produced it.
 
 | Version | Supported | Notes |
 |---|---|---|
-| 3.0.x | **Yes** — fixes land on `master` and ship in the next tag | The flat C ABI only; see the scope sections above |
+| 3.1.x | **Yes** — fixes land on `master` and ship in the next tag | The flat C ABI only; see the scope sections above |
+| 3.0.x | No | Superseded by 3.1.0, which did not move the flat C ABI: `Msgcore_c.h` and the flat export manifest are unchanged between the two tags, so upgrading costs a C consumer nothing |
 | < 3.0.0 | No | Development states that were never published; there is nothing to identify them by |
+
+3.1.0 is a MINOR bump under the narrow reading this table already takes: the supported
+flat C ABI did not move. The mangled C++ half — shipped, toolchain-pinned and internal,
+per the paragraph below — did break, dropping twelve exported symbols, so a C++ consumer
+that reached past the supported surface has to recompile.
 
 There is one maintained line, and no long-term-support branch: a fix goes onto `master`
 and is released by the next tag rather than backported. That is honest for a project with

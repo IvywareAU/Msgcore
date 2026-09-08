@@ -365,7 +365,7 @@ as compile-time macros — so a consumer's `MSGCORE_VERSION_*` can never disagre
 ```
 
 Releases are annotated git tags named `vMAJOR.MINOR.PATCH`, matching the header. The current
-release is **`v3.0.0`**. If you have a `Msgcore.dll` and want to know what built it, read its
+release is **`v3.1.0`**. If you have a `Msgcore.dll` and want to know what built it, read its
 `FileVersion` and check out the tag of the same number — that correspondence is verified at
 tag time against the DLL's own version resource, not assumed from the header.
 
