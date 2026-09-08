@@ -442,7 +442,7 @@ szDiagnostic[cSize]=0; \
 CString strDiagnostic = szDiagnostic; \
 fwprintf ( stdout, (LPCTSTR)CString(strDiagnostic) ); }
 #else
-#define Diagnostic(tag)
+#define Diagnostic(...) ((void*)0)
 #endif
 //
 //  Conditional diagnostic
