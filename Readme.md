@@ -18,7 +18,7 @@ a file and read back verbatim, with no serialisation pass and no pointer fix-up.
 #include "P2PmsgMgr.h"
 
 P2PmsgMgr mgr;
-mgr.r_name() = _N("Settings");
+mgr.r_name() = L"Settings";
 mgr.r_Desc() += P3PmsgField ( L"window" );
 mgr.Save ( L"settings.p2p" );          // atomic: temp file, then rename over the target
 
