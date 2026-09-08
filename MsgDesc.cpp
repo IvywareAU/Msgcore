@@ -325,7 +325,7 @@ P3PmsgDesc::SelectList ( LPCTNAM lpszListName )
     {
       EVERR -> Module ( __FUNCTION__ )
             -> AFP(lpszListName)
-            -> Message(_N("List [%s] does not exist"), lpszListName )
+            -> Message(L"List [%s] does not exist", lpszListName )
             -> Throw();
     }
     return m_pCurs->r_list ( );
@@ -340,7 +340,7 @@ P3PmsgDesc::SelectVect ( LPCTNAM lpszVectName )
     {
       EVERR -> Module ( __FUNCTION__ )
             -> AFP(lpszVectName)
-            -> Message(_N("Vect [%s] does not exist"), lpszVectName )
+            -> Message(L"Vect [%s] does not exist", lpszVectName )
             -> Throw();
     }
     return m_pCurs->r_vect ( );

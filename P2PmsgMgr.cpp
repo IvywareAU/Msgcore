@@ -1334,6 +1334,63 @@ P2PmsgMgr::Sizeof ( )
     return P2PmsgHeap_Sizeof ( m_hMgr );
 }
 
+///////////////////////////////////////
+//  Safe DSet Paging
+//  NOTES: Manages the lifecycle of paged Data Sets within a P2PmsgMgr.
+//         The paging is managed by the P2PmsgMgr and the SafeDSetPaging
+//         class provides a convenient RAII-style wrapper to ensure that
+//         the paging is properly cached and flushed.
+//       : Only relevant for large datasets that are paged in and out of memory.
+//         For small datasets, the paging is not necessary and the SafeDSetPaging
+//         class is not applicable.
+SafeDSetPaging::SafeDSetPaging ( P2PmsgMgr& oP2PmsgMgr, P3PmsgItem& oDSetItem )
+{
+    m_pP2PmsgMgr    = &oP2PmsgMgr;
+    m_eDSetPageSumm = m_pP2PmsgMgr -> PageSumm ( oDSetItem );
+    m_pP2PmsgMgr -> PageDatasetIn ( oDSetItem.GetP2Pos() );
+    m_pDSetItem     = &oDSetItem;
+}
+   
+SafeDSetPaging::~SafeDSetPaging ()
+{
+    try
+    {
+      if ( m_pP2PmsgMgr &&
+           m_pDSetItem  &&
+          (m_eDSetPageSumm& P2Pmsg_PAGESUMM_CACHED) != P2Pmsg_PAGESUMM_CACHED )
+        m_pP2PmsgMgr -> PageDatasetOut ( m_pDSetItem->GetP2Pos(), TRUE );
+    }
+    // Exceptions
+    catch_pP2Pevent_Cancel
+    catch_pCException_Cancel
+    catch_ALL_Cancel
+}
+
+P3PmsgItem*
+SafeDSetPaging::operator -> () noexcept
+{
+    return m_pDSetItem;
+}
+
+P3PmsgItem*
+SafeDSetPaging::operator = ( P3PmsgItem *pDSetItem )
+{
+    if ( m_pP2PmsgMgr &&
+         m_pDSetItem  &&
+        (m_eDSetPageSumm& P2Pmsg_PAGESUMM_CACHED) != P2Pmsg_PAGESUMM_CACHED )
+      m_pP2PmsgMgr -> PageDatasetOut ( m_pDSetItem->GetP2Pos(), TRUE );
+    m_eDSetPageSumm = pDSetItem ? m_pP2PmsgMgr -> PageSumm ( *pDSetItem ) : 0;
+    return m_pDSetItem = pDSetItem;
+}
+P3PmsgItem*
+SafeDSetPaging::Dereference () noexcept
+{
+    auto pDSetItem = m_pDSetItem;
+    m_pP2PmsgMgr = nullptr;
+    m_pDSetItem  = nullptr;
+    return pDSetItem;
+}
+
 ///////////////////////////////////////////////////////////////////////
 //  P2PmsgMgr helpers
 //  NOTES: Standard extensions and activities

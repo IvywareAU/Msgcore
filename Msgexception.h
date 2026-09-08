@@ -429,6 +429,52 @@ typedef P2PSafePtr<P2Pevent> P2PeventSP;
 //
 
 //
+//  Conditional diagnostic
+//  NOTES: Dynamic diagnostic that only presents in DEBUG mode
+#ifdef _DEBUG
+#define Diagnostic(strFormat, ...) \
+{ CString strVargs; strVargs.Format(strFormat,__VA_ARGS__); \
+COleDateTime _dt_ = COleDateTime::GetCurrentTime(); \
+TCHAR szDiagnostic[4096]; \
+int cSize = swprintf_s ( &szDiagnostic[0], ARRAYSIZE(szDiagnostic)-1 \
+,L"[%s] %s\n",(LPCTSTR)_dt_.Format(L"%H-%M-%S"),(LPCTSTR)strVargs); \
+szDiagnostic[cSize]=0; \
+CString strDiagnostic = szDiagnostic; \
+fwprintf ( stdout, (LPCTSTR)CString(strDiagnostic) ); }
+#else
+#define Diagnostic(tag)
+#endif
+//
+//  Conditional diagnostic
+//  NOTES: Dynamic diagnostic that only presents in DEBUG mode
+#ifdef _DEBUG
+#define DiagnosticA(strFormatA, ...) \
+{ CStringA strVargsA; strVargsA.Format(strFormatA,__VA_ARGS__); \
+CString strVargs(strVargsA); \
+COleDateTime _dt_ = COleDateTime::GetCurrentTime(); \
+TCHAR szDiagnostic[4096]; \
+int cSize = swprintf_s ( &szDiagnostic[0], ARRAYSIZE(szDiagnostic)-1 \
+,L"[%s] %s\n",(LPCTSTR)_dt_.Format(L"%H-%M-%S"),(LPCTSTR)strVargs); \
+szDiagnostic[cSize]=0; \
+CString strDiagnostic = szDiagnostic; \
+CStringA strDiagnosticA(strDiagnostic); \
+fprintf ( stdout, (LPCSTR)strDiagnosticA ); }
+#else
+#define DiagnosticA(...) ((void*)0)
+#endif
+//
+//  MsgexceptionLog diagnostics
+//  NOTES: Dynamic diagnostic that only presents in DEBUG mode
+#ifdef _DEBUG
+#define P2PmsgcorelogA(lpszFormatA, ...) \
+{ CString strVargsA; \
+CString strFormatA=lpszFormatA;if(strFormatA.GetLength()>0)strVargsA.Format(lpszFormatA,__VA_ARGS__); \
+EVLOG->Module(__FUNCTION__)->Message(strVargsA)->Cancel(); }
+#else
+#define DiagnosticA(...) ((void*)0)
+#endif
+
+//
 //  Catch block interceptions
 //  NOTES: Utilised in catch handlers to translate exception object
 //         into P2Pevent object.  Usually extracts Message() and
@@ -504,8 +550,17 @@ P2Pevent_catch ( CException *pEx, bool bDeleteEx = true );
 //       : Such parameters are appended beneath the P2Pevent function
 //         node.  It should be assumed that any appended parameters
 //         will have global exposure
-#define AFP(arg) SetFParam(_N(#arg),P3PmsgData(arg))
-#define AFP_f(arg,fmt) SetFParam(_N(#arg),P3PmsgData(arg).c_printf(fmt))
+//       : L#arg IS NOT A WIDE LITERAL, which is why the name arrives through a
+//         two-step widen instead. `#` and `##` are separate operations, so
+//         writing L immediately before #arg leaves TWO tokens -- the identifier
+//         L and a narrow "name" -- which MSVC's preprocessor silently glues back
+//         into one wide literal and GCC reports as an undeclared `L` (13 of them,
+//         plus two expected-')' cascades, in the CMake/Linux build). AFP__widen
+//         takes the ALREADY-STRINGIFIED name, so the paste has a real string
+//         literal to work on and both preprocessors agree.
+#define AFP__widen(str) L##str
+#define AFP(arg) SetFParam(AFP__widen(#arg),P3PmsgData(arg))
+#define AFP_f(arg,fmt) SetFParam(AFP__widen(#arg),P3PmsgData(arg).c_printf(fmt))
 
 //
 //  P2Pevent callback definitions (default set)

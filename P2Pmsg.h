@@ -1074,6 +1074,12 @@ Msgcore_EXT void
 P3PmsgRefactor_Move ( P3PmsgAttr& oAttrSource, P3PmsgAttr& oAttrDestin, LPCTSTR lpszItemName );
 Msgcore_EXT void
 P3PmsgRefactor_DataType ( P3PmsgItem& oItemParent, LPCTSTR lpszItemname, const P3PmsgData& oData );
+Msgcore_EXT void
+P3PmsgRefactor_CastDataType (P3PmsgItem& oItem, LPCTSTR lpszItemName, char ucNewDataType);
+Msgcore_EXT void
+P3PmsgRefactor_CastDataType (P3PmsgAttr& oAttr, LPCTSTR lpszAttrName, char ucNewDataType);
+Msgcore_EXT void    
+P3PmsgRefactor_CastDataType ( P3PmsgData& oData, char ucNewDataType );
 
 ///////////////////////////////////////////////////////////////////////////
 // ------------------------------------------------------------------------

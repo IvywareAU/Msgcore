@@ -136,7 +136,7 @@ typedef void (*P2PmsgTriggerSink)( void* pUser
 #define _ucslen  strlen
 
 #define _U(arg)  _T(arg)
-#define _N(arg)  L##arg
+//#define _N(arg)  L##arg
 
 ///////////////////////////////////////
 //  NULL value management

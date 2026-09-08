@@ -13,7 +13,9 @@
 // implied. See the License for the specific language governing
 // permissions and limitations under the License.
 //
-//  P2Peer message definitions and prototypes
+//  P3P framework attribute definitions and prototypes
+//  NOTES: Manages P3PmsgItem attribute operations, effectively
+//         an indirection or property branch in the primary P2Pmsg tree.
 //
 #include "stdafx.h"
 #include "Propvarutil.h"
@@ -203,7 +205,7 @@ P3PmsgAttr::operator += ( const P3PmsgVect& rhs )
     return *this;
 }
 P3PmsgAttr&
-P3PmsgAttr::operator += ( const P3PmsgField& rhs )
+P3PmsgAttr::operator += ( const P3PmsgItem& rhs )
 {
     PushBack ( rhs );
     return *this;

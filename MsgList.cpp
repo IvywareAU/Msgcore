@@ -388,7 +388,7 @@ P3PmsgList::operator bool ( )
 //      m_pCurs = new P3PmsgCurs ( *this );
 //    if ( !m_pCurs->Goto(lpszItemName) )
 //      EVERR -> Module ( __FUNCTION__"(%s)", lpszItemName )
-//            -> Message(_N("Item [%s] does not exist"), lpszItemName )
+//            -> Message(L"Item [%s] does not exist", lpszItemName )
 //            -> Throw();
 //    if ( m_pCurs->IsField() )
 //      return m_pCurs->r_field ( );
@@ -408,7 +408,7 @@ P3PmsgList::operator bool ( )
 //    {
 //      ASSERT(0);//TODO:Delete-me
 //      EVERR -> Module ( __FUNCTION__"(%s)", lpszNodeName )
-//            -> Message(_N("Node [%s] does not exist"), lpszNodeName )
+//            -> Message(L"Node [%s] does not exist", lpszNodeName )
 //            -> Throw();
 //    }
 //    return m_pCurs->r_node ( );

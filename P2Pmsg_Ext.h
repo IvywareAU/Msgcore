@@ -46,17 +46,17 @@
 ///////////////////////////////////////////////////////////////////////
 //  P2Pmsg CMFCPropertyGridCtrl decoration helpers
 //  NOTES: Perform standard activities
-#define T_4GRID_TYPE_Lab        _N("#Lab")
-#define T_4GRID_TYPE_Dsc        _N("#Dsc")
-#define T_4GRID_TYPE_Typ        _N("#Typ")
-#define T_4GRID_TYPE_SPIN       _N("SPIN")
-#define T_4GRID_TYPE_FONT       _N("FONT")
-#define T_4GRID_TYPE_FONTcrx    _N("FONTcrx")
-#define T_4GRID_TYPE_COLOR      _N("COLOR")
-#define T_4GRID_TYPE_FILE       _N("FILE")
-#define T_4GRID_TYPE_OPTION     _N("OPTION")
-#define T_4GRID_TYPE_HEADING    _N("HEADING")
-#define T_4GRID_TYPE_ENUM       _N("ENUM")
+#define T_4GRID_TYPE_Lab        L"#Lab"
+#define T_4GRID_TYPE_Dsc        L"#Dsc"
+#define T_4GRID_TYPE_Typ        L"#Typ"
+#define T_4GRID_TYPE_SPIN       L"SPIN"
+#define T_4GRID_TYPE_FONT       L"FONT"
+#define T_4GRID_TYPE_FONTcrx    L"FONTcrx"
+#define T_4GRID_TYPE_COLOR      L"COLOR"
+#define T_4GRID_TYPE_FILE       L"FILE"
+#define T_4GRID_TYPE_OPTION     L"OPTION"
+#define T_4GRID_TYPE_HEADING    L"HEADING"
+#define T_4GRID_TYPE_ENUM       L"ENUM"
 
 //  Grid decorations
 const DWORD GRIDEC_Heading    = (1<<0);     // Decorates primary heading

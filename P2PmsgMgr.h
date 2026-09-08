@@ -344,6 +344,33 @@ typedef P2PmsgMgrnn<VBLock_Addr16> P2PmsgMgr16;
 typedef P2PmsgMgrnn<VBLock_Addr32> P2PmsgMgr32;
 typedef P2PmsgMgrnn<VBLock_Addr64> P2PmsgMgr64;
 
+///////////////////////////////////////
+//  Safe DSet Paging
+//  NOTES: Manages the lifecycle of paged Data Sets within a P2PmsgMgr.
+//         The paging is managed by the P2PmsgMgr and the SafeDSetPaging
+//         class provides a convenient RAII-style wrapper to ensure that
+//         the paging is properly cached and flushed.
+//       : Only relevant for large datasets that are paged in and out of memory.
+//         For small datasets, the paging is not necessary and the SafeDSetPaging
+//         class is not applicable.
+class Msgcore_EXT SafeDSetPaging
+{
+    public:
+      SafeDSetPaging ( P2PmsgMgr& oP2PmsgMgr, P3PmsgItem& oDSetItem );
+     ~SafeDSetPaging ();
+    P3PmsgItem*
+      operator -> ( ) noexcept;
+    P3PmsgItem*
+      operator = ( P3PmsgItem *pDSetItem );
+    P3PmsgItem*
+      Dereference ( ) noexcept;
+    // Attributes
+    private:
+      P2PmsgMgr   *m_pP2PmsgMgr{nullptr};
+      P3PmsgItem  *m_pDSetItem{nullptr};
+      DWORD        m_eDSetPageSumm{0};
+};
+
 ///////////////////////////////////////////////////////////////////////
 //  Safe P2PmsgMgr paging registration push and subsequent pop
 class Msgcore_EXT SafeRegistrationPush

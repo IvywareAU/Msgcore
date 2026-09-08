@@ -1635,7 +1635,7 @@ P3PmsgData::GetAttr ( ) const
 VBLsize
 P3PmsgData::Sizeof ( ) const
 {   
-    VBLockData *pData = P2PmsgObject_pData(*pOBJ__); //TODO:LJM deprectaed GetVBLockData();
+    const VBLockData *pData = P2PmsgObject_pData(*pOBJ__); //TODO:LJM deprectaed GetVBLockData();
     return VBLockData_Sizeof(pOBJ__uVBLock, pData);
 /*  VBLockData *pData = GetVBLockData();
     VBLockType  nType = GetVBLockData()->uVBLockType;
@@ -2197,6 +2197,8 @@ P3PmsgName::c_name ( ) const
     //  Name stored as 16-bit P2PWCHAR; widen to wchar_t on read (§4.2). For names
     //  nBlobUsed is the character count (set by the name-write path above).
     VBLockName *pName = P3PmsgName_GetVBLockName(m_pObject);
+    LPCWSTR lpszName1 = p2p_wstr_from_store (&pName->u.vBlob08.cBlob, pName->u.vBlob08.nBlobUsed);
+    LPCWSTR lpszName2 = (LPCWSTR)&pName->u.vBlob08.cBlob;
     return (LPCTNAM)p2p_wstr_from_store ( &pName->u.vBlob08.cBlob, pName->u.vBlob08.nBlobUsed );
 }
 UCHAR
@@ -3567,7 +3569,7 @@ P3PmsgField::AssertValid ( ) const
       aPrev_Next = VBLockItem_GetNext ( OBJ__uVBLock, VBLock_pItem(pPrev) );
     if ( aPrev_Next && OBJ__VBLocknn != aPrev_Next )
       EVERR -> Module ( __FUNCTION__ )
-            -> Message(_N("%s"), (LPCTSTR)P3Pmsg_GetPath(this) )
+            -> Message(L"%s", (LPCTSTR)P3Pmsg_GetPath(this) )
             -> Message("Corrupted backwards link aPrev=%i aThis=%i aPrev_Next=%i",
                         aPrev, OBJ__VBLocknn, aPrev_Next )
             -> Throw();
@@ -4389,7 +4391,7 @@ P3PmsgNode::SelectNode ( LPCTNAM lpszNodeName )
       ASSERT(0);//TODO:Delete-me
       EVERR -> Module ( __FUNCTION__ )
             -> AFP(lpszNodeName)
-            -> Message(_N("Node [%s] does not exist"), lpszNodeName )
+            -> Message(L"Node [%s] does not exist", lpszNodeName )
             -> Throw();
     }
     return m_pCurs->r_node ( );
@@ -4686,7 +4688,7 @@ P3PmsgNode::AssertValid ( ) const
         VBLaddr aVBLockParentnn = P2PmsgField_GetVBLockParentnn(&oCurs.r_node());
         if ( aVBLocknn != aVBLockParentnn )
           EVERR -> Module ( __FUNCTION__ )
-                -> Message(_N("Corrupted link %s(%i) back to %s(%i)")
+                -> Message(L"Corrupted link %s(%i) back to %s(%i)"
                           , oCurs.r_node().c_name(), aVBLocknn
                           , c_name(), aVBLockParentnn )
                 -> Throw();
@@ -5019,7 +5021,7 @@ P3PmsgDesc::operator [] ( LPCTNAM lpszName )
     if ( !m_pCurs->Goto(lpszName) )
       EVERR -> MODULE
             -> AFP(lpszName)
-            -> Message(_N("Item [%s] does not exist"), lpszName )
+            -> Message(L"Item [%s] does not exist", lpszName )
             -> Throw();
     return m_pCurs->r_node ( );
 }
@@ -5136,7 +5138,7 @@ P3PmsgDesc::SelectItem ( LPCTNAM lpszItemName )
       ASSERT(0);//TODO:Delete-me
       EVERR -> Module ( __FUNCTION__ )
             -> AFP(lpszItemName)
-            -> Message(_N("Node [%s] does not exist"), lpszItemName )
+            -> Message(L"Node [%s] does not exist", lpszItemName )
             -> Throw();
     }
     return *m_pCurs;
@@ -5152,7 +5154,7 @@ P3PmsgDesc::SelectNode ( LPCTNAM lpszNodeName )
       ASSERT(0);//TODO:Delete-me
       EVERR -> Module ( __FUNCTION__ )
             -> AFP(lpszNodeName)
-            -> Message(_N("Node [%s] does not exist"), lpszNodeName )
+            -> Message(L"Node [%s] does not exist", lpszNodeName )
             -> Throw();
     }
     return m_pCurs->r_node ( );
@@ -5168,7 +5170,7 @@ P3PmsgDesc::SelectList ( LPCTNAM lpszListName )
       ASSERT(0);//TODO:Delete-me
       EVERR -> Module ( __FUNCTION__ )
             -> AFP(lpszListName)
-            -> Message(_N("List [%s] does not exist"), lpszListName )
+            -> Message(L"List [%s] does not exist", lpszListName )
             -> Throw();
     }
     return m_pCurs->r_list ( );
@@ -5184,7 +5186,7 @@ P3PmsgDesc::SelectVect ( LPCTNAM lpszVectName )
       ASSERT(0);//TODO:Delete-me
       EVERR -> Module ( __FUNCTION__ )
             -> AFP(lpszVectName)
-            -> Message(_N("Vect [%s] does not exist"), lpszVectName )
+            -> Message(L"Vect [%s] does not exist",   lpszVectName )
             -> Throw();
     }
     return m_pCurs->r_vect ( );
@@ -6417,110 +6419,6 @@ P2PmsgField_Merge ( P3PmsgField& oField, const P3PmsgField& rhs )
     return oField;
 }
 
-P3PmsgNode&
-P2PmsgNode_Merge ( P3PmsgNode& oNode, const P3PmsgNode& rhs )
-{
-    // Recursive copy
-    P3PmsgCurs& oCurs = ((P3PmsgNode&)rhs).r_Curs();
-    for ( int i = 0; oCurs.Goto(i); i++ )
-    {
-//oCurs.AssertValid();
-ASSERT(oCurs.Item()==i);
-      if ( oCurs.IsNode() )
-      {
-        //  COPY, never the bare c_name() pointer.  c_name() ends in
-        //  p2p_wstr_from_store(), which off Win32 hands back a slot of a 16-entry
-        //  thread-local widening RING (Platform/p2pstr.h:629-651).  Both calls
-        //  below rescan oNode BY NAME, and every comparison in that scan spends
-        //  one more slot (P3PmsgCurs::Goto -> c_wcsicmp -> c_name), so from about
-        //  the eighth item on the held pointer is recycled mid-scan - and when the
-        //  recycled slot is the one c_name() has just written, the comparison
-        //  reads equal and the WRONG item is merged.  Win32 returns the store
-        //  pointer unchanged, so this is byte-identical there.
-        CString strNodename  = oCurs.r_node().c_name();
-        LPCTSTR lpszNodename = strNodename;
-        if ( oNode.Exists(lpszNodename) )
-          P2PmsgNode_Merge ( oNode.SelectNode(lpszNodename), oCurs.r_node() );
-        else
-          oNode += oCurs.r_node();
-      }
-      else if ( oCurs.IsList() )
-      {
-        ASSERT(0);
-        oNode += oCurs.r_list();
-      }
-      else if ( oCurs.IsVect() )
-      {
-        ASSERT(0);
-        oNode += oCurs.r_vect();
-      }
-      else if ( oCurs.IsField() )
-      {
-        //  COPY - see the P3PmsgCurs widening-ring note in the IsNode() branch above.
-        CString strFieldname  = oCurs.r_field().c_name();
-        LPCTSTR lpszFieldname = strFieldname;
-        if ( oNode.Exists(lpszFieldname) )
-          P2PmsgField_Merge ( oNode.SelectItem(lpszFieldname), oCurs.r_field() );
-        else
-          oNode += oCurs.r_field();
-      }
-      else
-        ASSERT(0);
-//oNode.AssertValid();//TODO:LJM delete, testing
-    }
-
-    // Tidy up, and
-    return oNode;
-}
-
-P3PmsgAttr&
-P2PmsgAttr_Merge ( P3PmsgAttr& oAttr, const P3PmsgNode& rhs )
-{
-    // Recursive copy
-    P3PmsgCurs& oCurs = ((P3PmsgNode&)rhs).r_Curs();
-    for ( int i = 0; oCurs.Goto(i); i++ )
-    {
-//oCurs.AssertValid();
-ASSERT(oCurs.Item()==i);
-      if ( oCurs.IsNode() )
-      {
-        //  COPY - see the P3PmsgCurs widening-ring note in P2PmsgNode_Merge above.
-        CString strNodename  = oCurs.r_node().c_name();
-        LPCTSTR lpszNodename = strNodename;
-//oAttr.AssertValid();
-        if ( oAttr.Exists(lpszNodename) )
-          P2PmsgNode_Merge ( oAttr.SelectNode(lpszNodename), oCurs.r_node() );
-        else
-          oAttr += oCurs.r_node();
-      }
-      else if ( oCurs.IsList() )
-      {
-        ASSERT(0);
-        oAttr += oCurs.r_list();
-      }
-      else if ( oCurs.IsVect() )
-      {
-        ASSERT(0);
-        oAttr += oCurs.r_vect();
-      }
-      else if ( oCurs.IsField() )
-      {
-        //  COPY - see the P3PmsgCurs widening-ring note in P2PmsgNode_Merge above.
-        CString strFieldname  = oCurs.r_field().c_name();
-        LPCTSTR lpszFieldname = strFieldname;
-        if ( oAttr.Exists(lpszFieldname) )
-          P2PmsgField_Merge ( oAttr.SelectItem(lpszFieldname), oCurs.r_field() );
-        else
-          oAttr += oCurs.r_field();
-      }
-      else
-        ASSERT(0);
-//oAttr.AssertValid();//TODO:LJM delete, testing
-    }
-
-    // Tidy up, and
-    return oAttr;
-}
 
 P3PmsgAttr&
 P2PmsgAttr_Merge ( P3PmsgAttr& oAttr, const P3PmsgAttr& rhs )
@@ -6608,25 +6506,6 @@ ASSERT(oCurs.Item()==i);
 //    return oAttr;
 //}
 
-//P3PmsgField&
-//Decorate4Grid ( P3PmsgField& oField, UCHAR ucAttributes
-//              , LPCTSTR lpszGridLabel, LPCTSTR lpszGridDescription )
-//{
-//    oField.r_Attr().PushBack ( P3PmsgField ( _T("#Lab"), lpszGridLabel ) );
-//    oField.r_Attr().PushBack ( P3PmsgField ( _T("#Dsc"), lpszGridDescription ) );
-//    oField.r_Attr().PushBack ( P3PmsgField ( _T("#Typ"), L"" ) );
-//    return oField;
-//}
-//
-//P3PmsgField&
-//Decorate4Grid_FONT ( P3PmsgField& oField, UCHAR ucAttributes
-//                   , LPCTSTR lpszGridLabel, LPCTSTR lpszGridDescription )
-//{
-//    oField.r_Attr().PushBack ( P3PmsgField ( _T("#Lab"), lpszGridLabel ) );
-//    oField.r_Attr().PushBack ( P3PmsgField ( _T("#Dsc"), lpszGridDescription ) );
-//    oField.r_Attr().PushBack ( P3PmsgField ( _T("#Typ"), _T("FONT") ) );
-//    return oField;
-//}
 //
 //P3PmsgField&
 //Decorate4Grid_COLOR ( P3PmsgField& oField, UCHAR ucAttributes
@@ -7436,17 +7315,18 @@ P3PmsgRefactor_Rename ( P3PmsgField& oItem, LPCTSTR lpszItemName, LPCTSTR lpszIt
     //  after those comparisons, so a recycled slot renames items to the WRONG
     //  NAME. Note strItemName below was already a copy and the loop used the raw
     //  pointer anyway.
-    const p2p_wkey oItemName ( lpszItemName );
-    const p2p_wkey oItemNew  ( lpszItemNew  );
-    CString strItemName = oItemName.c_str();
-    if ( strItemName.Compare(oItemNew) == 0 )
+    //const p2p_wkey oItemName ( lpszItemName );
+    //const p2p_wkey oItemNew  ( lpszItemNew  );
+    CString strItemName = lpszItemName;
+    CString strItemNew = lpszItemNew; 
+    if ( strItemName.CompareNoCase(strItemNew) == 0 )
       return;
     P3PmsgCurs oCurs(oItem);
     for ( int i = 0; oCurs.Goto(i); i++ )
     {
-      if ( oCurs.r_name().c_wcscmp(oItemName) )
+      if ( oCurs.r_name().c_wcsicmp(strItemName) )
         continue;
-      oCurs.r_name().c_name ( oItemNew );
+      oCurs.r_name().c_name ( strItemNew );
     }
 }
 
@@ -7456,17 +7336,18 @@ P3PmsgRefactor_Rename ( P3PmsgAttr& oAttr, LPCTSTR lpszItemName, LPCTSTR lpszIte
     //  Attribute twin of the descendant version above, with the same hazard in
     //  both arguments and the same reason: the scan spends a ring slot per
     //  sibling, and lpszItemNew is consumed inside the loop after them.
-    const p2p_wkey oItemName ( lpszItemName );
-    const p2p_wkey oItemNew  ( lpszItemNew  );
-    CString strItemName = oItemName.c_str();
-    if ( strItemName.Compare(oItemNew) == 0 )
+    //const p2p_wkey oItemName ( lpszItemName );
+    //const p2p_wkey oItemNew  ( lpszItemNew  );
+    CString strItemName = lpszItemName;
+    CString strItemNew  = lpszItemNew;
+    if ( strItemName.CompareNoCase(strItemNew) == 0 )
       return;
     P3PmsgCurs oCurs(oAttr);
     for ( int i = 0; oCurs.Goto(i); i++ )
     {
-      if ( oCurs.r_name().c_wcscmp(oItemName) )
+      if ( oCurs.r_name().c_wcsicmp(strItemName) )
         continue;
-      oCurs.r_name().c_name ( oItemNew );
+      oCurs.r_name().c_name ( strItemNew );
     }
 }
 
@@ -7546,6 +7427,59 @@ P3PmsgRefactor_DataType ( P3PmsgItem& oItemParent, LPCTSTR lpszItemname, const P
     }
 }
 
+//
+//  Refactors contained data type
+//
+//  Parameters:  P3PmsgItem& oItem
+//               P3PmsgAttr& oAttr
+//               P3PmsgData& oData
+//               Original data source
+//
+//               LPCTSTR lpszItemName
+//               Name of item whose data type is to be changed
+// 
+//               char ucNewDataType
+//               New data type to be set
+//
+Msgcore_EXT void
+P3PmsgRefactor_CastDataType (P3PmsgItem& oItem, LPCTSTR lpszItemName, char ucNewDataType)
+{
+    if (oItem.Exists(lpszItemName))
+    {
+      P3PmsgData& oData = oItem.SelectItem(lpszItemName).r_data();
+      P3PmsgRefactor_CastDataType(oData, ucNewDataType);
+    }
+}
+Msgcore_EXT void
+P3PmsgRefactor_CastDataType (P3PmsgAttr& oAttr, LPCTSTR lpszItemName, char ucNewDataType)
+{
+    if (oAttr.Exists(lpszItemName))
+    {
+      P3PmsgData& oData = oAttr.SelectItem(lpszItemName).r_data();
+      P3PmsgRefactor_CastDataType(oData, ucNewDataType);
+    }
+}
+Msgcore_EXT void
+P3PmsgRefactor_CastDataType (P3PmsgData& oData, char ucNewDataType)
+{
+    if ( oData.DataType() == ucNewDataType )
+      return;
+    if ( ucNewDataType == VBLockData_INT32 )
+    {
+      if ( oData.DataType() == VBLockData_UINT32 ) {
+        oData = P3PmsgData( (INT32)oData.c_uint() );
+        return; 
+      }
+    }
+    else if ( ucNewDataType == VBLockData_UINT32 )
+    {
+      if ( oData.DataType() == VBLockData_INT32 ) {
+        oData = P3PmsgData( (UINT32)oData.c_int() );
+        return; 
+      }
+    }
+    ASSERT(0); //TODO:LJM Implement other data type conversions
+}
 
 /////////////////////////////////////////////////
 //  P2PCheckPtrs diagnostic

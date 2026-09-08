@@ -147,7 +147,7 @@ int main ( )
         {   // saver scope: destroying the manager closes its exclusively-held
             // file handle before we re-open the file to load it.
             P2PmsgMgr mgr;
-            mgr.r_name() = _N("C4Root");
+            mgr.r_name() = L"C4Root";
             mgr.r_Desc() += P3PmsgField ( L"Alpha" );
             mgr.r_Desc() += P3PmsgField ( L"Beta" );
             saved = mgr.Save ( L"c4_roundtrip.dat" );
@@ -205,7 +205,7 @@ int main ( )
     // (m_dwSharedMode == 0) this second open failed with a sharing violation.
     {
         P2PmsgMgr saver;                       // stays alive - holds c4_share.dat open
-        saver.r_name() = _N("ShareRoot");
+        saver.r_name() = L"ShareRoot";
         saver.r_Desc() += P3PmsgField ( L"X" );
         BOOL saved = saver.Save ( L"c4_share.dat" );
 
@@ -224,7 +224,7 @@ int main ( )
     // Under the old read/write Load this failed with a sharing violation.
     {
         P2PmsgMgr saver;                       // stays alive - holds c4_live.dat
-        saver.r_name() = _N("LiveRoot");
+        saver.r_name() = L"LiveRoot";
         saver.r_Desc() += P3PmsgField ( L"Y" );
         BOOL saved  = saver.Save ( L"c4_live.dat" );
         BOOL loaded = FALSE;
@@ -258,7 +258,7 @@ int main ( )
     // successful Save no "<target>.<tid>.tmp" remains and the target loads.
     {
         P2PmsgMgr mgr;
-        mgr.r_name() = _N("AtomicRoot");
+        mgr.r_name() = L"AtomicRoot";
         mgr.r_Desc() += P3PmsgField ( L"Z" );
         BOOL saved = mgr.Save ( L"c4_atomic.dat" );
 
@@ -283,7 +283,7 @@ int main ( )
     // back to a non-atomic in-place write, and an existing store is untouched.
     {
         P2PmsgMgr mgr;
-        mgr.r_name() = _N("BadRoot");
+        mgr.r_name() = L"BadRoot";
         BOOL saved = TRUE;
         try { saved = mgr.Save ( L"Z:\\no_such_dir_xyz\\c4_bad.dat" ); }
         catch ( P2Pevent *e ) { saved = FALSE; e->Cancel(); }
@@ -296,12 +296,12 @@ int main ( )
     // Hold the lock file the way another writer would; a Save must fail to
     // acquire it (after its bounded retry) and return FALSE, not race.
     {
-        { P2PmsgMgr m; m.r_name() = _N("LockRoot"); m.Save ( L"c4_lock.dat" ); }
+        { P2PmsgMgr m; m.r_name() = L"LockRoot"; m.Save ( L"c4_lock.dat" ); }
         HANDLE hHeld = CreateFileW ( L"c4_lock.dat.lock", GENERIC_WRITE | DELETE, 0,
                                      nullptr, CREATE_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, nullptr );
         bool held = ( hHeld != INVALID_HANDLE_VALUE );
         BOOL saved = TRUE;
-        try { P2PmsgMgr m2; m2.r_name() = _N("LockRoot2"); saved = m2.Save ( L"c4_lock.dat" ); }
+        try { P2PmsgMgr m2; m2.r_name() = L"LockRoot2"; saved = m2.Save ( L"c4_lock.dat" ); }
         catch ( P2Pevent *e ) { saved = FALSE; e->Cancel(); }
         if ( hHeld != INVALID_HANDLE_VALUE ) CloseHandle ( hHeld );
         printf ( "[8 ] save blocked by lock: held=%s Save=%s\n",
@@ -472,7 +472,7 @@ int main ( )
         unsigned int nReached = 0;
         try {
             P2PmsgMgr mgr ( 1 /*VBLock_Addr16*/, 2024, 0 );
-            mgr.r_name() = _N("M5Root");
+            mgr.r_name() = L"M5Root";
             for ( int i = 0; i < 20000; i++ ) {
                 wchar_t szName[32];
                 swprintf_s ( szName, L"Attr%05d", i );
@@ -528,7 +528,7 @@ int main ( )
         CString strMsg;
         try {
             P2PmsgMgr mgr ( 0 /*VBLock_Addr08*/, 2024, 0 );
-            mgr.r_name() = _N("Addr08Root");
+            mgr.r_name() = L"Addr08Root";
         } catch ( P2Pevent *e ) { refused = true; strMsg = e->GetMessage(); e->Cancel(); }
           catch ( ... )         { refused = true; }
         byWidth = strMsg.Find ( _T("not a supported heap addressing width") ) >= 0;

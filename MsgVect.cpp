@@ -74,7 +74,7 @@ P3PmsgVect::P3PmsgVect ( int nItems, LPCTNAM lpszName, const P3PmsgData& oData )
 {
     RenderThisSafe ( );
   (*this) = P3PmsgField ( lpszName, oData );        // vect's own name + template data
-    P3PmsgField oElem ( _N(""), oData );             // per-slot value template
+    P3PmsgField oElem ( L"", oData );             // per-slot value template
     for ( int i = 0; i < nItems; i++ )
       InsertAt ( i, oElem );
 }
@@ -460,7 +460,7 @@ P3PmsgVect::operator bool ( )
 //      m_pCurs = new P3PmsgCurs ( *this );
 //    if ( !m_pCurs->Goto(lpszItemName) )
 //      EVERR -> Module ( __FUNCTION__"(%s)", lpszItemName )
-//            -> Message(_N("Item [%s] does not exist"), lpszItemName )
+//            -> Message(L"Item [%s] does not exist", lpszItemName )
 //            -> Throw();
 //    if ( m_pCurs->IsField() )
 //      return m_pCurs->r_field ( );
@@ -480,7 +480,7 @@ P3PmsgVect::operator bool ( )
 //    {
 //      ASSERT(0);//TODO:Delete-me
 //      EVERR -> Module ( __FUNCTION__"(%s)", lpszNodeName )
-//            -> Message(_N("Node [%s] does not exist"), lpszNodeName )
+//            -> Message(L"Node [%s] does not exist", lpszNodeName )
 //            -> Throw();
 //    }
 //    return m_pCurs->r_node ( );
@@ -629,7 +629,7 @@ P3PmsgVect::MarkElemLinked ( VBLaddr aElem )
 VBLaddr
 P3PmsgVect::AllocContinuation ( )
 {
-    P3PmsgVect oEmpty ( 0, _N(""), P3PmsgData() );   // valid, element-free template
+    P3PmsgVect oEmpty ( 0, L"", P3PmsgData() );   // valid, element-free template
     VBLsize nSize = P2PmsgVect_SizeofItem ( OBJ__uVBLock, oEmpty );
     VBLaddr aItem = OBJ__Alloc ( VBLock_Item, nSize );
     P2PmsgVect_InitItem ( (VBLock *)OBJ__Msg2Phys(aItem), oEmpty );

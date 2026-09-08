@@ -33,6 +33,7 @@
 ?__autoclassinit2@P3PmsgObject@@QEAAX_K@Z
 ?__autoclassinit2@P3PmsgTime@@QEAAX_K@Z
 ?__autoclassinit2@P3PmsgVect@@QEAAX_K@Z
+?__autoclassinit2@SafeDSetPaging@@QEAAX_K@Z
 ?__autoclassinit2@SafeRegistrationPush@@QEAAX_K@Z
 ??_7MsgStck@@6B@
 ??_7P2Pevent@@6BP3PmsgData@@@
@@ -160,6 +161,7 @@
 ??0P3PmsgVect@@QEAA@HPEB_WAEBVP3PmsgData@@@Z
 ??0P3PmsgVect@@QEAA@PEAX_K1@Z
 ??0P3PmsgVect@@QEAA@XZ
+??0SafeDSetPaging@@QEAA@AEAVP2PmsgMgr@@AEAVP3PmsgField@@@Z
 ??0SafeRegistrationPush@@QEAA@PEAVP2PmsgMgr@@@Z
 ??1MsgStck@@UEAA@XZ
 ??1P2Pevent@@UEAA@XZ
@@ -184,6 +186,7 @@
 ??1P3PmsgObject@@UEAA@XZ
 ??1P3PmsgTime@@UEAA@XZ
 ??1P3PmsgVect@@UEAA@XZ
+??1SafeDSetPaging@@QEAA@XZ
 ??1SafeRegistrationPush@@QEAA@XZ
 ??4CMsgcore@@QEAAAEAV0@$$QEAV0@@Z
 ??4CMsgcore@@QEAAAEAV0@AEBV0@@Z
@@ -223,6 +226,8 @@
 ??4P3PmsgVect@@QEAAAEAV0@AEBV0@@Z
 ??4P3PmsgVect@@QEAAAEAV0@AEBVP3PmsgField@@@Z
 ??4P3PmsgVect@@QEAAAEAV0@AEBVP3PmsgObject@@@Z
+??4SafeDSetPaging@@QEAAAEAV0@AEBV0@@Z
+??4SafeDSetPaging@@QEAAPEAVP3PmsgField@@PEAV1@@Z
 ??4SafeRegistrationPush@@QEAAAEAV0@AEBV0@@Z
 ??8P3PmsgData@@QEAAHAEBV0@@Z
 ??8P3PmsgField@@QEAA_NPEB_W@Z
@@ -246,6 +251,7 @@
 ??BP3PmsgList@@QEAA_NXZ
 ??BP3PmsgObject@@QEBA_NXZ
 ??BP3PmsgVect@@QEAA_NXZ
+??CSafeDSetPaging@@QEAAPEAVP3PmsgField@@XZ
 ??EP2PmsgRecurs@@UEAAAEAV0@XZ
 ??EP3PmsgCurs@@UEAA?AV0@H@Z
 ??EP3PmsgCurs@@UEAAAEAV0@XZ
@@ -374,6 +380,7 @@
 ?Delete@P3PmsgVect@@QEAA_NH@Z
 ?Dereference@P2PsafeHANDLE@@QEAAPEAXXZ
 ?Dereference@P2PsafeHGLOBAL@@QEAAPEAXXZ
+?Dereference@SafeDSetPaging@@QEAAPEAVP3PmsgField@@XZ
 ?Display@P2Pevent@@QEAAPEAV1@QEAUHWND__@@@Z
 ?Drop@MsgStck@@UEAAXXZ
 ?Drop@P3PmsgAttr@@UEAAXXZ
@@ -585,6 +592,9 @@
 ?P3PmsgData_var@@YAHPEAX_KAEAV_variant_t@@@Z
 ?P3PmsgField_SERIALISE@@YAAEAVP3PmsgField@@AEAV1@PEB_WAEBVP3PmsgData@@H1@Z
 ?P3PmsgObject_IsCommon@@YAHPEBVP3PmsgObject@@0@Z
+?P3PmsgRefactor_CastDataType@@YAXAEAVP3PmsgAttr@@PEB_WD@Z
+?P3PmsgRefactor_CastDataType@@YAXAEAVP3PmsgData@@D@Z
+?P3PmsgRefactor_CastDataType@@YAXAEAVP3PmsgField@@PEB_WD@Z
 ?P3PmsgRefactor_DataType@@YAXAEAVP3PmsgField@@PEB_WAEBVP3PmsgData@@@Z
 ?P3PmsgRefactor_Delete@@YAXAEAVP3PmsgAttr@@PEB_W@Z
 ?P3PmsgRefactor_Delete@@YAXAEAVP3PmsgField@@PEB_W@Z

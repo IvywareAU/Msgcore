@@ -309,9 +309,11 @@ P3PmsgCurs::Goto ( LPCTNAM lpszItemName )
     //  compares EQUAL to the sibling that overwrote it, stopping this scan on the
     //  wrong item. Snapshotting in the callee is what makes that unreachable
     //  however Goto is called; see p2p_wkey (Platform/p2pstr.h).
-    const p2p_wkey oItemName ( lpszItemName );
+    const P3PmsgName oItemName(lpszItemName);
+    LPCWSTR lpszStackName = oItemName.c_name();
+    //const p2p_wkey oItemName ( lpszItemName );
     if ( m_pP3PmsgFoN                                         &&
-         m_pP3PmsgFoN->r_name().c_wcsicmp(oItemName) == 0        )
+         m_pP3PmsgFoN->r_name().c_wcsicmp(lpszStackName) == 0    )
       return true;
     P2PmsgHANDLE hVBList = 0;
     VBLock      *pVBLock = 0;
@@ -349,8 +351,6 @@ P3PmsgCurs::Goto ( LPCTNAM lpszItemName )
         pVBLock = (VBLock *)m_pP3PmsgDesc -> r_Object().Msg2Phys(aItem); //TODO:LJM 2013/08/30 was GetField() -> r_Object().Msg2Phys ( aItem );
       else if ( m_pP3PmsgAttr )
         pVBLock = (VBLock *)m_pP3PmsgAttr -> r_Object().Msg2Phys(aItem); //TODO:LJM 2013/08/30 was GetField() -> r_Object().Msg2Phys ( aItem );
-      //else if ( m_pP3PmsgNode )
-      //  pVBLock = (VBLock *)m_pP3PmsgNode -> r_Object().Msg2Phys(aItem);
       else { ASSERT(0); break; }
       //ASSERT(VBLock_IsAlloc(pVBLock));
       //ASSERT(VBLock_IsLinked(pVBLock));
@@ -384,7 +384,7 @@ P3PmsgCurs::Goto ( LPCTNAM lpszItemName )
       else { ASSERT(0);}
       ASSERT(m_pP3PmsgFoN!=nullptr);
       //LPCTSTR lpszName = m_pP3PmsgFoN->c_name();
-      if ( m_pP3PmsgFoN->r_name().c_wcsicmp(oItemName) == 0 )
+      if ( m_pP3PmsgFoN->r_name().c_wcsicmp(lpszStackName) == 0 )
         return true;
       aItem = VBLockItem_GetNext ( pVBLock->oHdr.uVBLockDefs, pItem, &m_nItem );
       m_pP3PmsgFoN = 0;
