@@ -991,6 +991,80 @@ static void Test_Data_CopySemantics()
 }
 
 // ---------------------------------------------------------------------------
+// P2PSafePtr : the copy constructor, which never compiled
+// ---------------------------------------------------------------------------
+// MsgCollectors.h's copy constructor carried two defects from b97bea3 "Initial
+// Code". It compared m_pRefCount against &m_pRefCount -- the address of the
+// pointer rather than of the count that pointer guards -- and then called the
+// non-const SwapRef2Shared() through a const reference. Both are hard errors on
+// both toolchains (MSVC C2446 and C2662; g++ "distinct pointer types" and
+// "discards qualifiers"), so this constructor was never instantiated anywhere
+// in MSCS and P2PSafePtr was accidentally non-copyable. Nothing reported it
+// because nothing ever copied one.
+//
+// These cases exist first of all to INSTANTIATE it: if either defect returns
+// this file stops compiling, which catches the regression earlier than any
+// assertion could. What they then check is the part a cast would have hidden --
+// that the count is migrated off the source, so a copy may outlive it.
+// ---------------------------------------------------------------------------
+namespace
+{
+    struct SafePtrProbe
+    {
+        static int nLive;
+        int        nValue;
+        SafePtrProbe ( int n ) : nValue(n) { ++nLive; }
+       ~SafePtrProbe ( )                   { --nLive; }
+    };
+    int SafePtrProbe::nLive = 0;
+}
+
+static void Test_SafePtr_CopySemantics()
+{
+    TF_CASE("a copy keeps the payload alive after the source is destroyed")
+    {
+        SafePtrProbe::nLive = 0;
+        P2PSafePtr<SafePtrProbe>* pCopy = NULL;
+        {
+            P2PSafePtr<SafePtrProbe> oSrc(new SafePtrProbe(4210));
+            pCopy = new P2PSafePtr<SafePtrProbe>(oSrc);
+            TF_CHECK_EQ(SafePtrProbe::nLive, 1);
+        }
+        // The source is gone. Before the fix the count lived inside it, so this
+        // read was of expired storage.
+        TF_CHECK_EQ(SafePtrProbe::nLive, 1);
+        TF_CHECK_EQ((*pCopy)->nValue, 4210);
+        delete pCopy;
+        TF_CHECK_EQ(SafePtrProbe::nLive, 0);        // destroyed exactly once
+    }
+
+    TF_CASE("the source outlives a destroyed copy intact")
+    {
+        SafePtrProbe::nLive = 0;
+        P2PSafePtr<SafePtrProbe> oSrc(new SafePtrProbe(7));
+        {
+            P2PSafePtr<SafePtrProbe> oCopy(oSrc);
+            TF_CHECK_EQ(oCopy->nValue, 7);
+        }
+        TF_CHECK_EQ(SafePtrProbe::nLive, 1);
+        TF_CHECK_EQ(oSrc->nValue, 7);
+    }
+
+    TF_CASE("a chain of copies frees the payload exactly once")
+    {
+        SafePtrProbe::nLive = 0;
+        {
+            P2PSafePtr<SafePtrProbe> oFirst(new SafePtrProbe(3));
+            P2PSafePtr<SafePtrProbe> oSecond(oFirst);
+            P2PSafePtr<SafePtrProbe> oThird(oSecond);
+            TF_CHECK_EQ(SafePtrProbe::nLive, 1);
+            TF_CHECK_EQ(oThird->nValue, 3);
+        }
+        TF_CHECK_EQ(SafePtrProbe::nLive, 0);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3PmsgTime and the scalar tags the sizeof ladder used to omit
 // ---------------------------------------------------------------------------
 static void Test_Time()
@@ -1457,6 +1531,7 @@ void RunMsgcoreSuite()
 {
     Test_Data_TypedValues();
     Test_Data_CopySemantics();
+    Test_SafePtr_CopySemantics();
     Test_Time();
     Test_HeapWidths();
     Test_Field_NameAndData();

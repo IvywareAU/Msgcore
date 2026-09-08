@@ -57,10 +57,28 @@ class P2PSafePtr
           }
         }
 
+        //  NOTES: The guard tests &m_nRefCount -- the address of the COUNT --
+        //         because that is the sentinel every other member sets and
+        //         reads. It said &m_pRefCount, the address of the POINTER, from
+        //         b97bea3 "Initial Code" until this was fixed: a different
+        //         address and a different type (int* against int* const*), so
+        //         MSVC rejected it with C2446 and g++ with "comparison between
+        //         distinct pointer types". Calling the then non-const
+        //         SwapRef2Shared() through this const reference was the second
+        //         error (C2662). Both are hard errors on both toolchains, so
+        //         this constructor had never been instantiated and the template
+        //         was accidentally non-copyable -- which is why nothing ever
+        //         reported it.
+        //       : Casting the mismatch away instead of correcting the operand
+        //         compiles silently and is worse than the error: the guard is
+        //         then permanently false, the count is never migrated, and the
+        //         copy's m_pRefCount points into the SOURCE object. Outliving
+        //         the source reads freed storage, and reaching zero there hands
+        //         Delete() a pointer that was never new'd.
         P2PSafePtr ( const P2PSafePtr& rSafePtr )
         {
           m_pSafePtrType = rSafePtr.m_pSafePtrType;
-          if ( rSafePtr.m_pRefCount == &rSafePtr.m_pRefCount )
+          if ( rSafePtr.m_pRefCount == &rSafePtr.m_nRefCount )
             rSafePtr.SwapRef2Shared ( );
           m_pRefCount    = rSafePtr.m_pRefCount;
         (*m_pRefCount)++;
@@ -146,8 +164,11 @@ class P2PSafePtr
                    m_pSafePtrType  = NULL;
           }
         }
+      //  const, and the two count members are mutable with it: migrating the
+      //  count to the heap is a representation change, not a value change, and
+      //  the copy constructor's source is a const reference.
       void
-        SwapRef2Shared ( )
+        SwapRef2Shared ( ) const
         {
           if ( m_pRefCount == &m_nRefCount )
           {
@@ -160,8 +181,8 @@ class P2PSafePtr
     // Attributes
     private:
         SafePtrType *m_pSafePtrType;
-        int         *m_pRefCount;
-        int          m_nRefCount;
+        mutable int *m_pRefCount;
+        mutable int  m_nRefCount;
 };
 
 //
