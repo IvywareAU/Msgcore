@@ -42,11 +42,15 @@
 #        written. Nothing has yet RUN that .so. Add the job when Phase 1 lands
 #        and there is behaviour to test -- a green build for unwritten code
 #        teaches as little as the red one this note used to fear.
-#      : Reproducing that locally has one trap: it holds only on a
-#        case-sensitive filesystem. Built over /mnt/c from WSL, the win-compat
-#        Assert.h forwarder answers #include <assert.h> and the ASSERT sites
-#        lose their declaration -- recorded in 4d39d0d. That is the mount, not
-#        the port, and GitHub's ubuntu runners are unaffected.
+#      : Reproducing that locally used to have one trap, and no longer does.
+#        Built over /mnt/c from WSL the win-compat Assert.h forwarder answered
+#        #include <assert.h> -- which is what <cassert> itself includes -- so
+#        the guard closed the loop and all 428 ASSERT sites lost their
+#        declaration at once. It read like a broken port and was only ever the
+#        mount; GitHub's ubuntu runners were never affected. The forwarder now
+#        uses #include_next, which resumes the search past win-compat and so
+#        reaches the real assert.h under either spelling. Recorded in 4d39d0d,
+#        fixed in gen_wincompat.sh, and /mnt/c now builds clean.
 #      : The ASan/libFuzzer job (item 14, fourth bullet) is not here. It lives
 #        in fuzz.yml because it is nightly rather than per-push -- a job that
 #        takes an hour and whose result is "no new crash yet" does not belong

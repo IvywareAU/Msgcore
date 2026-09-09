@@ -77,8 +77,20 @@ for h in comutil.h comdef.h psapi.h Psapi.h ShlObj_core.h shlobj_core.h shlobj.h
   fwd "../p2ptypes.h" "$h"
 done
 
-# --- assert case variants -> <cassert> ---
-for h in Assert.h ASSERT.h; do printf '#pragma once\n#include <cassert>\n' > "$h"; done
+# --- assert case variants -> the real assert.h ---
+#     NOT #include <cassert>, and the difference only shows on a CASE-INSENSITIVE
+#     filesystem - a WSL build over /mnt/c is where it bites. There this file also
+#     answers #include <assert.h>, which is exactly what <cassert> itself includes:
+#     the guard above then closes the loop, assert is never declared, and every
+#     ASSERT site in the library loses its declaration at once (428 of them, which
+#     reads like a broken port and is nothing of the kind).
+#     #include_next resumes the search PAST this directory, so it reaches the real
+#     assert.h whether this file was entered as <Assert.h> on a case-sensitive tree
+#     or as a case-folded <assert.h>. It is a GCC/Clang extension and costs nothing
+#     here: win-compat is on the include path ONLY on Linux, so MSVC never sees it.
+for h in Assert.h ASSERT.h; do
+  printf '#pragma once\n#include_next <assert.h>\n' > "$h"
+done
 
 # --- MSVC internal <xstring> -> <string> ---
 printf '#pragma once\n#include <string>\n' > xstring
