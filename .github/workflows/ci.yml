@@ -101,15 +101,29 @@ jobs:
           # silencing two warnings -- see the C4456 and C4389 notes in
           # The release-readiness register, Stage D.
           #
-          # The platforms still differ (76/59 vs 138/121) from identical source
+          # The platforms still differ (75/58 vs 138/121) from identical source
           # and now-identical switches. That is the C4244 residue: 37 truncations
           # on x64 against 102 on Win32, which is a property of the pointer width,
           # not of the diagnostic regime. Triaging that set is the one part of
           # item 10 left open, and these ceilings are what stop it growing.
-          - { configuration: Debug,      platform: x64,   baseline: 76  }
-          - { configuration: Release,    platform: x64,   baseline: 59  }
-          - { configuration: DebugLib,   platform: x64,   baseline: 76  }
-          - { configuration: ReleaseLib, platform: x64,   baseline: 59  }
+          #
+          # LOWERED on 2026-09-10, 76 -> 75 and 59 -> 58, to the counts the runner
+          # actually reports. This is NOT the v145 move: the last v143 run
+          # (3378bcd, 2026-09-09) reported 75 and 58 as well, and so has every run
+          # in this repository back to the first one that compiled. The v143 and
+          # v145 warning sets are identical line for line apart from the project
+          # filename, so the toolset changed nothing here.
+          #
+          # The 76/59 came from the register's build table, measured on the
+          # pre-org line under MSBuild 17, and one x64 warning has gone since
+          # without being attributed to a commit -- which is exactly what a stale
+          # ceiling hides, and why the notice fired on every run until now.
+          # Debug|x64's 75 is 37 C4244 + 18 C4189 + 10 C4245 + 7 C4100 + 3 C4366;
+          # the 37 is the C4244 residue named above, unchanged.
+          - { configuration: Debug,      platform: x64,   baseline: 75  }
+          - { configuration: Release,    platform: x64,   baseline: 58  }
+          - { configuration: DebugLib,   platform: x64,   baseline: 75  }
+          - { configuration: ReleaseLib, platform: x64,   baseline: 58  }
           - { configuration: Debug,      platform: Win32, baseline: 138 }
           - { configuration: DebugLib,   platform: Win32, baseline: 138 }
           - { configuration: Release,    platform: Win32, baseline: 121 }
