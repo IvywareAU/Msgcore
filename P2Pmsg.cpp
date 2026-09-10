@@ -4327,7 +4327,7 @@ P3PmsgNode::operator [] ( LPCTNAM lpszItemName )
     if ( !m_pCurs->Goto(lpszItemName) )
       EVERR -> Module ( __FUNCTION__ )
             -> AFP(lpszItemName)
-            -> Message(_N("Item [%s] does not exist"), lpszItemName )
+            -> Message(L"Item [%s] does not exist", lpszItemName )
             -> Throw();
     if ( m_pCurs->IsNode() )
       return m_pCurs->r_node ( );
