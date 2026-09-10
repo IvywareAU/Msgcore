@@ -2379,6 +2379,52 @@ P2Pevent_catch ( CException *pEx, bool bDeleteEx )
 
 __declspec(thread) P2Pevent *tls_pMsgexception = 0;
 
+//
+//  THE THREAD'S LAST EVENT DIES WITH THE THREAD
+//  NOTES: SetP2Pevent deletes the event it displaces, so a thread that raises
+//         a hundred events holds one.  Nothing ever displaced the LAST one.
+//         The thread ended, the slot went with it, and the P2Pevent the slot
+//         pointed at did not - one event, plus every P3Pmsg block it owns,
+//         for every thread that ever raised one.  On a host that cycles pump
+//         threads that is unbounded.
+//       : Measured on p2p_e2ewaive under LSan: 23,682 bytes in 41 allocations,
+//         all of it ONE refused-seal diagnostic that SealAppMsgOutbound parked
+//         with ->Display()->SetLast() on a pump thread that then exited.
+//       : LSan called every one of those 41 blocks INDIRECT and none of them
+//         direct, which reads like an orphan with no parent.  It is not: the
+//         graph is CYCLIC - the VB heap's block registry points at the blocks
+//         and the blocks carry the heap - and no member of a cycle is the one
+//         nothing else points at.  Absence of a direct root was the clue, not
+//         a contradiction.
+//       : Not a DLL_THREAD_DETACH hook.  Msgcore.cpp keeps DllMain commented
+//         out, Msgcore also builds as a static library, and the POSIX build
+//         has no such callback at all.  A thread_local destructor is the one
+//         mechanism all three configurations share.
+//       : Armed from SetP2Pevent rather than declared beside the slot, so a
+//         thread that never raises an event never registers a destructor.
+//         m_bArmed exists to be written: a store the optimiser cannot drop is
+//         what forces the initialisation that performs the registration.
+namespace
+{
+  struct P2PeventLastReaper
+  {
+    bool m_bArmed = false;
+    void Arm ( ) { m_bArmed = true; }
+    ~P2PeventLastReaper ( )
+    {
+      //  Deliberately NOT through SetP2Pevent: that would touch this guard
+      //  while the guard is being destroyed.  The slot is cleared BEFORE the
+      //  delete because ~P2Pevent reads it back - it isolates itself when it
+      //  finds it is the thread's last
+      P2Pevent *pEvent  = tls_pMsgexception;
+      tls_pMsgexception = 0;
+      delete pEvent;
+    }
+  };
+
+  thread_local P2PeventLastReaper tls_oLastReaper;
+}
+
 
 //
 //  Sets last P2Pevent for current thread context
@@ -2398,6 +2444,11 @@ SetP2Pevent ( P2Pevent *pEvent )
     // Recovery
     if ( tls_pMsgexception )
       delete tls_pMsgexception;
+    //  Registers this thread's reaper, the first time this thread parks an
+    //  event.  Refer P2PeventLastReaper above: it is what deletes this one if
+    //  nothing displaces it before the thread ends
+    if ( pEvent )
+      tls_oLastReaper.Arm ( );
     tls_pMsgexception = pEvent;
 }
 
