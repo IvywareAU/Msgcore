@@ -232,7 +232,7 @@ section says so again.
 ## Three things about the build that are not obvious
 
 **No clang-cl.** Item 14 assumed `clang-cl -fsanitize=address,fuzzer` was required. It is
-not: VS 2022's MSVC ships both, including `clang_rt.fuzzer_MD-x86_64.lib`, so
+not: VS 2026's MSVC ships both, including `clang_rt.fuzzer_MD-x86_64.lib`, so
 `cl /fsanitize=address /fsanitize=fuzzer` produces a libFuzzer binary with the same
 compiler as the rest of the tree. For an MFC extension library that is worth a great deal
 more than a saved download.

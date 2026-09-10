@@ -84,7 +84,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build:
     name: ${{ matrix.configuration }}|${{ matrix.platform }}
-    runs-on: windows-2022
+    runs-on: windows-2025-vs2026
     strategy:
       fail-fast: false        # one broken configuration must not mask the other seven
       matrix:
@@ -149,7 +149,7 @@ jobs:
           Write-Host "MSBuild: $msbuild"
           "MSBUILD=$msbuild" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Build Msgcore(2022).vcxproj
+      - name: Build Msgcore(2026).vcxproj
         run: |
           # GitHub's pwsh shell sets $ErrorActionPreference='Stop', and PS 7.4
           # defaults $PSNativeCommandUseErrorActionPreference to true. Left
@@ -168,7 +168,7 @@ jobs:
           # item 10 unified the switch set; 37/140/123 immediately before it,
           # two C4310 having gone with the M5 pass). Suppressing the summary
           # makes each warning appear once.
-          & $env:MSBUILD 'Msgcore(2022).vcxproj' `
+          & $env:MSBUILD 'Msgcore(2026).vcxproj' `
               /nologo /m:1 /v:normal /clp:NoSummary `
               /p:Configuration=${{ matrix.configuration }} `
               /p:Platform=${{ matrix.platform }} `
@@ -231,7 +231,7 @@ jobs:
       # fails on the four Win32 rows with MSB4126, "The specified solution
       # configuration Release|Win32 is invalid" -- which reads like a broken
       # solution and is only a naming difference between the two files.
-      - name: Build Msgcore(2022).sln
+      - name: Build Msgcore(2026).sln
         run: |
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
@@ -239,14 +239,14 @@ jobs:
           $slnPlatform = if ('${{ matrix.platform }}' -eq 'Win32') { 'x86' } else { '${{ matrix.platform }}' }
           Write-Host "Solution platform: $slnPlatform (project platform: ${{ matrix.platform }})"
 
-          & $env:MSBUILD 'Msgcore(2022).sln' `
+          & $env:MSBUILD 'Msgcore(2026).sln' `
               /nologo /m:1 /v:minimal `
               /p:Configuration=${{ matrix.configuration }} `
               /p:Platform=$slnPlatform `
               2>&1 | Tee-Object -FilePath sln.log
           $rc = $LASTEXITCODE
           if ($rc -ne 0) {
-              Write-Host "::error::Solution build failed (msbuild exit $rc). The project builds and the solution does not, so check what Msgcore(2022).sln names against what the repository contains."
+              Write-Host "::error::Solution build failed (msbuild exit $rc). The project builds and the solution does not, so check what Msgcore(2026).sln names against what the repository contains."
               exit $rc
           }
 
@@ -293,7 +293,7 @@ jobs:
   # ---------------------------------------------------------------------------
   test:
     name: C4 load test (${{ matrix.mode }})
-    runs-on: windows-2022
+    runs-on: windows-2025-vs2026
     needs: build          # a runtime failure is unreadable if the build is broken
     strategy:
       fail-fast: false
@@ -336,7 +336,7 @@ jobs:
           $ErrorActionPreference = 'Continue'          # see the note in job 1
           $PSNativeCommandUseErrorActionPreference = $false
 
-          & $env:MSBUILD 'Msgcore(2022).vcxproj' /nologo /m:1 /v:minimal `
+          & $env:MSBUILD 'Msgcore(2026).vcxproj' /nologo /m:1 /v:minimal `
               /p:Configuration=${{ matrix.configuration }} /p:Platform=x64
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

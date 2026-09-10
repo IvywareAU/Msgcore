@@ -52,7 +52,7 @@ if(WIN32 OR NOT P2PPLATFORM_SOURCES_LINUX)
         # whatever is written here becomes the language level of everything that
         # links p2pplatform, overriding that target's own CXX_STANDARD when it is
         # lower. cxx_std_23 here silently raised Msgcore to C++23 in the CMake
-        # build while Msgcore(2022).vcxproj compiled the same sources at stdcpp17
+        # build while Msgcore(2026).vcxproj compiled the same sources at stdcpp17
         # (its deliberate choice, 3f7bf5e). Setting CXX_STANDARD on the Msgcore
         # target could not fix that on its own; this line had to come down first.
         # These headers only need C++17, so that is what they should ask for.

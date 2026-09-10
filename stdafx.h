@@ -42,7 +42,7 @@
 // Msgcore/Platform as its p2pplatform -- so that macro is not coming back.
 //
 // A quoted include resolves relative to THIS file first, so "Platform/..." needs no
-// -I and no project setting: Msgcore(2022).vcxproj carries no
+// -I and no project setting: Msgcore(2026).vcxproj carries no
 // AdditionalIncludeDirectories at all and needs none.
 //
 // The other two consumers reach this same single copy from where they sit, as

@@ -79,14 +79,14 @@ it is the first thing to read if you are considering depending on it.
 
 | | |
 |---|---|
-| Toolchain | Visual Studio 2022 (v143), "Desktop development with C++" — or, for Linux, GCC/Clang through the top-level CMake build |
+| Toolchain | Visual Studio 2026 (v145), "Desktop development with C++" — or, for Linux, GCC/Clang through the top-level CMake build |
 | Libraries | MFC (shared/DLL) on Windows; the `Platform/` shim stands in for it on Linux |
 | Platforms | Windows `x64` and `Win32`; Linux `x86-64` |
 | Floor | Windows 8.1 (`_WIN32_WINNT=0x0603`) |
 | Language | C++17 (`/std:c++17`) and C17 (`/std:c17`) — on all eight `.vcxproj` configurations **and under CMake**, on both platforms |
 
 **The two build systems compiled this library at different language standards until
-2026-08-22, and nothing guarded the gap.** The authoritative `Msgcore(2022).vcxproj` sets
+2026-08-22, and nothing guarded the gap.** The authoritative `Msgcore(2026).vcxproj` sets
 `stdcpp17` in all eight configurations — deliberately, in `3f7bf5e` on 2026-08-15, because
 "latest" is a moving target across toolset updates and a library that must build the same
 way in five years should not have its language level chosen by whichever Visual Studio the
@@ -134,8 +134,8 @@ Eight configurations, two shapes:
 | Static archive | `DebugLib` / `ReleaseLib` × `Win32` / `x64` | `Msgcore.lib` | `Msgcore_STATIC` |
 
 ```powershell
-$msbuild = "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
-& $msbuild ".\Msgcore(2022).vcxproj" /p:Configuration=Debug /p:Platform=x64
+$msbuild = "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe"
+& $msbuild ".\Msgcore(2026).vcxproj" /p:Configuration=Debug /p:Platform=x64
 ```
 
 Binaries land in `out\<Platform>\<Configuration>\`, intermediates in that directory's
@@ -292,7 +292,7 @@ same include routes to the shim implementations and `mfcshim.h` supplies the `CO
 `CList` / `CMap` / `CString` / `ASSERT` subset the legacy sources expect.
 
 Nothing has to be configured for this. A quoted include resolves relative to `stdafx.h`
-first, so `"Platform/..."` resolves with no `-I`: `Msgcore(2022).vcxproj` carries no
+first, so `"Platform/..."` resolves with no `-I`: `Msgcore(2026).vcxproj` carries no
 `AdditionalIncludeDirectories` at all and needs none. Under CMake, the guarded
 `add_subdirectory(Platform)` in `CMakeLists.txt` defines `p2pplatform` unless the
 surrounding MSCS tree already has.

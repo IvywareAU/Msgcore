@@ -23,7 +23,7 @@ genuine SDK/ATL/MFC header and stops (`p2ptypes.h:34`, `p2psock.h:33`, `p2pexpor
 The legacy `stdafx.h` files **do** route through `platform.h` — that was the Phase-1 wiring
 step and it is done: `Msgcore/stdafx.h:53` (via `MSGCORE_PLATFORM_FROM_PARENT`, see
 *Vendoring*) and `TargetCore/stdafx.h:32`, plus `mfcshim.h` on Linux only. Because
-`platform.h` is pass-through on Windows, that wiring leaves the `(2022).vcxproj` output
+`platform.h` is pass-through on Windows, that wiring leaves the `(2026).vcxproj` output
 unchanged.
 
 ## What is here
@@ -160,7 +160,7 @@ ctest  --preset linux-gcc-debug
 `windows-msvc-debug` / `linux-gcc-debug` also exist as *build* and *test* preset names; the
 configure presets are `windows-msvc` and `linux-gcc-*`. The library targets sit behind
 `MSCS_BUILD_LIBS` (default `OFF` at the root, `ON` in every preset) and now build on **both**
-platforms — CMake+MSVC reached parity in Phase 6. The `(2022).sln`/`.vcxproj` files remain the
+platforms — CMake+MSVC reached parity in Phase 6. The `(2026).sln`/`.vcxproj` files remain the
 shipping Windows build.
 
 **Standalone, from a clone of this repository.** There is no `project()`/preset here, so CMake

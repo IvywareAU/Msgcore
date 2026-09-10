@@ -24,11 +24,11 @@
 #     lives here now, brings its own CMakeLists.txt, and needs no sibling checkout, no
 #     cross-repository token and no layout check.
 #
-# On Windows the (2022).vcxproj remains authoritative: it is the build that is verified
+# On Windows the (2026).vcxproj remains authoritative: it is the build that is verified
 # across all eight configurations, and it is what Readme.md tells you to use. The CMake path
 # is maintained for the Linux port and for parity checking.
 #
-# The TU list mirrors the compiled set in Msgcore(2022).vcxproj.
+# The TU list mirrors the compiled set in Msgcore(2026).vcxproj.
 
 # Only when this is the top-level project. As a subdirectory both calls belong to the parent.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -81,7 +81,7 @@ set(MSGCORE_SOURCES
 # Excluded on Linux: stdafx.cpp (PCH via target_precompile_headers).
 # The §2 orphan TUs this list used to exclude by name are deleted; nothing is out of scope.
 
-# CMake-on-Windows parity: mirror Msgcore(2022).vcxproj, which
+# CMake-on-Windows parity: mirror Msgcore(2026).vcxproj, which
 # builds Msgcore.dll as an MFC extension DLL using the SHARED MFC runtime (UseOfMfc=
 # Dynamic) + Unicode. CMAKE_MFC_FLAG must be set BEFORE add_library() (it is consumed
 # there to inject the MFC include/lib/_AFXDLL wiring). The Windows source set is identical
@@ -103,7 +103,7 @@ if(WIN32)
 endif()
 
 add_library(msgcore SHARED ${MSGCORE_SOURCES})
-# C++17, matching Msgcore(2022).vcxproj, which sets stdcpp17 in all eight
+# C++17, matching Msgcore(2026).vcxproj, which sets stdcpp17 in all eight
 # configurations. That was a deliberate choice (commit 3f7bf5e, 2026-08-15):
 # "latest" is a moving target across toolset updates, and a library that has to
 # build the same way in five years should not have its language level chosen by
@@ -123,7 +123,7 @@ add_library(msgcore SHARED ${MSGCORE_SOURCES})
 #
 # PUBLIC is still correct at 17: it declares the MINIMUM a consumer needs, and
 # targetcore asks for cxx_std_23 and still gets it. The headers already have to
-# be valid under both -- TargetCore(2022).vcxproj is stdcpplatest and includes
+# be valid under both -- TargetCore(2026).vcxproj is stdcpplatest and includes
 # them -- so this is not a new constraint on them.
 target_compile_features(msgcore PUBLIC cxx_std_17)
 set_target_properties(msgcore PROPERTIES
@@ -180,7 +180,7 @@ endif()
 # ---------------------------------------------------------------------------
 # The DebugLib/ReleaseLib shape (MSCS_BUILD_STATIC_LIBS, off by default).
 #
-# Read out of Msgcore(2022).vcxproj rather than guessed: those configurations are
+# Read out of Msgcore(2026).vcxproj rather than guessed: those configurations are
 # ConfigurationType=StaticLibrary with UseOfMfc still Dynamic, and their preprocessor set is
 # WIN32;_WINDOWS;_DEBUG;Msgcore_STATIC;TargetCore_STATIC -- so Msgcore_STATIC REPLACES
 # Msgcore_EXPORTS (there is nothing to export from an archive) and _AFXEXT is absent, because

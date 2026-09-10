@@ -27,7 +27,7 @@
         pwsh tests\fuzz\build_run_fuzz.ps1 -Harness recv_image -Seconds 3600
 
     NOTES: No clang-cl. The plan in item 14 assumed clang-cl was needed for
-           -fsanitize=address,fuzzer, and it is not: VS 2022's own MSVC ships
+           -fsanitize=address,fuzzer, and it is not: VS 2026's own MSVC ships
            both, including clang_rt.fuzzer_MD-x86_64.lib, so `cl /fsanitize=
            address /fsanitize=fuzzer` links a libFuzzer binary with the same
            compiler the rest of the tree uses. That matters more than saving a
@@ -102,9 +102,9 @@ $exe       = "$outDir\fuzz_$Harness.exe"
 if (-not (Test-Path $source)) { Write-Error "no harness source at $source"; exit 1 }
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-if (-not (Test-Path $vswhere)) { Write-Error 'vswhere.exe not found -- install VS 2022 with the C++ workload'; exit 1 }
+if (-not (Test-Path $vswhere)) { Write-Error 'vswhere.exe not found -- install VS 2026 with the C++ workload'; exit 1 }
 $vsdir = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-if (-not $vsdir) { Write-Error 'no VS 2022 C++ toolset found'; exit 1 }
+if (-not $vsdir) { Write-Error 'no VS 2026 C++ toolset found'; exit 1 }
 $vcvars = Join-Path $vsdir 'VC\Auxiliary\Build\vcvars64.bat'
 
 foreach ($d in @($outDir, $workDir, $artifacts, $runDir)) { New-Item -ItemType Directory -Force $d | Out-Null }
@@ -149,7 +149,7 @@ if (-not $SkipBuild -and -not $Repro) {
     $env:CL = '/fsanitize-coverage=inline-8bit-counters /fsanitize-coverage=edge ' +
               '/fsanitize-coverage=trace-cmp /fsanitize-coverage=trace-div'
     try {
-        & $msbuild 'Msgcore(2022).vcxproj' /nologo /m /v:minimal /clp:NoSummary `
+        & $msbuild 'Msgcore(2026).vcxproj' /nologo /m /v:minimal /clp:NoSummary `
             /p:Configuration=ReleaseLib /p:Platform=x64 /p:EnableASAN=true `
             /p:IntDir="$repo\$outDir\obj\" /p:OutDir="$repo\$outDir\"
     }

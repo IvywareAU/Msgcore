@@ -24,9 +24,9 @@ terms and carry their own notices, which must not be removed:
                                        is not Microsoft's.
     stdafx.h                           Visual Studio project template.
     stdafx.cpp                         Visual Studio project template.
-    Msgcore(2022).sln                  Visual Studio solution file.
-    Msgcore(2022).vcxproj              Visual Studio project files.
-    Msgcore(2022).vcxproj.filters
+    Msgcore(2026).sln                  Visual Studio solution file.
+    Msgcore(2026).vcxproj              Visual Studio project files.
+    Msgcore(2026).vcxproj.filters
 
 Msgcore.rc is a mixed file. Its wizard-generated skeleton is Microsoft's, as
 above; the VERSIONINFO block, and the values it reads from Msgcore_version.h,
@@ -35,7 +35,7 @@ are the work of Khrustal & Mann and ARE covered by the Apache License, Version
 
 Two files that earlier revisions listed here are no longer tracked at all, and
 so need no exception: Msgcore.aps (the resource editor's binary cache, now
-ignored - it is regenerated from the .rc) and Msgcore(2022).vcxproj.user (per-
+ignored - it is regenerated from the .rc) and Msgcore(2026).vcxproj.user (per-
 user IDE settings, which .gitignore always intended to exclude).
 
 The COM server (MsgcoreCom) and its files - com/Targetver.h and the

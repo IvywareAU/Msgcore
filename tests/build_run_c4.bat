@@ -131,7 +131,7 @@ REM ---- Diagnostics ----------------------------------------------------------
 :no_vs
 echo.
 echo ERROR: no Visual Studio C++ toolset found.
-echo        Run this from a "x64 Native Tools Command Prompt for VS 2022", or
+echo        Run this from a "x64 Native Tools Command Prompt for VS 2026", or
 echo        install the "Desktop development with C++" workload.
 endlocal & exit /b 1
 
@@ -145,7 +145,7 @@ echo            %REPO%\..\lib\x64\Debug\Msgcore.lib
 echo        and a static archive at
 echo            %REPO%\out\x64\DebugLib\Msgcore.lib
 echo        and found none of them. Build Debug^|x64 (or DebugLib^|x64) first:
-echo            msbuild "Msgcore(2022).vcxproj" /p:Configuration=Debug /p:Platform=x64
+echo            msbuild "Msgcore(2026).vcxproj" /p:Configuration=Debug /p:Platform=x64
 endlocal & exit /b 1
 
 :no_dll

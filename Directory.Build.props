@@ -7,11 +7,11 @@
     which is not part of this repository: a standalone clone got neither the default nor the
     guard in Directory.Build.targets, and link.exe wrote the import library and its .exp to
     the ROOT OF THE CURRENT DRIVE, silently, with the build still green. (Historic evidence
-    from exactly that failure: C:\Msgcore(2022).lib and three siblings, Apr/May 2026, under
+    from exactly that failure: C:\Msgcore(2026).lib and three siblings, Apr/May 2026, under
     the pre-d50f150 artifact names.)
 
     MSBuild imports only the NEAREST Directory.Build.props walking up from the project, so
-    this file shadows the outer one for Msgcore(2022).vcxproj and com\MsgcoreCom(2022).vcxproj.
+    this file shadows the outer one for Msgcore(2026).vcxproj and com\MsgcoreCom(2026).vcxproj.
     That would silently move the staging directory for anyone building inside the MSCS tree,
     where sibling projects (TargetCore, MsgcoreMFC) link against MSCS\lib\... — so if an outer
     Directory.Build.props exists, chain to it and let it win. The standalone defaults below

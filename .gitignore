@@ -18,11 +18,11 @@
 # The old split -- Debug\ and Release\ for Win32, x64\<Config>\ plus a stray
 # Msgcore\<Platform>\<Config>\ for x64 -- is no longer produced.
 out/
-/.vs/Msgcore(2022)/FileContentIndex/7c51bab5-36a2-4afa-bfad-195a1f925948.vsidx
-/.vs/Msgcore(2022)/v17/Browse.VC.db
-/.vs/Msgcore(2022)/v17/Browse.VC.db-shm
-/.vs/Msgcore(2022)/v17/Browse.VC.db-wal
-/.vs/Msgcore(2022)/v17/Browse.VC.opendb
+/.vs/Msgcore(2026)/FileContentIndex/7c51bab5-36a2-4afa-bfad-195a1f925948.vsidx
+/.vs/Msgcore(2026)/v17/Browse.VC.db
+/.vs/Msgcore(2026)/v17/Browse.VC.db-shm
+/.vs/Msgcore(2026)/v17/Browse.VC.db-wal
+/.vs/Msgcore(2026)/v17/Browse.VC.opendb
 /Msgcore(2014).def
 /Msgcore(2014).vcproj
 /Msgcore(2015).vcxproj
