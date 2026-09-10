@@ -309,9 +309,21 @@ P3PmsgCurs::Goto ( LPCTNAM lpszItemName )
     //  compares EQUAL to the sibling that overwrote it, stopping this scan on the
     //  wrong item. Snapshotting in the callee is what makes that unreachable
     //  however Goto is called; see p2p_wkey (Platform/p2pstr.h).
-    const P3PmsgName oItemName(lpszItemName);
-    LPCWSTR lpszStackName = oItemName.c_name();
-    //const p2p_wkey oItemName ( lpszItemName );
+    //      : A P3PmsgName COPY IS NOT A SNAPSHOT, which is what stood here and is
+    //        why three suites failed. It copies the name out of the caller's
+    //        storage, but c_name() hands back a RING SLOT (P2Pmsg.cpp:1131 ->
+    //        p2p_wstr_from_store), so the key lands back inside the very ring the
+    //        snapshot exists to escape -- and it does so even for a key that
+    //        arrived SAFE, e.g. the literal every Exists() passes. That made the
+    //        wrong answer reachable without a careless caller: any container past
+    //        the ring's 16 slots. Measured: 24 siblings, Goto returns true on the
+    //        wrong item, and DeclareItem's `if (!Goto(name))` then drops the
+    //        append with bUpdate FALSE -- a silent short write.
+    //      : NULL is normalised here rather than passed through, because
+    //        c_wcsicmp() feeds it straight to _wcsicmp (P2Pmsg.cpp:2223). The
+    //        P3PmsgName route tolerated a null key by yielding L""; keep that.
+    const p2p_wkey oItemName ( lpszItemName ? lpszItemName : L"" );
+    LPCWSTR lpszStackName = oItemName;
     if ( m_pP3PmsgFoN                                         &&
          m_pP3PmsgFoN->r_name().c_wcsicmp(lpszStackName) == 0    )
       return true;

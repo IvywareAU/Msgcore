@@ -372,21 +372,23 @@ P3Pmsg_FindChildWithAttr ( const P3PmsgItem& oItem
     //  recycled slot compares EQUAL to whatever overwrote it. Snapshotting here
     //  covers the recursion too: the grandchild pass below hands these on, so
     //  one copy at the top protects the whole subtree walk.
-    const P3PmsgName oAttrName (lpszAttributeName);
-    LPCWSTR lpszAttr = oAttrName.c_name();
-    //const p2p_wkey oAttrKey  ( lpszAttributeName );
-    const P3PmsgName oChildName (lpszChildname);
-    //  NULL-NESS IS LOAD-BEARING and does not survive P3PmsgName. The normalisation
-    //  above collapses an empty name to nullptr, and both name tests below read that
-    //  nullptr as "no name supplied, match every sibling". c_name() never returns
-    //  null -- for a null-constructed name it hands back L"" -- so taking it
-    //  unconditionally turned every no-name search into a wildcard match against the
-    //  EMPTY STRING, which matches nothing: P3Pmsg_FindChildWithAttr(oItem,attr) then
-    //  returned void for a tree that does carry the attribute.
-    LPCWSTR lpszChild = lpszChildname ? oChildName.c_name() : nullptr;
-    //const p2p_wkey oChildKey ( lpszChildname );
-    //LPCTNAM        lpszAttr  = oAttrKey;
-    //LPCTNAM        lpszChild = oChildKey;
+    //      : A P3PmsgName COPY IS NOT A SNAPSHOT. It copies the name out of the
+    //        caller's storage, but c_name() returns a RING SLOT (P2Pmsg.cpp:1131),
+    //        so the key goes straight back into the ring the copy exists to escape
+    //        -- and the first loop below spends a slot per sibling. p2p_wkey copies
+    //        into its own inline buffer instead, which is the whole point of it.
+    //  NULL-NESS IS LOAD-BEARING: the normalisation above collapses an empty name to
+    //  nullptr, and both name tests below read that nullptr as "no name supplied,
+    //  match every sibling". P3PmsgName does not preserve it -- c_name() hands back
+    //  L"" for a null-constructed name, so taking it unconditionally turned every
+    //  no-name search into a wildcard match against the EMPTY STRING, which matches
+    //  nothing: P3Pmsg_FindChildWithAttr(oItem,attr) then returned void for a tree
+    //  that does carry the attribute. p2p_wkey passes a null key through untouched
+    //  (Platform/p2pstr.h), so the snapshot and the null-ness cost one line each.
+    const p2p_wkey oAttrKey  ( lpszAttributeName );
+    const p2p_wkey oChildKey ( lpszChildname );
+    LPCTNAM        lpszAttr  = oAttrKey;
+    LPCTNAM        lpszChild = oChildKey;
     //  NAME TEST SENSE.  c_wcsicmpWC() is a PREDICATE, not a comparison:
     //  it returns MsgcoreWildcard(pattern,name) (P2Pmsg.cpp:2099-2103), so
     //  NON-ZERO means the name MATCHES. The `cmp` in the spelling reads like
