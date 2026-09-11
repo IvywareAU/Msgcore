@@ -4301,11 +4301,13 @@ P3PmsgField::IsInline ( ) const
 //         false promises nothing; a holder subtracted that was never mine would
 //         report TRUE with a stranger looking, and true is a guarantee. So only
 //         the two sub-objects this class owns outright are counted, and each
-//         only when its heap is this heap. What is NOT subtracted, and stays a
-//         FALSE this cannot lift: the MsgStck a pushed field keeps -- its stack
-//         fields are protected and there is no accessor to reach them -- and
-//         any cursor a collection's Desc or Attr is holding, for the same
-//         reason. Both are measured and pinned by a case.
+//         only when its heap is this heap. What is NOT subtracted, because it
+//         cannot be reached from here: a cursor, which lives inside the Desc or
+//         Attr that made it, and whatever an MsgStck is holding, whose stack
+//         fields are protected with no accessor. The cursor costs a FALSE
+//         today and is pinned by a case. The MsgStck does not -- measured, a
+//         push adds no holder of this heap at all -- but it is unreachable
+//         either way, so it could never be subtracted even if it did.
 bool
 P3PmsgField::IsSole ( ) const
 {
