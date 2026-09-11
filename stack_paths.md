@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §20 say how to
+> every line of output below was run against this tree; §6, §7 and §21 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -70,6 +70,9 @@ followed nowhere:
 | `P3Pmsg_SelectObject`, the leading component | asserted the object's own name at any depth | **`.Last` asked `BHP` whether it is called `Last` (§18)** |
 | `P3Pmsg_SelectObject`, a match with nothing after it | recursed with an empty path | **`P3Pmsg_GetPath(&mgr)` is `.Store`, and `.Store` at the root answered void (§18)** |
 | `P3Pmsg_SelectObject`, the collection arms | the same discarded match | `Tag` answered where `.Tag` did not, on both collections (§18) |
+| `P3PmsgObject`'s copy constructor | `memcpy`'d an inline block into the copy | **a handle on a floating item was a DUPLICATE of it (§19)** |
+| `P3PmsgObject::Connect` | created the heap and placed nothing on it | **a handle addressed the source's own storage, and dangled (§19)** |
+| `P3PmsgObject::Connect`, the `ASSERT` under it | a condition the guard above excluded | every path that reached that arm asserted (§19) |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
@@ -80,7 +83,8 @@ the library itself writes, §11), `d31f2c4` (the collection's own path, §12) an
 `8218904` (stepping off a container, §13), `5d48e5a` (a bare `@` anywhere, §14) and
 `2a03161` (the descendant collection, and the rule stated once, §15) and `0888659`
 (one arm per block kind, §16) and `c0409cb` (a bare `.` wherever it stands, §17) and `2de26ac`
-(the root marker only where a path is rooted, §18).
+(the root marker only where a path is rooted, §18) and `48ff002` (a floating item is one
+object, §19).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -1337,21 +1341,94 @@ matching `BHP`'s own name and then descending. That is the assertion reaching wh
 is rooted. It has no caller in this tree and none in Chartboard, and the same object is
 `Last`, `.Last` or `..Last` from there — but it did work, and now it does not.
 
-## 19. What is left
+## 19. A floating item was its own storage
 
-- **A floating item's `P2Pos` is not an identity.** Asked twice of the same object it is
-  stable, but every COPY of a floating `P3PmsgField` carries a different SYS-heap address,
-  so `P3Pmsg_SelectObject(&oFloat, L".Floater")` answers the right object under a different
-  number. An item in a tree does not do this — `BHP` is pos 259 through every copy. It is
-  not a path question and nothing above depends on it; it is recorded because §18's
-  measurement is where it showed up, and because a test that identifies a floating object
-  by `P2Pos` would be testing the allocator.
+§18 took `P3Pmsg_GetPath`'s opening comment at its word about both of the things a path
+can be rooted at. The second is a **floating item** — one never linked into a tree — and
+asking one for its own identity gave a different answer every time:
+
+```
+  oFloat=79034294752  copy=79034285552  copy=79034286304  copy-of-copy=79034287056
+```
+
+Not a SYS-heap address, as §19 first recorded it. **The block is inside the object.**
+`P3PmsgField::RenderThisSafe` builds a floating item's `VBLock` in
+`P3PmsgObject::m_oVBLock` — an array declared in the class — and `Connecta`s it with no
+heap at all. So the object is not a handle on the item; it **is** the item, and a copy of
+the object is a second item.
+
+The number was the symptom, and it understated what it meant:
+
+| asked of a floating item | was | now |
+|---|---|---|
+| `GetP2Pos` through any handle | a different number per handle | one number |
+| a write through a handle | went to that handle's own copy | reaches the item |
+| `SelectObject(&o, GetPath(&o))` | a duplicate of it | it |
+| a handle outliving the object | read the dead object's storage | reads the block |
+
+Two paths copy a `P3PmsgObject`, and they did different things with an inline block. The
+copy constructor `memcpy`s it into the copy's own array — a duplicate, which is where the
+four numbers above come from. `Connect`, which `operator=` delegates to, says in its own
+comment what it wanted instead:
+
+```cpp
+    // Cannot share heap that does not exist
+    // NOTES: Create heap and place data on heap
+```
+
+It created the heap and placed nothing on it, leaving `m_aVBLock` addressing the
+**source's** array and copying that pointer as though it were an address on the new heap.
+A SYS heap resolves an address by returning it — `P2PmsgHeap_Addr2Phys` is the identity
+for that type — so the result read correctly and dangled the moment the source went out
+of scope. Under it stood `ASSERT(oObject.m_nVBLockSize==0)`, marked *"It's a bug should
+this occur"* with a `TODO: Code around this issue`, on a condition the guard above had
+already excluded: every path that reached that arm asserted.
+
+`RehomeInlineItem` is the "place data on heap" half. The block moves onto a SYS heap of
+its own the first time it is shared — from the copy constructor and from `Connect` — and
+both handles then name it the way they already name an item in a tree.
+
+**Only an item.** A standalone block that is not one is a **value**: `P3PmsgData` and
+`P3PmsgName` use the same inline storage through `ConnectVBLock`, and duplicating one is
+what copying a value means. The discriminator is the block header, which every block has,
+for the reason §16 gives. `Connect` now duplicates a value block rather than creating a
+heap for it, so the two copy paths agree — which is the principle the copy constructor's
+own NOTES had already established for the void case.
+
+**Nothing points at the block yet.** A collection or a push is allocated through
+`AllocVBLock`, which creates the heap when there is none. So an item with no heap has no
+attributes, no descendants and no stack, and no back-pointer needs fixing up when it
+moves; the `m_hVBList` test at the top of the rehome is that invariant, not an
+optimisation. A floating item that already HAS a heap was one object under copy before any
+of this, which is how §19 could report the number stable when asked twice and unstable
+across copies in the same breath.
+
+**It costs nothing.** 20000 insertions of a floating temporary, three runs each side:
+
+```
+  before   125 / 141 / 140 ms
+  after    125 / 140 / 125 ms
+```
+
+Nothing on the insertion path takes a `P3PmsgObject` by value, so nothing rehomes. The
+move is lazy by construction — an item that is never shared never leaves its object.
+
+## 20. What is left
+
+- **`P3PmsgField` copies as a value; `P3PmsgObject` now copies as a handle.**
+  `P3PmsgField oB = oA` runs `RenderThisSafe` and then a member-wise deep copy — name,
+  data, attributes, descendants — so it is a second item, and always was.
+  `P3PmsgObject oB = oA.r_Object()` is a handle on the first. Both are defensible and both
+  are now internally consistent, but they are one keystroke apart at the call site and
+  nothing there says which you asked for. Changing either would change what a copy means
+  for every caller in this tree and in Chartboard, which is a larger question than any of
+  the sections above asked.
 
 Nothing else from this investigation is outstanding. That is not a claim that the grammar
-is without defect — only that every case these eighteen sections measured has an answer,
+is without defect — only that every case these nineteen sections measured has an answer,
 and that the answer is pinned by a test.
 
-## 20. Reproducing this document
+## 21. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
