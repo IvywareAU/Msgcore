@@ -4063,6 +4063,177 @@ static void Test_SafePtr_CopySemantics()
 }
 
 // ---------------------------------------------------------------------------
+// P2PSafePtr : what the two conversions were answering
+// ---------------------------------------------------------------------------
+// The template declared operator SafePtrType*() and operator bool() together
+// and no comparison of its own, which is the shape §21 took off the six Msgcore
+// objects: `int n = sp` compiled and `sp == sp` did not (C2593, the two
+// conversions equally good ways to reach a built-in ==).
+//
+// The conversions are not symmetrical in worth and were not treated so. The
+// POINTER one is the idiom the library is written in -- deleting it named eight
+// call sites that hand a safe pointer straight to a function taking a raw one
+// -- so it stays implicit. The BOOL one is used by nothing: deleting it gave 0
+// errors over nine solutions in both configurations, so it is explicit now.
+//
+// The cases below are behavioural rather than about what compiles, because what
+// compiles is measured by compiling it. They pin the two lifetime defects the
+// conversions were hiding.
+// ---------------------------------------------------------------------------
+namespace
+{
+    //  Returns BY VALUE on purpose: the assignment under test is from a
+    //  temporary, which is the one a non-const operator= could not bind.
+    static P2PSafePtr<SafePtrProbe> MakeSafePtrProbe ( int n )
+    {
+        return P2PSafePtr<SafePtrProbe> ( new SafePtrProbe ( n ) );
+    }
+}
+
+static void Test_SafePtr_Conversions()
+{
+    //  THE ARM THAT WAS BEING TAKEN. operator = ( P2PSafePtr& ) could not bind
+    //  a temporary, so this fell through to operator = ( SafePtrType* ) by way
+    //  of the implicit pointer conversion -- an arm that stamps a fresh count
+    //  of one and knows nothing of the count the temporary still holds. The
+    //  temporary then freed the payload and left the assignee addressing it.
+    TF_CASE("assigning from a temporary shares it instead of seizing it")
+    {
+        SafePtrProbe::nLive = 0;
+        {
+            P2PSafePtr<SafePtrProbe> oPtr;
+            oPtr = MakeSafePtrProbe ( 1234 );
+
+            //  The temporary has been destroyed by now. Before the fix so had
+            //  the payload, and this read was of freed storage.
+            TF_CHECK_EQ(SafePtrProbe::nLive, 1);
+            TF_CHECK_EQ(oPtr->nValue, 1234);
+        }
+        TF_CHECK_EQ(SafePtrProbe::nLive, 0);        // freed exactly once
+    }
+
+    //  And a const source reaches the same arm, which it could not before:
+    //  C2679, there being no overload taking one.
+    TF_CASE("assigning from a const safe pointer shares it too")
+    {
+        SafePtrProbe::nLive = 0;
+        {
+            P2PSafePtr<SafePtrProbe>        oSrc ( new SafePtrProbe ( 55 ) );
+            const P2PSafePtr<SafePtrProbe>& roSrc = oSrc;
+            P2PSafePtr<SafePtrProbe>        oDst;
+            oDst = roSrc;
+
+            TF_CHECK_EQ(SafePtrProbe::nLive, 1);    // one payload, two holders
+            TF_CHECK_EQ(oDst->nValue, 55);
+            TF_CHECK(oDst == oSrc);
+        }
+        TF_CHECK_EQ(SafePtrProbe::nLive, 0);
+    }
+
+    //  AN EMPTY SOURCE HAS NOTHING TO SHARE. Neither copy path asked, so
+    //  SwapRef2Shared() moved a count of zero to the heap and the copy
+    //  constructor raised it to one for a pointee that does not exist: the
+    //  copy asserted and freed the count on the way out, and the source then
+    //  read the freed int.
+    TF_CASE("copying an empty safe pointer leaves both of them empty")
+    {
+        P2PSafePtr<SafePtrProbe> oSrc;
+        {
+            P2PSafePtr<SafePtrProbe> oCopy ( oSrc );
+            TF_CHECK(oCopy.IsEmpty());
+            TF_CHECK(oSrc.IsEmpty());
+            TF_CHECK(oCopy == oSrc);
+        }
+        TF_CHECK(oSrc.IsEmpty());                   // and the source survived it
+    }
+
+    TF_CASE("assigning from an empty safe pointer empties the target")
+    {
+        SafePtrProbe::nLive = 0;
+        {
+            P2PSafePtr<SafePtrProbe> oEmpty;
+            P2PSafePtr<SafePtrProbe> oHeld ( new SafePtrProbe ( 9 ) );
+            TF_CHECK_EQ(SafePtrProbe::nLive, 1);
+            oHeld = oEmpty;                         // ... which lets the payload go
+            TF_CHECK_EQ(SafePtrProbe::nLive, 0);
+            TF_CHECK(oHeld.IsEmpty());
+        }
+        TF_CHECK_EQ(SafePtrProbe::nLive, 0);
+    }
+
+    //  THE COMPARISON THE CLASS WAS FOR, which did not compile at all. It is
+    //  identity of the POINTEE: two safe pointers over one payload are equal
+    //  however separately they came by it, and two payloads are never equal
+    //  however identically they read.
+    TF_CASE("two safe pointers are equal when they point at one thing")
+    {
+        P2PSafePtr<SafePtrProbe> oOne  ( new SafePtrProbe ( 6 ) );
+        P2PSafePtr<SafePtrProbe> oSame ( oOne );
+        P2PSafePtr<SafePtrProbe> oTwo  ( new SafePtrProbe ( 6 ) );
+
+        TF_CHECK(oOne == oSame);                    // one payload, two holders
+        TF_CHECK(!(oOne != oSame));
+        TF_CHECK(oOne != oTwo);                     // two payloads, same reading
+        TF_CHECK(!(oOne == oTwo));
+        TF_CHECK_EQ(oOne->nValue, oTwo->nValue);    // ... which is the point
+    }
+
+    //  The raw-pointer arm exists so that this question does not go through the
+    //  implicit CONSTRUCTOR, which would wrap pRaw in a temporary safe pointer
+    //  and delete it when the comparison ended.
+    TF_CASE("a safe pointer compares against the raw pointer it holds")
+    {
+        SafePtrProbe::nLive = 0;
+        {
+            SafePtrProbe            *pRaw = new SafePtrProbe ( 8 );
+            P2PSafePtr<SafePtrProbe> oPtr ( pRaw );
+            P2PSafePtr<SafePtrProbe> oOther ( new SafePtrProbe ( 8 ) );
+
+            TF_CHECK(oPtr == pRaw);
+            TF_CHECK(oOther != pRaw);
+            TF_CHECK_EQ(SafePtrProbe::nLive, 2);    // and nothing was freed by asking
+        }
+        TF_CHECK_EQ(SafePtrProbe::nLive, 0);
+    }
+
+    //  An empty one is empty, and says so both ways round.
+    TF_CASE("an empty safe pointer equals nullptr and is not equal to a payload")
+    {
+        P2PSafePtr<SafePtrProbe> oEmpty;
+        P2PSafePtr<SafePtrProbe> oHeld ( new SafePtrProbe ( 2 ) );
+
+        TF_CHECK(oEmpty == (SafePtrProbe *)NULL);
+        TF_CHECK(oHeld  != (SafePtrProbe *)NULL);
+        TF_CHECK(oEmpty != oHeld);
+        TF_CHECK(oEmpty.IsEmpty());
+        TF_CHECK(!oHeld.IsEmpty());
+    }
+
+    //  CONTEXTUAL CONVERSIONS SURVIVE EXPLICIT, which is the whole reason for
+    //  spelling it explicit rather than deleting it. A const one answers too,
+    //  which it could not before.
+    TF_CASE("a safe pointer still tests as a condition, const or not")
+    {
+        P2PSafePtr<SafePtrProbe>        oHeld ( new SafePtrProbe ( 5 ) );
+        const P2PSafePtr<SafePtrProbe>& roHeld = oHeld;
+        P2PSafePtr<SafePtrProbe>        oEmpty;
+
+        TF_CHECK(oHeld  ? true : false);
+        TF_CHECK(roHeld ? true : false);            // C2451 before
+        TF_CHECK(!oEmpty);
+        TF_CHECK(static_cast<bool>(oHeld));
+        TF_CHECK(oHeld && roHeld);
+
+        //  ... and reading through a const one, which is the rest of it
+        TF_CHECK_EQ(roHeld->nValue, 5);
+        TF_CHECK_EQ((*roHeld).nValue, 5);           // C2678 before
+        TF_CHECK(!roHeld.IsEmpty());                // C2662 before
+        SafePtrProbe *pRaw = roHeld;                // C2440 before
+        TF_CHECK_EQ(pRaw->nValue, 5);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3PmsgTime and the scalar tags the sizeof ladder used to omit
 // ---------------------------------------------------------------------------
 static void Test_Time()
@@ -5022,6 +5193,7 @@ void RunMsgcoreSuite()
     Test_Data_TypedValues();
     Test_Data_CopySemantics();
     Test_SafePtr_CopySemantics();
+    Test_SafePtr_Conversions();
     Test_Time();
     Test_HeapWidths();
     Test_Field_NameAndData();
