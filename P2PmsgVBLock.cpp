@@ -1464,11 +1464,40 @@ VBLockData_Sizeof_uv ( UCHAR uVBlock, VBLockDataType uDataType, VBLsize nSizeBlo
     ASSERT(0);
     return 0;
 }
+//  Bytes of the union this block is actually using
+//  NOTES: THE CHAINED FORM IS A FORM, and until §29 this did not know it. A
+//         chained block holds an ADDRESS in the union and nothing else -- its
+//         type byte is 0xFF, no arm below claims 0xFF, and the fall-through at
+//         the bottom of the function is ASSERT(0). Nothing had ever reached it,
+//         because while a chain is ONE link long the only block anyone sizes is
+//         the payload at the end of it, and that one carries a real type.
+//       : P3PmsgData::VerifyContainment sizes EVERY link, so a chain of three
+//         asserts twice -- once per block in the middle -- and a Debug build
+//         halts there. Measured on a hand-built three-link chain, which is the
+//         state an image can deliver and no in-process path can build.
+//       : IT CHANGES NO COMPUTED SIZE, and that is worth saying plainly rather
+//         than claiming a fix that is larger than it is. VBLockData_Sizeof
+//         floors its result at VBLockData_Sizeof_Min -- the header plus exactly
+//         this address -- so the number it handed back for a chained block was
+//         already right. What was wrong was getting there through an assertion
+//         and a zero. The refusal below still stands for a type byte that
+//         names nothing at all, which is what it was for.
 VBLsize
 VBLockData_Sizeof_uv ( UCHAR uVBlock, const VBLockData *pData )
 {   
     const VBLockDataType nDataType = pData -> uDataType;
     //VBLockData  oData;
+    if ( VBLockData_IsChained ( pData ) )
+    {
+      if ( uVBlock == VBLock_Addr16 )
+        return sizeof(soData.u.aChain2Next16);
+      if ( uVBlock == VBLock_Addr32 )
+        return sizeof(soData.u.aChain2Next32);
+      if ( uVBlock == VBLock_Addr64 )
+        return sizeof(soData.u.aChain2Next64);
+      ASSERT(0);                       // An addressing width nothing resolves
+      return 0;
+    }
     if ( nDataType == VBLockData_NULL )
       return 0;
     if ( nDataType <  VBLockData_BSTR08 )

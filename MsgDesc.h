@@ -141,6 +141,11 @@ class Msgcore_EXT P3PmsgDesc
       const P3PmsgObject&
         r_Object ( ) const noexcept;
 
+      //  How many references on hVBList this collection and the cursor it owns
+      //  are holding.  Refer P3PmsgField::HeapHolders.
+      int
+        HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept;
+
     // Memory management
     public:
       virtual void

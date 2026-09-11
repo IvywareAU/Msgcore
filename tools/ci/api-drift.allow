@@ -198,3 +198,20 @@ cxx-to-c  P3PmsgVect::r_list    # UNTRIAGED (method, MsgVect.h:130)
 cxx-to-c  P3PmsgVect::r_name    # UNTRIAGED (method, MsgVect.h:124)
 cxx-to-c  P3PmsgVect::r_vect    # UNTRIAGED (method, MsgVect.h:132)
 cxx-to-c  P3PmsgVect::VerifyContainment    # UNTRIAGED (method, MsgVect.h:113)
+
+# ---------------------------------------------------------------------------------
+#  TRIAGED -- decided, with the reason the header asks for.
+# ---------------------------------------------------------------------------------
+#  HeapHolders is the WORKING of IsSole, not a second answer. IsSole asks "can a
+#  write through this be seen anywhere but here", and answers it by comparing the
+#  heap's reference count against the references this object and the sub-objects it
+#  owns are holding; HeapHolders is that second number. A caller on the flat surface
+#  wants the answer and has it -- IsSole is the question the C API would carry -- and
+#  the count on its own is only meaningful next to P2PmsgHeap_RefCount, which the flat
+#  surface does not expose either. It also takes a P2PmsgHANDLE, which is not a type
+#  the flat surface has. Refer stack_paths.md section 29.
+cxx-to-c  P3PmsgField::HeapHolders    # the working of IsSole, and takes a P2PmsgHANDLE
+cxx-to-c  P3PmsgDesc::HeapHolders    # as P3PmsgField::HeapHolders, one level in
+cxx-to-c  P3PmsgAttr::HeapHolders    # as P3PmsgField::HeapHolders, one level in
+cxx-to-c  P3PmsgCurs::HeapHolders    # as P3PmsgField::HeapHolders; P3PmsgCurs has no flat surface at all
+cxx-to-c  MsgStck::HeapHolders    # as P3PmsgField::HeapHolders, one level in

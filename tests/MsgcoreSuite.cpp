@@ -3310,12 +3310,13 @@ static void Test_SoleStorage()
         TF_CHECK_EQ(oF.r_data().c_int(), 77);
     }
 
-    //  WHAT IS STILL OPEN, and it is one thing rather than any sub-object. A
-    //  cursor lives inside the collection that made it and there is no accessor
-    //  to reach it from here, so it is not subtracted -- and not subtracting
-    //  leaves the answer FALSE, which promises nothing. Undercounting is the
-    //  safe direction; this pins which way the remaining gap falls.
-    TF_CASE("a cursor on its own descendants still leaves the question open")
+    //  THE ROW §26 LEFT OPEN, ANSWERED. A cursor lives one level further in
+    //  than the sub-objects §26 subtracted, and a cursor holds the heap, so a
+    //  collection that had been WALKED went back to answering false. It is
+    //  still not handed out -- a cursor is stateful and shared, and a const
+    //  question that repositioned one would be its own wrong answer. The
+    //  collection is asked what it is holding instead. §29.
+    TF_CASE("a cursor on its own descendants does not stop it being sole")
     {
         P3PmsgField oF(L"HHH");
         GrowPastInline(oF, 10);
@@ -3325,11 +3326,368 @@ static void Test_SoleStorage()
         TF_CHECK(oF.IsSole());
 
         oF.r_Desc().r_Curs();
-        TF_CHECK(!oF.IsSole());            // open, not wrong
+        TF_CHECK(oF.IsSole());             // a third holder, and it is MINE
 
         TF_CHECK_EQ(oF.r_data().c_int(), 10);
         TF_CHECK_EQ((int)oF.r_Desc().GetCount(), 2);
     }
+
+    //  ONE CURSOR CAN HOLD THE HEAP TWICE, which is why the subtraction is a
+    //  COUNT and not one-per-cursor. Goto connects whichever of its three
+    //  by-value members matches the item it landed on and leaves the other two
+    //  as they were, so walking past a list and then a field leaves two of them
+    //  connected at once. Counting per cursor would have undercounted here --
+    //  safe, but only by luck.
+    TF_CASE("a cursor that has walked two kinds of item holds it twice")
+    {
+        P3PmsgField oF(L"III");
+        GrowPastInline(oF, 11);
+        oF.r_Desc(P3PmsgField::AttrCMD_Create) += P3PmsgList(L"aList");
+        oF.r_Desc() += P3PmsgField(L"aField", P3PmsgData((int)2));
+        TF_CHECK(oF.IsSole());
+
+        oF.r_Desc().r_Curs().Goto(0);      // the list
+        TF_CHECK(oF.IsSole());
+        oF.r_Desc().r_Curs().Goto(1);      // ... and now the field, as well
+        TF_CHECK(oF.IsSole());
+
+        TF_CHECK_EQ(oF.r_data().c_int(), 11);
+        TF_CHECK_EQ((int)oF.r_Desc().GetCount(), 2);
+    }
+
+    TF_CASE("an attribute collection's cursor counts the same way")
+    {
+        P3PmsgField oF(L"JJJ");
+        GrowPastInline(oF, 12);
+        oF.r_Attr(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"tag", P3PmsgData((int)1));
+        oF.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"kid", P3PmsgData((int)1));
+        oF.r_Attr().r_Curs();
+        oF.r_Desc().r_Curs();
+        TF_CHECK(oF.IsSole());             // four of mine, and still mine alone
+        TF_CHECK_EQ(oF.r_data().c_int(), 12);
+    }
+
+    //  §26 RECORDED THE MsgStck AS UNREACHABLE and measured a push as adding no
+    //  holder at all. Both readings were right and neither was the whole of it:
+    //  READING the snapshot makes a field on this heap, and the same walk that
+    //  reaches a cursor reaches that too.
+    TF_CASE("a stacked snapshot that has been read does not stop it either")
+    {
+        P3PmsgField oF(L"KKK");
+        GrowPastInline(oF, 13);
+        TF_CHECK(oF.IsSole());
+
+        oF.r_Stck().Push();
+        TF_CHECK(oF.IsSole());             // a push alone holds nothing
+
+        oF.r_Stck().r_item();              // ... and reading it holds one
+        TF_CHECK(oF.IsSole());
+        TF_CHECK_EQ(oF.r_data().c_int(), 13);
+    }
+
+    //  AND STILL NOT A STRANGER'S. Subtracting one holder too many would report
+    //  that nobody is looking while somebody is, so every arm of the walk is
+    //  checked against a partner that can see the write.
+    TF_CASE("a shared floater whose descendants were walked is still not sole")
+    {
+        P3PmsgField oF(L"LLL");
+        GrowPastInline(oF, 14);
+        oF.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"kid", P3PmsgData((int)1));
+        oF.r_Desc().r_Curs();
+        TF_CHECK(oF.IsSole());
+
+        P3PmsgField oShare = oF.r_Object();
+        TF_CHECK(!oF.IsSole());            // a stranger, not one of mine
+        oShare.r_data().c_int(66);
+        TF_CHECK_EQ(oF.r_data().c_int(), 66);
+    }
+
+    TF_CASE("and a cursor held by the STRANGER is still the stranger's")
+    {
+        P3PmsgField oF(L"MMM");
+        GrowPastInline(oF, 15);
+        oF.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"kid", P3PmsgData((int)1));
+
+        P3PmsgField oShare = oF.r_Object();
+        oShare.r_Desc().r_Curs();          // the partner's cursor, not mine
+        TF_CHECK(!oF.IsSole());
+        oShare.r_data().c_int(55);
+        TF_CHECK_EQ(oF.r_data().c_int(), 55);
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// P3PmsgObject : a chain longer than one link
+// ---------------------------------------------------------------------------
+// §27 measured every in-process path as producing exactly ONE link, and that
+// measurement stands: P2PmsgObject_NewVBLockData and P3PmsgName_ResizeName both
+// REPLACE the chained block rather than appending to it, and a payload past
+// 65535 bytes is refused rather than split. The walks in PrivatiseInlineChain,
+// ReleaseInlineChain, NewVBLockData and every reader loop anyway, because an
+// image can carry a longer chain -- and until §29 not one of them had ever been
+// put to one.
+//
+// THE IMAGE IS THE ARENA. P2PmsgMgr::Save writes the heap whole with a single
+// WriteFile and Load reads it back whole; a chain pointer is a plain offset into
+// it, relocated by nothing and validated for length by nothing. So the state an
+// image delivers is exactly the state built below with the heap's own
+// allocator, and the last case saves and reloads one to show the round trip
+// carries it.
+//
+// STATIC LINK ONLY, for the reason Test_ValueCopiesItsPayload gives: block
+// navigation and the heap allocator are declared in the library's headers but
+// not marked Msgcore_EXT. §29.
+// ---------------------------------------------------------------------------
+#ifdef Msgcore_STATIC
+
+//  Blocks the value's chain runs through, from the head. 0 = nothing chained.
+static int ChainLen29(const P3PmsgObject& oObject)
+{
+    VBLockData *pData = P2PmsgObject_pData(oObject, false);
+    int         nLen  = 0;
+    while (VBLockData_IsChained(pData))
+    {
+        const VBLaddr aNext = VBLockData_GetChain2Next(oObject.m_uVBLock, pData);
+        pData = VBLock_pData((VBLock *)oObject.Msg2Phys(aNext));
+        nLen++;
+    }
+    return nLen;
+}
+
+static VBLaddr ChainTail29(const P3PmsgObject& oObject)
+{
+    VBLockData *pData = P2PmsgObject_pData(oObject, false);
+    VBLaddr     aTail = 0;
+    while (VBLockData_IsChained(pData))
+    {
+        aTail = VBLockData_GetChain2Next(oObject.m_uVBLock, pData);
+        pData = VBLock_pData((VBLock *)oObject.Msg2Phys(aTail));
+    }
+    return aTail;
+}
+
+//  Appends one link, exactly as an image would carry one: duplicate the block
+//  holding the payload, then make the old one a pure link to the duplicate.
+//  P2PmsgObject_CopyHeapVBLock's arithmetic -- ask Alloc for the declared size
+//  LESS the header, because Alloc adds the header back.
+static bool Lengthen29(P3PmsgObject& oObject)
+{
+    const VBLaddr aTail = ChainTail29(oObject);
+    if (aTail == 0)
+        return false;
+
+    const P2PmsgHANDLE hVBList = oObject.m_hVBList;
+    VBLock       *pTail = (VBLock *)oObject.Msg2Phys(aTail);
+    const VBLsize nSize = VBLock_Hdr_u_SizeNN(pTail);
+    const UCHAR   uType = pTail->oHdr.uVBLockDefs & VBLock_TypeMask;
+    const VBLsize nHdr  = P2PmsgHeap_Sizeof_Hdr(hVBList);
+
+    const VBLaddr aNew  = P2PmsgHeap_Alloc(hVBList, uType, nSize - nHdr);
+    memcpy(P2PmsgHeap_Addr2Phys(hVBList, aNew),
+           P2PmsgHeap_Addr2Phys(hVBList, aTail), nSize);
+
+    pTail = (VBLock *)oObject.Msg2Phys(aTail);   // Alloc invalidates pointers
+    VBLockData_SetChain2Next(oObject.m_uVBLock, VBLock_pData(pTail), aNew);
+    return true;
+}
+
+#endif // Msgcore_STATIC
+
+static void Test_ChainLongerThanOne()
+{
+#ifdef Msgcore_STATIC
+    TF_CASE("a value chains one link, and a second can be appended to it")
+    {
+        CString sBig(L'x', 1024);
+        sBig.SetAt(0, L'A');
+        P3PmsgData    oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgObject& oObj = const_cast<P3PmsgObject&>(*oSrc.p_Object());
+
+        TF_CHECK_EQ(ChainLen29(oObj), 1);  // what every in-process path gives
+        TF_CHECK(Lengthen29(oObj));
+        TF_CHECK_EQ(ChainLen29(oObj), 2);
+        TF_CHECK(Lengthen29(oObj));
+        TF_CHECK_EQ(ChainLen29(oObj), 3);
+
+        //  The readers walk to the end, and the end is where it always was.
+        TF_CHECK(oSrc.c_wstr()[0] == L'A');
+        TF_CHECK_EQ((int)oSrc.c_size(), 2048);
+    }
+
+    //  THE ONE THING A LONGER CHAIN BROKE. VerifyContainment sizes every link
+    //  it steps to, and VBLockData_Sizeof_uv had no arm for the chained type
+    //  byte -- it fell through all of them to ASSERT(0). A one-link chain never
+    //  reached it, because the only block anyone sizes is the payload at the
+    //  end. The assert trap in TestFramework folds an ASSERT into a failure of
+    //  the case, so this case IS the check. §29.
+    TF_CASE("every link of a long chain can be sized and contained")
+    {
+        CString sBig(L'x', 1024);
+        P3PmsgData    oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgObject& oObj = const_cast<P3PmsgObject&>(*oSrc.p_Object());
+        Lengthen29(oObj);
+        Lengthen29(oObj);
+        TF_CHECK_EQ(ChainLen29(oObj), 3);
+
+        TF_CHECK(oSrc.VerifyContainment() ? true : false);
+        oSrc.AssertValid();                // reaches VerifyContainment again
+        TF_CHECK_EQ((int)oSrc.c_size(), 2048);
+    }
+
+    //  PrivatiseInlineChain, put to three links. §23 is the defect it fixes and
+    //  its loop was written for exactly this, never having met it.
+    TF_CASE("a copy of a three-link value owns every link of its own")
+    {
+        CString sBig(L'x', 1024);
+        sBig.SetAt(0, L'A');
+        P3PmsgData    oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgObject& oObj = const_cast<P3PmsgObject&>(*oSrc.p_Object());
+        Lengthen29(oObj);
+        Lengthen29(oObj);
+
+        P3PmsgObject oCopy(oObj);
+        TF_CHECK_EQ(ChainLen29(oCopy), 3);
+
+        //  Every link, not just the first -- which is the whole difference
+        //  between a value copy and an alias.
+        bool bAllPrivate = true;
+        VBLockData *pA = P2PmsgObject_pData(oObj,  false);
+        VBLockData *pB = P2PmsgObject_pData(oCopy, false);
+        while (VBLockData_IsChained(pA) && VBLockData_IsChained(pB))
+        {
+            const VBLaddr aA = VBLockData_GetChain2Next(oObj .m_uVBLock, pA);
+            const VBLaddr aB = VBLockData_GetChain2Next(oCopy.m_uVBLock, pB);
+            if (aA == aB) bAllPrivate = false;
+            pA = VBLock_pData((VBLock *)oObj .Msg2Phys(aA));
+            pB = VBLock_pData((VBLock *)oCopy.Msg2Phys(aB));
+        }
+        TF_CHECK(bAllPrivate);
+
+        //  Same payload, compared whole -- header, flags, bytes. Spelled out
+        //  rather than borrowed: SamePayloadBytes is declared further down,
+        //  with the §23 cases it was written for.
+        VBLock       *pTA = (VBLock *)oObj .Msg2Phys(ChainTail29(oObj));
+        VBLock       *pTB = (VBLock *)oCopy.Msg2Phys(ChainTail29(oCopy));
+        const VBLsize nTA = VBLock_Hdr_u_SizeNN(pTA);
+        const VBLsize nTB = VBLock_Hdr_u_SizeNN(pTB);
+        TF_CHECK(nTA == nTB && memcmp(pTA, pTB, (size_t)nTA) == 0);
+    }
+
+    //  ReleaseInlineChain, put to three links. §27's method: freed storage is
+    //  reused, so a tail address that stays put is proof every link came back.
+    TF_CASE("and gives every link back when it goes")
+    {
+        CString sBig(L'x', 1024);
+        P3PmsgData    oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgObject& oObj = const_cast<P3PmsgObject&>(*oSrc.p_Object());
+        Lengthen29(oObj);
+        Lengthen29(oObj);
+
+        //  EXHAUSTION, NOT ADDRESSES, and the difference matters here. §27
+        //  watched the block address, because freed storage is reused and a
+        //  climbing address is proof nothing came back. That works in a quiet
+        //  process and not in this one: a floating value sits on a SYSTEM heap,
+        //  whose VBLaddr is a machine pointer, so whether the next copy lands
+        //  where the last one stood is a fact about the CRT allocator after two
+        //  hundred other cases and not about this release. Measured both ways
+        //  -- stable in a standalone probe, unstable here.
+        //
+        //  What does not depend on the allocator is the ceiling. Three links of
+        //  a 2048-byte value is about 6KB an iteration, so a release that
+        //  missed even one of them exhausts the heap's 10,000,000 bytes inside
+        //  two thousand copies and the allocator refuses. Five thousand is the
+        //  margin.
+        bool bEveryCopyStood = true;
+        try
+        {
+            for (int i = 0; i < 5000; i++)
+            {
+                P3PmsgObject oCopy(oObj);
+                if (oCopy.IsVoid() || ChainLen29(oCopy) != 3)
+                    bEveryCopyStood = false;
+            }
+        }
+        catch (P2Pevent* pEVT)
+        {
+            //  Caught rather than left to escape: an exhausted heap throws, and
+            //  a throw out of here stops the whole run at this case instead of
+            //  reporting it. §27's loop case is the one that did that.
+            if (pEVT) pEVT->Cancel(false);
+            bEveryCopyStood = false;
+        }
+        TF_CHECK(bEveryCopyStood);
+        TF_CHECK_EQ(ChainLen29(oObj), 3);  // and the source is untouched
+        TF_CHECK_EQ((int)oSrc.c_size(), 2048);
+    }
+
+    //  NewVBLockData's collapse loop, put to three links.
+    TF_CASE("a retype collapses a three-link chain back to one")
+    {
+        CString sBig(L'x', 1024);
+        CString sBigger(L'y', 4096);
+        sBigger.SetAt(0, L'B');
+
+        P3PmsgData    oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgObject& oObj = const_cast<P3PmsgObject&>(*oSrc.p_Object());
+        Lengthen29(oObj);
+        Lengthen29(oObj);
+        TF_CHECK_EQ(ChainLen29(oObj), 3);
+
+        oSrc = P3PmsgData((LPCWSTR)(LPCTSTR)sBigger);
+        TF_CHECK_EQ(ChainLen29(oObj), 1);
+        TF_CHECK(oSrc.c_wstr()[0] == L'B');
+        TF_CHECK_EQ((int)oSrc.c_size(), 8192);
+    }
+
+    //  AND THROUGH AN IMAGE, which is where a long chain would actually come
+    //  from. Nothing in Save or Load walks a chain or bounds its length.
+    TF_CASE("a saved image carries a three-link chain and reads back")
+    {
+        wchar_t szDir[MAX_PATH]  = { 0 };
+        wchar_t szPath[MAX_PATH] = { 0 };
+        GetTempPathW(MAX_PATH, szDir);
+        swprintf_s(szPath, MAX_PATH, L"%smscs_chain29.p2p", szDir);
+
+        CString sBig(L'x', 1024);
+        sBig.SetAt(0, L'A');
+        {
+            P2PmsgMgr oMgr;
+            oMgr.r_name() = L"Store";
+            oMgr.r_Desc(P3PmsgField::AttrCMD_Create)
+                += P3PmsgField(L"EEE", P3PmsgData((int)1));
+            P3PmsgField& oF = oMgr.r_Desc().SelectItem(L"EEE");
+            oF.r_data() = P3PmsgData((LPCWSTR)(LPCTSTR)sBig);
+
+            P3PmsgObject& oObj = const_cast<P3PmsgObject&>(oF.r_Object());
+            TF_CHECK_EQ(ChainLen29(oObj), 1);
+            Lengthen29(oObj);
+            Lengthen29(oObj);
+            TF_CHECK_EQ(ChainLen29(oObj), 3);
+            TF_CHECK(oMgr.Save(szPath) ? true : false);
+        }
+        {
+            P2PmsgMgr oMgr;
+            TF_CHECK(oMgr.Load(szPath) ? true : false);
+            P3PmsgField& oF = oMgr.r_Desc().SelectItem(L"EEE");
+            TF_CHECK_EQ(ChainLen29(oF.r_Object()), 3);
+            TF_CHECK(oF.r_data().c_wstr()[0] == L'A');
+        }
+        _wremove(szPath);
+    }
+#else
+    //  Visible rather than silent, per SuiteMain.cpp's rule that anything
+    //  compiled out must say so. Not a skipped SUITE: block navigation and the
+    //  heap allocator do not cross the DLL boundary at all.
+    TF_CASE("a chain longer than one link -- static link only, heap API is not exported")
+    {
+        TF_CHECK(true);
+    }
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -5420,6 +5778,7 @@ void RunMsgcoreSuite()
     Test_ValueCopiesItsPayload();
     Test_SoleStorage();
     Test_ValueCopyReleasesItsPayload();
+    Test_ChainLongerThanOne();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();

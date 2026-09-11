@@ -849,6 +849,11 @@ class Msgcore_EXT P3PmsgField : public P3PmsgName, public P3PmsgData
       //  guarantees not.  Refer P3PmsgObject::IsSole.
       virtual bool
         IsSole ( ) const;
+
+      //  How many references on hVBList this field and the sub-objects it owns
+      //  are holding.  What IsSole subtracts; refer its implementation.
+      int
+        HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept;
       virtual bool
         IsDirty ( ) const;
       virtual bool

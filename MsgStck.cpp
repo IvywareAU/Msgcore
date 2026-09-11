@@ -835,3 +835,28 @@ MsgStck::GetField ( ) noexcept
 {
     return m_pP3PmsgField;
 }
+//
+//  References on hVBList held by this stack
+//  NOTES: The three stacked objects, each of which is newed on the OWNING
+//         field's heap by r_field/r_list/r_vect and deleted by RecycleThis. A
+//         Push alone creates none of them -- §26 measured a push as adding no
+//         holder at all and that reading was correct -- so what this counts is
+//         a snapshot that has since been READ. That is the state §26 could not
+//         reach and recorded as unreachable rather than as costing nothing.
+//       : m_pP3PmsgField is the field that OWNS this stack and is not followed.
+//         Refer P3PmsgField::HeapHolders.
+int
+MsgStck::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 )
+      return 0;
+
+    int nHolders = 0;
+    if ( m_pStckField != nullptr )
+      nHolders += m_pStckField -> HeapHolders ( hVBList );
+    if ( m_pStckList  != nullptr )
+      nHolders += m_pStckList  -> HeapHolders ( hVBList );
+    if ( m_pStckVect  != nullptr )
+      nHolders += m_pStckVect  -> HeapHolders ( hVBList );
+    return nHolders;
+}

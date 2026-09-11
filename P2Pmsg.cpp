@@ -4299,15 +4299,15 @@ P3PmsgField::IsInline ( ) const
 //       : UNDERCOUNTING IS SAFE AND OVERCOUNTING IS NOT, which is why nothing
 //         is subtracted on trust. A holder missed leaves the answer FALSE, and
 //         false promises nothing; a holder subtracted that was never mine would
-//         report TRUE with a stranger looking, and true is a guarantee. So only
-//         the two sub-objects this class owns outright are counted, and each
-//         only when its heap is this heap. What is NOT subtracted, because it
-//         cannot be reached from here: a cursor, which lives inside the Desc or
-//         Attr that made it, and whatever an MsgStck is holding, whose stack
-//         fields are protected with no accessor. The cursor costs a FALSE
-//         today and is pinned by a case. The MsgStck does not -- measured, a
-//         push adds no holder of this heap at all -- but it is unreachable
-//         either way, so it could never be subtracted even if it did.
+//         report TRUE with a stranger looking, and true is a guarantee.
+//       : THE SUBTRACTION IS HeapHolders BELOW, and §29 is why it is a walk
+//         rather than the two `nMine++` lines it started as. Those counted the
+//         Attr and the Desc and stopped there, so a collection that had been
+//         WALKED still answered FALSE: the cursor is a level further in, and a
+//         cursor holds the heap. Asking each owned sub-object what it is
+//         holding reaches that level and every level under it, and it reaches
+//         the MsgStck's stacked field on the way -- which was the other entry
+//         §26 left, closed by the same walk rather than by a second mechanism.
 bool
 P3PmsgField::IsSole ( ) const
 {
@@ -4317,15 +4317,49 @@ P3PmsgField::IsSole ( ) const
       return true;                     // The block is in here, so nowhere else
 
     const P2PmsgHANDLE hVBList = OBJ__.m_hVBList;
-    int                nMine   = 1;    // This field's own object holds one
-    if ( m_pP3PmsgAttr != nullptr &&
-         m_pP3PmsgAttr -> r_Object ( ).m_hVBList == hVBList )
-      nMine++;
-    if ( m_pP3PmsgDesc != nullptr &&
-         m_pP3PmsgDesc -> r_Object ( ).m_hVBList == hVBList )
-      nMine++;
+    if ( hVBList == 0 )
+      return false;                    // A block on no heap is nobody's to count
 
-    return P2PmsgHeap_RefCount ( hVBList ) == nMine;
+    return P2PmsgHeap_RefCount ( hVBList ) == HeapHolders ( hVBList );
+}
+//
+//  References on hVBList held by this field and everything it owns
+//  NOTES: ONE RULE, applied down the ownership tree, and it is the heap's own:
+//         every path that gives a P3PmsgObject a non-zero m_hVBList AddRefs it
+//         -- the copy constructor, Connect, Connecta and the two CreateSYS
+//         sites, which is all of them -- and ~P3PmsgObject closes it. So a live
+//         object whose handle is this handle IS one reference. This counts
+//         references rather than estimating them, and that is what lets IsSole
+//         compare the total to it.
+//       : WHAT IS FOLLOWED IS WHAT IS OWNED, and nothing else. m_pP3PmsgAttr,
+//         m_pP3PmsgDesc and m_pMsgStck are made here and deleted here. A
+//         collection's m_pP3PmsgField and a cursor's m_pP3PmsgAttr /
+//         m_pP3PmsgDesc point back UP at the owner and are not followed:
+//         following one would count this field a second time and report TRUE
+//         with a stranger looking.
+//       : IT IS A COUNT AND NOT A FLAG because one cursor can hold more than
+//         one. P3PmsgCurs::Goto connects whichever of its three by-value
+//         members matches the item it landed on and does not disconnect the
+//         other two, so a walk across a collection holding a list and then a
+//         field leaves TWO of them on this heap. Refer P3PmsgCurs::HeapHolders.
+//       : UNDERCOUNTING IS STILL THE SAFE DIRECTION, and this still does some
+//         of it deliberately: the P3PmsgData cursors a P3PmsgList and a
+//         P3PmsgVect cache, and a vect's element type, are not descended into.
+//         A holder missed leaves FALSE, which promises nothing.
+int
+P3PmsgField::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 )
+      return 0;
+
+    int nHolders = OBJ__.m_hVBList == hVBList ? 1 : 0;
+    if ( m_pP3PmsgAttr != nullptr )
+      nHolders += m_pP3PmsgAttr -> HeapHolders ( hVBList );
+    if ( m_pP3PmsgDesc != nullptr )
+      nHolders += m_pP3PmsgDesc -> HeapHolders ( hVBList );
+    if ( m_pMsgStck != nullptr )
+      nHolders += m_pMsgStck    -> HeapHolders ( hVBList );
+    return nHolders;
 }
 bool
 P3PmsgField::IsStacked ( ) const

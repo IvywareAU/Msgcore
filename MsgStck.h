@@ -133,6 +133,11 @@ class Msgcore_EXT MsgStck
       P3PmsgField*
         GetField ( ) noexcept;
 
+      //  How many references on hVBList this stack is holding.  Refer
+      //  P3PmsgField::HeapHolders.
+      int
+        HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept;
+
     // Attributes
     protected:
       P3PmsgField  *m_pP3PmsgField{0};

@@ -265,6 +265,27 @@ P3PmsgDesc::r_Object ( ) const noexcept
 {
     return m_oObject;
 }
+//
+//  References on hVBList held by this collection and by its cursor
+//  NOTES: READS m_pCurs AND DOES NOT CREATE ONE. r_Curs() is a creating
+//         accessor -- it news a cursor on first call, and a cursor takes a
+//         reference on the heap as soon as it lands on an item. A question
+//         about who is holding this heap that answered by taking another
+//         reference on it would be its own wrong answer, so this asks the
+//         member directly.
+//       : m_pP3PmsgField is the field that OWNS this collection and is not
+//         followed. Refer P3PmsgField::HeapHolders for why not.
+int
+P3PmsgDesc::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 )
+      return 0;
+
+    int nHolders = m_oObject.m_hVBList == hVBList ? 1 : 0;
+    if ( m_pCurs != nullptr )
+      nHolders += m_pCurs -> HeapHolders ( hVBList );
+    return nHolders;
+}
 
 void
 P3PmsgDesc::Drop ( )
