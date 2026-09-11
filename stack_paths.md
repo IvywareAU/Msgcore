@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-12. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §32 say how to
+> every line of output below was run against this tree; §6, §7 and §36 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -2615,7 +2615,8 @@ walk reaches it, so it is subtracted for the same reason and by the same rule.
 **Undercounting remains, deliberately.** `P3PmsgList` and `P3PmsgVect` cache
 `P3PmsgData` cursors in `m_pP3PmsgData[]`, and a vect carries a `m_pP3PmsgType`; none of
 those is descended into. Whatever they hold leaves the answer FALSE, which is the safe
-side, and §31 records it rather than this claiming to have closed it.
+side, and What-is-left records it rather than this claiming to have closed it. §31
+later measured all three and closed it.
 
 **The exported surface moved, and it had already moved.** These classes are whole-class
 MFC extension exports, so five new public members are five new exports.
@@ -2785,44 +2786,663 @@ the case, so the case is the check.
   result  : FAIL
 ```
 
-## 31. What is left
+## 31. The cursors a collection keeps for itself
 
-- **`IsSole` still does not descend into a list's or a vect's data cursors.** §29 counts
-  what a field owns -- its attributes, its descendants, its stack, and the cursors those
-  carry -- and stops at `P3PmsgList::m_pP3PmsgData[]`, `P3PmsgVect::m_pP3PmsgData[]` and
-  `P3PmsgVect::m_pP3PmsgType`. Whatever those hold is a holder missed, which leaves the
-  answer FALSE, which promises nothing; the guarantee on TRUE is untouched either way.
-  That is the safe direction by the asymmetry §26 set out, and it is a deliberate stop
-  rather than an oversight: each would have to be shown to hold this heap and to be owned
-  outright before it could be subtracted, and neither has been measured.
+§29 walked what a field owns -- its attributes, its descendants, its stack, and the
+cursors those carry -- and stopped at three members: `P3PmsgList::m_pP3PmsgData[]`,
+`P3PmsgVect::m_pP3PmsgData[]` and `P3PmsgVect::m_pP3PmsgType`. What-is-left recorded the stop as
+deliberate rather than an oversight and said what would lift it: each would have to be
+shown to hold this heap AND to be owned outright before it could be subtracted, and
+neither had been measured.
 
-- **The three-link chain is built, not found.** §30 establishes that an image CAN carry
-  one -- the arena is written and read whole, and nothing validates chain length -- and
-  builds one with the heap's own allocator to put the walks to it. What it does not have
-  is a legacy image that actually carries one, so "this is what such an image would do"
-  rests on the format argument rather than on a file. Whether any image in hand -- a fuzz
-  seed, a sample workspace -- carries a longer chain has not been measured either way.
+Both are measured here. Two of the three hold and are owned; the third is owned and holds
+nothing, which is a different answer and is worth having.
 
-- **The Win32 export manifest could not be re-measured.** §29 re-measured
-  `exports-cxx-x64.manifest` against a built DLL. `Msgcore(2026).sln` carries no Win32
-  configuration at all -- `Debug|Win32` is rejected by MSBuild as an invalid solution
-  configuration -- so `exports-cxx-win32.manifest` still describes the surface as it was
-  at `4d39d0d`, and carries the same fourteen pre-§29 omissions the x64 one did. The
-  check compares each platform against its own manifest, so this is recorded rather than
-  discovered next time.
+### What the code says about each
 
-- **`check_api_drift.ps1` still fails, on two members that predate this work.**
-  `P3PmsgVect::Drop` (added by `d2763ce`) and `P3PmsgField::operator!=` (by `4f4c334`)
-  reach no binding and have no allowlist line. 163 of the allowlist's entries are
-  UNTRIAGED -- every one of them except the five §29 added. Deciding whether the flat C
-  surface should carry those two is a question about the C API rather than about `^`, and
-  it is left where it was found.
+**`P3PmsgList::m_pP3PmsgData[]` is the list's own and it holds this heap.** Every element
+is `new P3PmsgData()` at one of the three read sites and nowhere else -- `GetNext`
+(`MsgList.cpp:183`), `GetTail` (`:232`), `GetPrev` (`:255`) -- the array is zeroed at
+construction (`:106`, `:132`) and deleted by `~P3PmsgList` (`:122-123`) and by `Truncate`
+(`:448-450`). Nothing anywhere assigns it a pointer that came from outside, and there is
+no back-pointer up at an owner. It holds the heap by §29's rule: each wrapper is
+`Connect`ed on `OBJ__hVBList` (`:184`, `:233`, `:256`), and `P3PmsgData::Connect`
+(`P2Pmsg.cpp:300-306`) reaches `P3PmsgObject::Connecta`, which AddRefs when the handle
+changes and returns early when it is already this one.
+
+**It is one per SLOT USED, not one per list.** `m_nCurs` advances modulo
+`MAX_P3PmsgData_Curs` -- three (`P2PmsgVBLock.h:323`) -- and a read connects the wrapper in
+the new slot without disconnecting the others. So a list walked three deep is holding this
+heap three times, for the same reason §29 found a `P3PmsgCurs` holding it twice, and the
+count has to count rather than flag.
+
+**`P3PmsgVect::m_pP3PmsgType` is the vect's own and it holds this heap.** `Goto` deletes
+the previous wrapper and news one of the element's own kind -- `new P3PmsgList`, `new
+P3PmsgVect` or `new P3PmsgField` (`MsgVect.cpp:789-793`) -- then `Connect`s it on
+`OBJ__hVBList` (`:794`); `~P3PmsgVect` (`:123-124`), `Delete` (`:535`), `Truncate` (`:543`)
+and `Goto` itself on every failure and re-entry (`:774`, `:780`, `:787`) delete it. Because
+`InsertAt` ends in a `Goto` (`:757-758`), a vect that has had anything inserted is already
+holding one -- which is why the "before" run below shows a two-element vect at `refs=2
+mine=1` before anybody has read it.
+
+**`P3PmsgVect::m_pP3PmsgData[]` is owned and holds nothing, and that is measured rather
+than assumed.** It is zeroed at construction (`:107`, `:140`) and deleted (`:125-126`,
+`:544-545`), so ownership is not in question. But every site that would put a pointer in it
+is inside a comment block -- the vect's own `GetNext` (`:190-207`) and a copy of
+`P3PmsgList::GetTail` (`:237-249`), which is still spelled `P3PmsgList::` inside a vect
+source file and so was probably never a live vect reader. There is no code path that fills
+that array. A vect's element cursor is `m_pP3PmsgType`; a vect data cursor is not a thing
+that exists. It is walked anyway, because a null entry contributes nothing and the count
+stays exact either way, and because a vect that ever grows those readers back should not
+go quietly wrong in the unsafe direction.
+
+### The trap, which is what makes this an override
+
+`P3PmsgField` derives from `P3PmsgData`, so the obvious shape -- a `P3PmsgData::HeapHolders`
+that everything chains up into -- counts one object twice. Every `P3PmsgField` constructor
+aliases the inherited cell onto its own object, `P3PmsgData::m_pObject = &m_oObject`
+(`P2Pmsg.cpp:3563`, `:3574`, `:3601`, `:3646`), and `~P3PmsgField` clears it (`:3583-3584`)
+so that `~P3PmsgData` does not delete a member. `OBJ__` and `m_pObject` are the same
+object. A field that counted itself and then called the base version would report one
+holder too many, and **overcounting is the direction that reports a guarantee that is not
+true** -- §26's asymmetry, in the direction that matters. So `P3PmsgField::HeapHolders`
+overrides `P3PmsgData::HeapHolders` rather than adding to it, counts `OBJ__` itself, and
+never calls the base version. Its existing count is unchanged to the reference, which is
+what keeps §26's and §29's rows where they were.
+
+```cpp
+int
+P3PmsgData::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 ||
+         m_pObject == nullptr )
+      return 0;
+
+    return m_pObject -> m_hVBList == hVBList ? 1 : 0;
+}
+```
+
+**`HeapHolders` is virtual now, and two independent things force it.** First,
+`P3PmsgField::IsSole` is inherited unchanged by both collections and calls
+`HeapHolders ( hVBList )` on itself; resolved at compile time that is
+`P3PmsgField::HeapHolders`, and a list would never reach its own override no matter what
+was declared on it. Second, `m_pP3PmsgType` is declared `P3PmsgField*` and `Goto` news a
+`P3PmsgList` or a `P3PmsgVect` into it for a nested container, whose own cursors are a
+level further in again. The "a vect holding a vect" row exists only because of the
+dispatch.
+
+That makes the virtualness visible on the exported surface in a way worth naming, because
+it is the one export removal in this section: MSVC encodes virtualness in the mangling --
+`Q` for public non-virtual, `U` for public virtual -- so
+`?HeapHolders@P3PmsgField@@QEBAHPEAX@Z` retires and `...@UEBAHPEAX@Z` is minted. Four
+additions and one removal, and the removal is the same member.
+
+### Measured
+
+Seven cases and twenty-eight checks. Before, against the unchanged library, ten of those
+checks fail:
+
+```
+  - a list's own data cursors do not stop it being sole
+      a list nobody has read                       refs=1  mine=1  sole=true
+      ... once one element has been read           refs=2  mine=1  sole=false
+      FAIL [a list's own data cursors do not stop it being sole]  oList.IsSole()
+      ... and the tail, in a second slot           refs=3  mine=1  sole=false
+      FAIL [a list's own data cursors do not stop it being sole]  oList.IsSole()
+  - a list walked end to end holds its heap once per cursor slot
+      a list walked end to end                     refs=4  mine=1  sole=false
+      FAIL ...
+  - a vect's own element cursor does not stop it being sole
+      a vect with two elements                     refs=2  mine=1  sole=false
+      FAIL ...
+      ... once an element has been read            refs=2  mine=1  sole=false
+      FAIL ...
+  - a nested collection's cursors are reached through the element cursor
+      a vect holding a vect                        refs=2  mine=1  sole=false
+      FAIL ...
+      ... and the inner element read through it    refs=3  mine=1  sole=false
+      FAIL ...
+  - a list element's data cursor is reached through the element cursor
+      a vect holding a list                        refs=2  mine=1  sole=false
+      FAIL ...
+      ... with that list read through it           refs=3  mine=1  sole=false
+      FAIL ...
+  - a shared list whose cursors were used is still not sole
+      a shared list, walked by me                  refs=4  mine=1  sole=false
+  - and a vect the STRANGER is walking is still the stranger's
+      FAIL [and a vect the STRANGER is walking is still the stranger's]  oVect.IsSole()
+      a shared vect, walked by the partner         refs=4  mine=1  sole=false
+```
+
+After:
+
+```
+  - a list's own data cursors do not stop it being sole
+      a list nobody has read                       refs=1  mine=1  sole=true
+      ... once one element has been read           refs=2  mine=2  sole=true
+      ... and the tail, in a second slot           refs=3  mine=3  sole=true
+  - a list walked end to end holds its heap once per cursor slot
+      a list walked end to end                     refs=4  mine=4  sole=true
+  - a vect's own element cursor does not stop it being sole
+      a vect with two elements                     refs=2  mine=2  sole=true
+      ... once an element has been read            refs=2  mine=2  sole=true
+  - a nested collection's cursors are reached through the element cursor
+      a vect holding a vect                        refs=2  mine=2  sole=true
+      ... and the inner element read through it    refs=3  mine=3  sole=true
+  - a list element's data cursor is reached through the element cursor
+      a vect holding a list                        refs=2  mine=2  sole=true
+      ... with that list read through it           refs=3  mine=3  sole=true
+  - a shared list whose cursors were used is still not sole
+      a shared list, walked by me                  refs=4  mine=3  sole=false
+  - and a vect the STRANGER is walking is still the stranger's
+      a shared vect, walked by the partner         refs=4  mine=2  sole=false
+```
+
+`mine=` is `HeapHolders` and it tracks `refs=` exactly on every row that is sole. The last
+two rows are the ones that must NOT move, and they are the reason this is a subtraction
+rather than a suppression: on the shared list `mine=3` of `refs=4` -- the list and its two
+cursors are mine, the fourth is the stranger's own object -- and on the shared vect
+`mine=2` of `refs=4`, the vect and its element cursor against the partner's same pair. The
+count falls short by precisely the stranger's holdings, which is what leaves the answer
+false.
+
+The `refs=` column exists only in static link mode: `P2PmsgHeap_RefCount` is not exported,
+and exporting it to make a test's listing prettier would widen a surface frozen through
+1.x. The row is guarded the way `Test_ImageAddressBounds` is, and the DLL run fails and
+passes the identical ten checks without it.
+
+**Teeth.** Restore the pre-change library, force a rebuild, and six of the seven cases
+fail -- ten checks, the same ten in both link modes. The seventh, "a shared list whose
+cursors were used is still not sole", passes before and after and is meant to: it is one
+of the two rows that must not move, and a row that cannot fail either way is the only
+honest way to pin one. The OTHER must-not-move row is among the six, and it fails on its
+opening `TF_CHECK ( oVect.IsSole ( ) )` rather than on the shared assertion it exists for
+-- exactly as §29's sixth case did. Before the walk reaches the element cursor, a vect
+nobody shares has already read false, so the case cannot get as far as the stranger.
+
+## 32. Every image in hand, asked whether it carries one
+
+§30 built a three-link chain with the heap's own allocator and put the four walks to it,
+and What-is-left recorded what that left standing: the chain was built, not found. The format
+argument says an image CAN carry one -- the arena is written and read whole, a `VBLaddr` is
+relocated by nothing and validated for length by nothing -- but no file in hand had been
+asked. "Whether any image in hand -- a fuzz seed, a sample workspace -- carries a longer
+chain has not been measured either way."
+
+It is measured now, and the answer is no.
+
+### What there is to ask
+
+Nineteen saved arenas in this library's format: the six fuzz seeds in
+`tests/fuzz/corpus/`, the twelve stores `c4test.exe` leaves in `tests/out/`, and the golden
+image itself -- `MscsUnitTests/golden_ref.p2p`, 4104 bytes, the one §25's and §28's gates
+keep reporting byte-identical. No in-repo test leaves a sample workspace behind:
+`Test_ChainLongerThanOne` (`tests/MsgcoreSuite.cpp:3695`) writes `%TEMP%\mscs_chain29.p2p`
+and `_wremove`s it, which is §30's own image and not one found lying about.
+
+**Not one of them carries a chained block.** Every file reports zero standalone `VBLockData`
+blocks flagged `uDataType == 0xFF`, so the longest chain in any image in hand is one link --
+the head inline in the owning block, one payload hanging off it -- or none at all:
+
+```
+   golden_ref.p2p          blocks=11  dataBlocks=0  chainedHeads=0  MAX chain links=0
+   valid_store.dat         blocks=6   dataBlocks=0  chainedHeads=0  MAX chain links=0
+   c4_roundtrip.dat        blocks=6   dataBlocks=0  chainedHeads=0  MAX chain links=0
+   ...
+ANSWER: No image in hand carries a VBLockData chain longer than one link.
+```
+
+**The measurement is worth nothing without a positive control, so there is one.** §30's
+own path was reproduced -- grow a value, append two links with `Lengthen29`, save, reload --
+and the library read the chain back at three. The same file, put to the same two scanners:
+
+```
+   library probe:  Data block @ 423  : CHAINED, 2 link(s)
+                   Data block @ 2484 : CHAINED, 1 link(s)
+                   blocks=7  dataBlocks=3  chainedHeads=2
+                   RESULT: >>> chain of MORE THAN ONE link present
+   byte scanner:   @423 0xFF -> 2484;  @2484 0xFF -> 4545;  @4545 payload type=26
+                   RESULT: a chain of MORE THAN ONE link EXISTS.  maxlen=3
+```
+
+So zero on nineteen files is a reading and not a blind spot. This closes the entry in the
+direction that leaves §30 exactly where it stood: the format argument is all there is, and
+no file contradicts it.
+
+### Eleven of the nineteen had to be read without the library, which is the point of them
+
+The honest way to ask is with the library's own walk, and it answered for eight files.
+The other eleven are refused by the heap-open before any walk can start, each with its own
+message -- which is these files working as designed, since most of the corpus is
+deliberately malformed:
+
+```
+  c4_evil_oversize.iom  IOMAGE declared size (16777215) exceeds buffer (4096)
+  f11_collate_nogrow.dat  BSTRio block structure is corrupt
+  f1_bstrio_oob.dat     BSTRio declared size (2032) exceeds buffer (49)
+  c4_bstrio_oversize.dat  BSTRio declared size (131072) exceeds buffer (4096)
+  c4_addr16_oversize.dat  Image declares a 0x10001-byte arena, past the 0xffff
+                          addressable by the Addr16 width it also declares
+  c4_f3_iomage_walk.iom   IOMAGE block structure is corrupt
+```
+
+A byte-level scanner parses the arena directly, bounds every oversize declaration to the
+file length and walks what is actually there. It measured all eleven, and all eleven are
+zero as well. A file the library will not open is still a file that can be asked this
+question, and the answer is not allowed to be "unmeasurable" just because the loader was
+right to refuse it.
+
+### What that walk turned up, which is not about chains at all
+
+Four of those refusals assert on the way to being refused, and all four are the same line:
+
+```
+  f11_collate_nogrow.dat   [assert #1] MsgVBHeap.cpp(3609) : Assertion failed!
+  f2_walk_oob.dat          [assert #2] MsgVBHeap.cpp(3609) : Assertion failed!
+  c4_bstrio_honest.dat     [assert #3] MsgVBHeap.cpp(3609) : Assertion failed!
+  c4_f2_walk_oob.dat       [assert #4] MsgVBHeap.cpp(3609) : Assertion failed!
+```
+
+`MsgVBHeap.cpp:3609` is `ASSERT(P2PmsgHeap_AssertVBlocksBSTRio(pHandle))`, the last line of
+`P2PmsgHeap_CreateBSTRio`. The untrusted overload above it CALLS that function and then
+runs the very same walk again as a real gate, and the comment it carries says why:
+
+> Walk the block chain FOR REAL, in every build (item 19). The delegate above ends with
+> `ASSERT(P2PmsgHeap_AssertVBlocksBSTRio(pHandle))` -- the whole validation call sits
+> inside the assertion, so Release does not run a reduced version of it, it does not run
+> it at all. [...] Only this overload is changed. The single-argument one keeps its
+> ASSERT, because it is for images this process just built, where the walk is a developer
+> aid and not a gate.
+
+The reasoning is right and the call graph defeats it: the untrusted path reaches the
+developer aid on its way to the gate. So on an untrusted image the walk runs **twice**, and
+the first run is an assertion that fires. Under the default report mode a `_CRT_ASSERT`
+raises the dialog and a Debug build stops in it -- so a Debug consumer handed a corrupt
+image halts on a structure the library was about to refuse cleanly and by name, which is
+§30's shape exactly, on the load path rather than the sizing one.
+
+**Nobody had met it because the corpus is never fed to a build that has assertions.**
+`tests/fuzz/build_run_fuzz.ps1` builds `ReleaseLib` with `/DNDEBUG` (`:153`, `:167`), where
+`ASSERT` compiles to nothing. That is the same lesson item 19 wrote into the comment above
+-- "the structure is checked in the build nobody ships" -- holding one layer further up and
+still unlearned: the assertion is exercised only in the build the fuzzer does not run.
+
+It is recorded rather than fixed. Suppressing an assertion on the untrusted load path is a
+change to a gate, with `P2PmsgHeap_UntrustedGate` standing in the middle of it, and it
+wants its own teeth and its own section rather than arriving as a side effect of counting
+chain links.
+
+## 33. The platform the solution spells `x86`
+
+§29 re-measured `exports-cxx-x64.manifest` against a built DLL and could not do the same
+for Win32. The entry recorded why: "`Msgcore(2026).sln` carries no Win32 configuration at
+all -- `Debug|Win32` is rejected by MSBuild as an invalid solution configuration". The
+first half of that sentence does not follow from the second, and it is false.
+
+```
+Msgcore(2026).sln.metaproj : error MSB4126: The specified solution configuration
+"Debug|Win32" is invalid. Please specify a valid solution configuration using the
+Configuration and Platform properties (e.g. MSBuild.exe Solution.sln
+/p:Configuration=Debug /p:Platform="Any CPU") or leave those properties blank to use
+the default solution configuration. [Msgcore(2026).sln]
+```
+
+That is the SOLUTION refusing a solution platform name, 0.21 seconds in, having never
+reached the project. `GlobalSection(SolutionConfigurationPlatforms)` lists `Debug|x86`,
+`DebugLib|x86`, `Release|x86` and `ReleaseLib|x86`; `GlobalSection(ProjectConfigurationPlatforms)`
+maps each onto the project's own `|Win32` -- `{C1E33B10-...}.Debug|x86.ActiveCfg =
+Debug|Win32` -- and `Msgcore(2026).vcxproj` declares all four `|Win32` configurations
+itself, at lines 4-34. Solution platform `x86`, project platform `Win32`, is MSBuild's
+ordinary convention and not a quirk of this tree. Both of these build:
+
+```
+msbuild "Msgcore(2026).vcxproj" /t:Rebuild /p:Configuration=Debug /p:Platform=Win32 /m
+msbuild "Msgcore(2026).sln"                /p:Configuration=Debug /p:Platform=x86
+```
+
+A full `Debug|Win32` rebuild is nineteen sources through `HostX86\x86\CL.exe` at `/W4
+/sdl /std:c++17 /MDd`, **61 warnings and 0 errors** in 9.32 seconds; `Release|Win32` is
+**44 warnings and 0 errors** in 5.37. `out\Win32\Debug\Msgcore.dll` was already on disk
+from an earlier build. Nothing was ever stopping this except the name.
+
+### The drift, which is the same drift
+
+```
+out\Win32\Debug\Msgcore.dll (Win32): 1048 exports -- 282 flat msgcore_*, 766 mangled C++
+
+  OK -- flat C ABI matches tools/ci/exports-flat.manifest (282 symbols).
+
+  mangled C++ (Win32) drifted from tools/ci/exports-cxx-win32.manifest:
+  EXPORT ADDED, undeclared: ??8P3PmsgField@@QBE_NABV0@@Z
+  EXPORT ADDED, undeclared: ??8P3PmsgField@@QBE_NPB_W@Z
+  EXPORT ADDED, undeclared: ??9P3PmsgField@@QBE_NABV0@@Z
+  EXPORT ADDED, undeclared: ??9P3PmsgObject@@QBE_NABV0@@Z
+  EXPORT ADDED, undeclared: ?Drop@P3PmsgVect@@UAEXXZ
+  EXPORT ADDED, undeclared: ?HeapHolders@MsgStck@@QBEHPAX@Z
+  EXPORT ADDED, undeclared: ?HeapHolders@P3PmsgAttr@@QBEHPAX@Z
+  EXPORT ADDED, undeclared: ?HeapHolders@P3PmsgCurs@@QBEHPAX@Z
+  EXPORT ADDED, undeclared: ?HeapHolders@P3PmsgDesc@@QBEHPAX@Z
+  EXPORT ADDED, undeclared: ?HeapHolders@P3PmsgField@@QBEHPAX@Z
+  EXPORT ADDED, undeclared: ?IsInline@P3PmsgField@@UBE_NXZ
+  EXPORT ADDED, undeclared: ?IsInline@P3PmsgObject@@QBE_NXZ
+  EXPORT ADDED, undeclared: ?IsSole@P3PmsgField@@UBE_NXZ
+  EXPORT ADDED, undeclared: ?IsSole@P3PmsgObject@@QBE_NXZ
+  EXPORT ADDED, undeclared: ?P3Pmsg_GetPath@@YA?AV?$CStringT@...@ATL@@PBVP3PmsgDesc@@@Z
+  EXPORT ADDED, undeclared: ?P3Pmsg_GetStckDepth@@YAIPBVP3PmsgField@@I@Z
+  EXPORT ADDED, undeclared: ?PrivatiseInlineChain@P3PmsgObject@@QAEXXZ
+  EXPORT ADDED, undeclared: ?RehomeInlineItem@P3PmsgObject@@QAEIXZ
+  EXPORT ADDED, undeclared: ?ReleaseInlineChain@P3PmsgObject@@QAEXXZ
+  EXPORT REMOVED, still declared: ??8P3PmsgField@@QAE_NPB_W@Z
+```
+
+**Nineteen and one, which is §29's shape exactly.** The entry said Win32 "carries the
+same fourteen pre-§29 omissions the x64 one did", and that is true as far as it goes --
+but the drift a reader actually meets is nineteen, because the five `HeapHolders` §29
+added to the x64 manifest were never added to this one either. Normalise the x64 names
+for pointer width -- `QEAA` to `QAE`, `AEBV` to `ABV`, `PEB_W` to `PB_W` -- and the two
+nineteen-name sets reduce to the same member set, with `P3Pmsg_GetStckDepth` and
+`RehomeInlineItem` differing in one letter apiece, `_K` against `I`, which is `size_t`
+and the ABI difference showing through. The single removal is the twin of x64's: not a
+deletion but §21's constification, `QAE` becoming `QBE`, the same member re-mangled and
+re-added two lines up.
+
+The manifest is regenerated with the script's own `-Regenerate` rather than hand-edited,
+and the diff is exactly +19 / -1 and nothing else. That brought Win32 to **766** mangled
+names, which is what x64 declared at that moment, so the two platforms described the same
+set of declarations for the first time since `4d39d0d`.
+
+**Then §31 landed, and the point is that it landed on both.** Its four members -- three new
+`HeapHolders` and one re-mangled by becoming virtual -- move x64 by +4/-1 and Win32 by the
+Win32 spelling of the same five. Both manifests are re-measured against freshly built DLLs
+and regenerated a second time, and both finish at **769 mangled and 1051 exports**:
+
+```
+out\x64\Debug\Msgcore.dll   (x64): 1051 exports -- 282 flat msgcore_*, 769 mangled C++
+out\Win32\Debug\Msgcore.dll (Win32): 1051 exports -- 282 flat msgcore_*, 769 mangled C++
+  OK -- exported surface matches the manifests: 282 flat, 769 mangled.
+```
+
+Against `4d39d0d` that is +22/-1 on Win32 and +4/-1 on x64, the difference being only that
+x64 had already banked the nineteen. A section that adds a member now moves two manifests
+instead of silently moving one and leaving the other to be discovered, which is the whole
+of what this section is for.
+
+**The flat ABI is byte-identical, and the regeneration is what proves it.** `-Regenerate`
+rewrites `exports-flat.manifest` from whichever DLL it measured, so pointing it at the
+Win32 DLL was a test of the script header's claim that the flat surface is
+platform-independent -- a claim that had never been put to anything, since only x64 had
+ever been regenerated. SHA-256 before and after: `3E494A36...DE3B` both times. In the
+second round the file is rewritten twice more, once from each platform's DLL, and `git
+status` reports it unmodified through all four rewrites. 282 flat names either way. No
+version bump is due for any of this.
+
+### What the /sdl paragraph still says, and the one number in it that had moved
+
+`check_exports.ps1`'s header carries a long account of item 10: that `Debug|Win32` once
+exported 1006 names where `Release|Win32` exported 984, that the 22 extra were
+`?__autoclassinit2@<class>@@QAEXI@Z` emitted by `/sdl`, and that turning `/sdl` on
+everywhere moved them into the base manifests and retired the supplement. The check does
+not need that story to run -- `-Configuration` selects no expectation any more -- but the
+header says outright that the claim is "re-earned on every push", so it was earned rather
+than quoted. `/sdl` is on the `CL.exe` line for both `Debug|Win32` and `Release|Win32`;
+both DLLs export the same count; `Compare-Object` over the two sorted sets returns **zero**
+differences, identical sets and not merely identical counts. The split is genuinely
+closed.
+
+**The count is 23, not 22.** One more class is exported than on the day that paragraph was
+written -- `MsgStck`, by §26 and §29 -- and the synthesised member tracked it. Every
+figure in that header had moved the same way: 700 mangled names where the file now
+declares 769, and `982 exports differ in 1340 names` between the platforms where the same
+comparison now gives 1051 and 1470. The mechanism the paragraph describes is intact and
+the arithmetic in front of it was stale, which is the failure §29 met in the manifest
+itself, one file over. The present-tense figures are brought current; item 10's own
+numbers are left exactly as written, with a note saying so, because rewriting them would
+destroy the measurement they are.
+
+## 34. The two members the drift check was failing on, and the one it was not
+
+§29 left `check_api_drift.ps1` red and said why: `P3PmsgVect::Drop` and
+`P3PmsgField::operator!=` reach no binding and have no allowlist line, and deciding
+whether the flat C surface should carry them "is a question about the C API rather than
+about `^`". It is, and it is a question with an answer. Both are answered here, and
+answering them found a third thing that neither of them is about.
+
+```
+Scanned 286 public members over 1 pair(s); 116 bound, 168 allowlisted.
+  163 of the allowlist entries are UNTRIAGED -- banked, not decided.
+
+2 upstream members reach no binding:
+
+  P2Pmsg.h:768
+      P3PmsgField::operator!=   (operator)
+      looked for : msgcore_field_*
+  MsgVect.h:95
+      P3PmsgVect::Drop   (method)
+      looked for : msgcore_vect_*
+```
+
+### `Drop` is not the drop the surface already has
+
+**The precedent that would have settled this does not exist.** `P3PmsgList::Drop`
+(`MsgList.h:122`) is the same member on the sibling class, and the check scores it
+`bound -> msgcore_list_drop_head`. It is not bound. `msgcore_list_drop_head` and
+`msgcore_list_drop_tail` bind `P3PmsgList::DropHead` and `::DropTail` (`MsgList.h:78,88`),
+which take one element off an end. The whole-object drop reaches no binding on either
+class; on the list it is merely invisible, for a reason the last part of this section is
+about.
+
+So the reason had to be written rather than copied, and "internal" was not available.
+**`Drop` frees the item in the store; `destroy` releases a HANDLE to it.** The flat
+surface already spells the second once per family -- `msgcore_field_destroy`,
+`msgcore_attr_destroy`, `msgcore_desc_destroy`, `msgcore_list_destroy`,
+`msgcore_vect_destroy` -- so `msgcore_vect_drop` beside `msgcore_vect_destroy` would be
+two exports that read the same and do the opposite. Underneath the naming there is an ABI
+constraint that is not cosmetic. The surface removes things by asking the PARENT and
+naming the child -- `msgcore_field_delete_item`, `msgcore_attr_delete`,
+`msgcore_desc_delete`, `msgcore_list_delete_at`, `msgcore_vect_delete` -- or by emptying
+in place, `msgcore_*_truncate`. Both leave every handle the caller holds valid. `Drop`
+asked of the item ITSELF cannot: it frees the block other live handles alias, and the
+durable re-resolution route rule 2 of `Msgcore_c.h` offers against relocation -- hold the
+p2pos, come back through `msgcore_mgr_p2pos2field` -- resolves to nothing once the item is
+gone. **The flat ABI has no way to tell a handle that it died, so it does not hand out the
+call that kills one.**
+
+Two things that look like counter-examples and are not. `d2763ce` wrote
+`P3PmsgVect::Drop` for exactly one caller -- `MsgStck::Pop` freeing the generation it had
+just unlinked, "no vect had ever been a pushed stack generation" (`MsgVect.cpp:585`) --
+and that caller IS on the flat surface, as `msgcore_stck_pop`, which reaches `Drop` from
+the inside. And `msgcore_stck_drop` frees no item the caller holds a handle on and unlinks
+nothing from the tree: its own comment is "Release the stacked position without restoring
+it" (`Msgcore_c.h:886`).
+
+The same argument covers `P3PmsgField::Drop`, `P3PmsgAttr::Drop` and `P3PmsgDesc::Drop`,
+all three of which were UNTRIAGED, so all three are triaged with it.
+
+### `!=` was untriaged and `==` was invisible, for no reason but timing
+
+§21 settled what these two ask: identity -- the same heap handle and the same block
+address, therefore the SAME ITEM -- and not value equality, which is `r_data()` and
+`r_name()`. **The flat surface already carries that question, as a value rather than as a
+predicate.** `msgcore_field_get_p2pos` is "the natural inode number (st_ino)"
+(`Msgcore_c.h:547`), and two handles denote the same item exactly when their p2pos are
+equal and non-zero, compared with the caller's own `==`.
+
+What makes this a decision rather than an omission is that the operator is the WEAKER
+test. It compares a block address, and rule 2 at the top of `Msgcore_c.h` says any
+allocating call may move every block, so a `msgcore_field_equals` would be answerable only
+between two handles re-resolved since the last mutation -- where the p2pos comparison
+survives one. Exporting it would put a weaker identity test beside a stronger one already
+there. The residue is small and is named in the line rather than left out of it: p2pos
+returns 0 for an unaddressable standalone field, so two distinct FLOATING fields compare
+equal on the flat surface where the operator would separate them.
+
+**`==` was not on the check's list and should have been.** `4f4c334` added both identity
+overloads on the same day. `P3PmsgField::operator ==` was already a banked NAME, because
+`operator == ( LPCTNAM )` predates it -- `P2Pmsg.h:720` at `4f4c334^` -- and the check asks
+about each distinct name once, so the new `==` collapsed into the line that already existed
+and never resurfaced, while `!=` was a new name and surfaced immediately. They are one
+decision and are triaged as one.
+
+```
+Scanned 288 public members over 1 pair(s); 116 bound, 172 allowlisted.
+  159 of the allowlist entries are UNTRIAGED -- banked, not decided.
+  43 of the 116 bound matched by prefix fallback, 28 of those at a bare accessor root.
+
+OK -- every upstream member has a binding, or an allowlisted reason not to.
+```
+
+163 was right when §29 counted it. It is 159 now: four lines moved out of UNTRIAGED and
+two were new. The scanned total is 288 rather than 286 and the allowlist 172 rather than
+170 because §31's two collection `HeapHolders` arrived while this was being written, and
+the check caught them -- which is the check working. `P3PmsgData::HeapHolders` needs no
+line: that class has no family in `api-drift.config.psd1` and is never scanned, for the
+reason the config states in its own comment.
+
+### The third thing: `bound` is not measuring what it says
+
+`P3PmsgList::Drop` being scored `bound` is not a one-off. The matcher tries the exact
+snake-cased name first and then falls back to a prefix root, and the root is the FIRST
+segment only:
+
+```powershell
+$root = $target + ($snake -split '_')[0]
+foreach ($n in $surfaceNames) {
+    if ($n -eq $root -or $n.StartsWith($root + '_')) { $hit = $n; break }
+}
+```
+
+The comment above it says what the fallback is for, and for that case it is right:
+`DeclareItem` becomes `declare_item`, roots at `declare`, and matches
+`msgcore_..._declare_double` -- one C++ name spread across overloads the surface spells
+out. For a ONE-WORD member the first segment is the whole name and nothing is lost. For a
+multi-word member whose first segment is an accessor verb, the root is `get`, `is` or
+`set`, and it matches whatever comes first in the surface list:
+
+```
+P3PmsgList::GetHeadPos    -> msgcore_list_get_count
+P3PmsgList::GetTail       -> msgcore_list_get_count
+P2PmsgMgr::IsField        -> msgcore_mgr_is_dirty
+P3PmsgField::IsInline     -> msgcore_field_is_null
+P3PmsgField::GetPath      -> msgcore_field_get_name
+```
+
+None of those is a binding. **43 of the 116 "bound" match by the fallback, and 28 of those
+collapse to a bare `get` / `is` / `set` root.** The honest bound count is nearer 88 than
+116, and the backlog this check exists to work down is correspondingly LARGER than the 159
+it prints, not smaller.
+
+Those two numbers are printed by the check now rather than asserted here, for the reason
+its own allowlist header gives about the UNTRIAGED count -- a number nobody prints is a
+number nobody reads -- and `-ShowBound` names every one of the 28:
+
+```
+  43 of the 116 bound matched by prefix fallback, 28 of those at a bare accessor root.
+```
+
+**One of those false positives is load-bearing, and it is §29's own.** There is no
+`msgcore_field_is_sole` in `Msgcore_c.h`; there are nine `msgcore_field_is_*` predicates
+and not one of them answers this question. `IsSole` scores bound against
+`msgcore_field_is_null` by the `is` root. So the `HeapHolders` triage reason §29 wrote --
+"a caller on the flat surface wants the answer and has it -- `IsSole` is the question the
+C API would carry" -- says something that is not true. The argument around it survives
+whole: the working of a question is not the question, `HeapHolders` is only meaningful next
+to `P2PmsgHeap_RefCount` which the surface does not expose either, and it takes a
+`P2PmsgHANDLE` which is not a type the surface has. The sentence is corrected in place and
+the premise it was resting on becomes an open entry. `IsInline` is in the same position, by
+the same root.
+
+**Nothing is bound here and the matcher is not tightened here**, and both of those are
+deliberate. Tightening it turns 28 silent passes into 28 new failures in one commit, every
+one of them a separate question about the C API -- which is the work §29 declined for two
+members and this section has done for six. Doing it as a side effect of a `^`
+investigation would be the same mistake in the other direction. What this section owes the
+next reader is the measurement, and the measurement is above.
+
+## 35. What is left
+
+- **`check_asserts.ps1` fails, and its baseline has been stale since `4d39d0d` -- the same
+  commit §33 found `exports-cxx-win32.manifest` frozen at.** Three ceilings were banked
+  that day; §29 re-measured one, §33 re-measured the second, and this is the third.
+  `callwrap` has risen 245 to 248 and `predicate` 192 to 195 across the thirty-six commits
+  that have touched a non-test source since, while `marker` has FALLEN 216 to 208 and the
+  fall was never banked -- which the file's own header says is the worse half, because "the
+  stale ceiling silently re-admits everything between the two numbers". Nothing in §31 to
+  §34 adds an ASSERT anywhere: the counts are identical against a pristine worktree of
+  `4e897f7`, which is how this was told apart from our own work. It is not re-banked here,
+  because `-Regenerate` would bank six rises nobody has looked at and retire a notice that
+  is doing its job -- the same reason §34 declined to tighten the drift matcher. Each of the
+  six wants the argument the register's item 19 asks for: if the condition matters in
+  Release, throw; if it does not, do not assert it either.
+
+- **The untrusted BSTRio load path asserts on its way to refusing.** §32 found it while
+  walking the fuzz corpus: `P2PmsgHeap_CreateBSTRio` ends in
+  `ASSERT(P2PmsgHeap_AssertVBlocksBSTRio(pHandle))` (`MsgVBHeap.cpp:3609`), and the
+  untrusted overload calls that function before running the same walk again as its real
+  gate. Four of the nineteen images in hand fire it -- `f11_collate_nogrow.dat`,
+  `f2_walk_oob.dat`, `c4_bstrio_honest.dat`, `c4_f2_walk_oob.dat` -- and every one of them
+  is then refused correctly and by name. So the defect is the assertion and the doubled
+  walk, not the outcome: a Debug consumer handed a corrupt image stops in a dialog on a
+  structure the library was about to reject. It is §30's shape on the load path. It is not
+  closed here because suppressing an assertion inside a gate, with
+  `P2PmsgHeap_UntrustedGate` in the middle of it, wants its own teeth rather than a change
+  made in passing. The IOMAGE twin (`MsgVBHeap.cpp:3330`, `:3438`) has the same two call
+  sites and has not been measured.
+
+- **`check_api_drift.ps1` scores 43 of its 116 bindings by a prefix fallback, and 28 of
+  those at a bare accessor root.** §34 measured it and the check now prints both numbers on
+  every run. `P3PmsgList::GetHeadPos -> msgcore_list_get_count` is not a binding, and
+  neither are the other 27. The honest bound count is nearer 88, so the UNTRIAGED backlog
+  is LARGER than the 159 the same line prints. Tightening the matcher turns 28 silent
+  passes into 28 separate questions about the C API in one commit, which is the work §29
+  declined for two members and §34 did for six; it is a session about the C API and not
+  about `^`.
+
+- **`P3PmsgField::IsSole` and `IsInline` are not on the flat surface, and §29's triage
+  reason said one of them was.** That sentence is corrected in `api-drift.allow` and the
+  members are two of §34's 28. Whether the surface SHOULD carry them is now an open
+  question rather than a settled premise: `msgcore_field_is_sole(MsgFieldHandle)` would be
+  signature-identical to the nine `msgcore_field_is_*` predicates already there, and adding
+  it is an addition to the supported ABI, which bumps `Msgcore_version.h` in the same
+  commit. That is a versioning decision and is left to one.
+
+- **`P3PmsgList::Drop` is decided nowhere and cannot be seen.** It is the same member as
+  `P3PmsgVect::Drop` under the same reason §34 wrote, and it carries no allowlist line on
+  purpose, because the matcher scores it bound against `msgcore_list_drop_head` and a line
+  would be reported as redundant. Its reason is written into the comment block above the
+  `Drop` group, ready to be promoted to a rule line the day the entry above this one is
+  closed.
+
+- **A vect's `m_pP3PmsgData[]` is walked and holds nothing.** §31 measured it as an array
+  of nullptrs for its whole life, because both sites that would fill it -- the vect's own
+  `GetNext` and `GetTail` -- are commented out, and one of them is still spelled
+  `P3PmsgList::GetTail` inside `MsgVect.cpp`. Whether a vect should have list-style data
+  cursors at all is a question about the vect's API. The walk costs three null tests and
+  is there so that restoring those readers cannot make `IsSole` wrong in the unsafe
+  direction without anybody noticing.
+
+- **`P2PmsgMgr` is not descended into.** It derives from `P3PmsgItem` and inherits
+  `P3PmsgField::HeapHolders` unchanged, so any sub-objects of its own are uncounted. That
+  is an undercount, which leaves FALSE, which promises nothing -- §26's safe direction --
+  and every existing `!mgr.IsSole()` row still passes. Nobody has measured what a manager
+  owns.
+
+- **The per-BLOCK reference count is still a different library.** §26 set this out and
+  nothing since has moved it: `VBListHANDLE` has no lock of any kind, only `nRefCount` is
+  atomic, `P2PmsgHeap_Close` says in its own comment that AddRef and Close race across pump
+  threads, and two writes to `m_aVBLock` take no reference at all. `IsSole`'s TRUE is a
+  guarantee and its FALSE still is not the opposite one; §31 narrowed what FALSE is about
+  and did not change that.
+
+- **No image in hand carries a chain longer than one link, and that is the answer rather
+  than a gap.** §32 asked all nineteen and none does. What would still be worth having is a
+  legacy image from outside this repository, since the format argument -- not the file --
+  is what §30 rests on. The measurement is repeatable: the probe is in §36.
 
 Nothing else from this investigation is outstanding. That is not a claim that the grammar
-is without defect -- only that every case these thirty sections measured has an answer,
-and that the answer is pinned by a test.
+is without defect -- only that every case these thirty-four sections measured has an
+answer, and that the answer is pinned by a test.
 
-## 32. Reproducing this document
+## 36. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
@@ -2963,3 +3583,38 @@ The cases are also pinned as regression tests in `tests/MsgcoreSuite.cpp`, run b
 for §7, and `Test_HeapCoalesce` and `Test_HeapCloserFit` for §8. Note that
 `build_run_suite.bat` compiles only the test sources — a change to the library itself does
 not reach the suite until `msbuild` has rebuilt it.
+
+### The image scan of §32
+
+§32's answer is a measurement over files rather than over code, so it is reproduced the
+same way — one probe, built against the static library, pointed at every arena on disk:
+
+```
+cl /nologo /EHsc /MDd /std:c++17 /Zc:wchar_t ^
+   /D_DEBUG /D_CONSOLE /D_UNICODE /DUNICODE /D_AFXDLL /D_WIN32_WINNT=0x0603 ^
+   /DMsgcore_STATIC /I. chain_probe.cpp ^
+   /link /LIBPATH:out\x64\DebugLib Msgcore.lib MsWsock.lib ws2_32.lib ^
+   comsuppwd.lib Propsys.lib /OUT:chain_probe.exe
+
+chain_probe.exe <control-image-to-write> <image> [image ...]
+```
+
+It reuses `ChainLen29`, `ChainTail29` and `Lengthen29` from `Test_ChainLongerThanOne`
+verbatim, writes its own three-link image as argument one — the positive control, without
+which zero findings prove nothing — and then opens each remaining file with
+`P2PmsgHeap_Create*` and walks the arena with the library's own `VBLock_Hdr_u_SizeNN`,
+`VBLock_IsData`, `VBLockData_IsChained` and `VBLockData_GetChain2Next`. Install a
+`_CrtSetReportHook` that counts and returns, as `TestFramework` does, or the four
+assertions §35's first entry names will stop the run in a dialog.
+
+Eleven of the nineteen are refused by the heap-open, which is those files working: most of
+the corpus is malformed on purpose. Reading them needs a scanner that parses the arena
+directly and bounds every declared size to the file length — a block header is
+`uVBLockDefs` (address width in bits 0-1, type in bits 2-5, `VBLock_Data == 0x20`) followed
+by the size field, and a `VBLockData` is a link exactly when its `uDataType` is `0xFF`,
+with the onward offset in `u.aChain2Next{16,32,64}`. Two arena formats reach it: IOMAGE,
+whose `oSync` is a complement pair and whose size is `uiSync1 & 0x00FFFFFF` with the first
+block at offset 8; and BSTRio, whose `oDefs` is the complement pair, whose size is
+`oSize.aSize1`, and whose first block is at `offsetof(cTag)`, 48. `P2PmsgMgr::Load` tests
+BSTRio FIRST, and it has to: the IOMAGE complement test also accepts a BSTRio `oDefs` word,
+so the other order misreads a BSTRio image as an IOMAGE one.
