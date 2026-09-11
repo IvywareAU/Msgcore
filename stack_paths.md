@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §7 says how to reproduce them.
+> every line of output below was run against this tree; §6 and §8 say how to reproduce them.
 
 ## 1. Summary
 
@@ -30,11 +30,15 @@ followed nowhere:
 | `P3Pmsg_IsValidItemname` (`P2Pmsg.cpp:7006`) | refused inside a name, correctly | — |
 | `P3Pmsg_SelectObjectRecurse`, field arm | `ASSERT(0); return P3PmsgObject();` | **a debug build asserted; a release build answered nothing** |
 | `P3Pmsg_SelectObjectRecurse`, descendant arm | tested `T_StckDelim` where it meant `T_DescDelim` | `Desc^name` descended, `Desc.name` matched nothing |
+| `P3Pmsg_SelectObjectRecurse`, list arm | `ASSERT(0)`, and nothing else | **no component of any kind resolved against a list** |
+| `P3Pmsg_SelectObjectRecurse`, vectors | no arm at all | a vector fell to the `ASSERT(0)` closing the function |
+| `P3Pmsg_SelectObject`, leading component | `IsField()`-only, then asserted and recursed anyway | a rooted path was never checked against the list it started at |
 | `P2PmsgMgr::RootPath2Object` | stripped off every component | `^` and `@` were looked up as plain child names |
 | `P3Pmsg_SplitRootPath` | refused a bare `^`, dropped a trailing one | **`.Root.Item^` silently answered with `Item` itself** |
 | `RootPath2Object`, on a miss | assigned a void object into a `P3PmsgItem` | threw `"Invalid overloaded context"` instead of answering |
 
-Fixed by `b6ae7c7` (the selector) and `e22c271` (the root-path walk).
+Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk) and `72e8f88` (lists
+and vectors, §6).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -213,12 +217,103 @@ exist"`. Four of the examples in `_Msgcore_UseExamples` depend on it in as many 
 | `Item^Child` | the same thing; the `.` after a `^` is optional, as it is after a name |
 | `Item@Tag^` | a pushed attribute — attributes are items and carry stacks too |
 | `.Root.Item^` | the same, as a full root path through `RootPath2Object` |
+| `List@Tag` | an attribute of a list — a list is an item and carries its own |
+| `List.Child` | a descendant of a list, likewise |
+| `Vect@Tag` | the same for a vector |
 
-## 6. What `^` still does not do
+## 6. Lists and vectors — one arm, three item types
 
-- **Lists and vectors.** The list arm of `P3Pmsg_SelectObjectRecurse` is `ASSERT(0)` in its
-  entirety — no path component of any kind resolves against a list — so `^` is not special
-  there.
+`P3Pmsg_SelectObjectRecurse` has an arm per object kind. The list arm was `ASSERT(0)` and
+nothing else, and there was no vector arm at all, so a vector fell past every test to the
+`ASSERT(0)` that closes the function.
+
+Landing **on** a list always worked: `P3PmsgCurs::Goto` connects `m_oP3PmsgList` for a
+match of that type (`MsgCurs.cpp`), and the descendant arm returns straight from the
+cursor. It was the step **after** that which had nowhere to go — and that is an ordinary
+thing to ask for, because a list has attributes and descendants of its own. The
+`VBLockItem` header is the same six addresses whatever the `ut` union under it holds:
+
+```cpp
+struct VBItemNN__            // P2PmsgVBLock.h:487
+{
+    ADDR__  aParent;
+    ADDR__  aPrev;
+    ADDR__  aNext;
+    ADDR__  aExtra;          // Attributes
+    ADDR__  aStack;          // Stack
+    ADDR__  aDescn;          // Descendants
+};
+```
+
+`P3PmsgList` and `P3PmsgVect` both derive from `P3PmsgField`, so the field arm's body is
+already correct for all three; the fix is the guard, not new code:
+
+```cpp
+if ( pObject->IsField() || pObject->IsList() || pObject->IsVect() )
+```
+
+The one place the type does matter is the stack, because `MsgStck` keeps an accessor per
+type and each *throws* if asked for the wrong one, so `^` dispatches to
+`r_list()` / `r_vect()` / `r_item()`. That branch is unreachable today: `MsgStck::Push()`
+still asserts for lists and vectors, so `IsStacked()` above it is what answers a `^` on
+one, and it answers false.
+
+### Measured
+
+`Test_ListPath` in `tests/MsgcoreSuite.cpp` pins five cases. Run against the library built
+from the commit before the fix, all five fail — three assertions per lookup, then the
+wrong answer:
+
+```
+  - '@' reaches an attribute of a list
+      ASSERT  P2Pmsg.cpp(6871) : Assertion failed!      <- the list arm
+      ASSERT  MsgVBHeap.cpp(4677) : Assertion failed!
+      ASSERT  P2Pmsg.cpp(6952) : Assertion failed!      <- the function tail
+      FAIL    !P3Pmsg_SelectObject(&oHost.r_Object(), L"Numbers@Unit").IsVoid()
+  - a descendant name resolves through a list
+      ...
+      FAIL    !P3Pmsg_SelectObject(&oHost.r_Object(), L"Numbers.Kid").IsVoid()
+  - '@' reaches an attribute of a vector
+      ASSERT  MsgVBHeap.cpp(4677) : Assertion failed!
+      ASSERT  P2Pmsg.cpp(6952) : Assertion failed!      <- no list arm to hit first
+      FAIL    !P3Pmsg_SelectObject(&oHost.r_Object(), L"Payload@Unit").IsVoid()
+  - a rooted path checks the name of a list it starts at
+      ASSERT  P2Pmsg.cpp(6991) : Assertion failed!      <- P3Pmsg_SelectObject
+      ...
+      FAIL    !P3Pmsg_SelectObject(&oList.r_Object(), L".Numbers@Unit").IsVoid()
+
+  cases   : 106  (5 with failures)
+  checks  : 484  (34 failed)
+  result  : FAIL
+```
+
+The vector case is worth reading twice: it never reaches `6871`, because there was no
+list arm for it to hit. It goes straight to the tail.
+
+`'^' on a list is a miss, not an assertion` is the fifth, and it is the one with no `FAIL`
+line above — the answer was void before the fix and is void after it. What changed is that
+asking the question no longer takes a debug build down.
+
+After the fix, on the same tree: **106 cases, 484 checks, PASS** static and **PASS** dll,
+and `build_run_c4.bat` PASS.
+
+To reproduce the failure column, put the pre-fix selector back under the current tests and
+rebuild the library — `build_run_suite.bat` compiles the test sources only, so a source
+change does not reach it until the library itself is rebuilt:
+
+```
+git checkout 72e8f88~1 -- P2Pmsg.cpp
+msbuild "Msgcore(2026).vcxproj" /p:Configuration=DebugLib /p:Platform=x64
+tests\build_run_suite.bat static
+git checkout HEAD -- P2Pmsg.cpp
+msbuild "Msgcore(2026).vcxproj" /p:Configuration=DebugLib /p:Platform=x64
+```
+
+## 7. What `^` still does not do
+
+- **Pushing a list or a vector.** `MsgStck::Push()` and `Pop()` are `ASSERT(0)` for both,
+  so there is never anything on a list's `aStack` to follow. `List^` is a well-formed
+  question with an empty answer; §6 covers why it is no longer an assertion.
 - **Collections.** `aStack` is a `VBLockItem` field; a `VBLockAttr` or `VBLockDesc` block
   has none. A `^` applied to the attribute or descendant *collection* is a broken path, not
   an assertion. The attributes and children **in** them are items and do have stacks.
@@ -230,7 +325,7 @@ exist"`. Four of the examples in `_Msgcore_UseExamples` depend on it in as many 
   throws `"Invalid overloaded context"`, exactly as before; the new empty answer applies
   only when the selection is void.
 
-## 7. Reproducing this document
+## 8. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
