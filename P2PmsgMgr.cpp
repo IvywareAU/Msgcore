@@ -827,7 +827,23 @@ P2PmsgMgr::RootPath2Object ( LPCWSTR lpszObjectPath )
     // Introduce locals
     CString        strRoot;
     CList<CString> oCListItems;
-    P3PmsgItem     oItemParent = r_Object();     // Root becomes parent
+    //  A P3PmsgObject, not a P3PmsgItem. Every step of this walk is
+    //  P3Pmsg_SelectObject, which is a free function over P3PmsgObject and has
+    //  an arm for each kind there is -- an item, a list, a vector, an attribute
+    //  collection, a descendant collection. Nothing about the walk needed a
+    //  field; only the variable did, and holding one meant the assignment that
+    //  carries the walk forward was P3PmsgField::operator=(const
+    //  P3PmsgObject&), which THROWS "Invalid overloaded context" for anything
+    //  that is not a field.
+    //
+    //  So a list or a vector anywhere but the last position ended the path
+    //  with a raised event: ".Root.Numbers.Leaf" and ".Root.Numbers@Unit" both
+    //  threw, though the object-path spellings of the same two questions have
+    //  answered since §6 taught the selector about containers. An ordinary MISS
+    //  under a list -- ".Root.Numbers.Nobody" -- threw the same event rather
+    //  than "Path to object does not exist", because the walk died on the list
+    //  one step before it ever asked about the name.
+    P3PmsgObject   oParent = r_Object();         // Root becomes parent
 
     // Problematic
     try
@@ -881,70 +897,58 @@ P2PmsgMgr::RootPath2Object ( LPCWSTR lpszObjectPath )
              lpszItemName[0] == T_ForeSlash    )
           lpszItemName++;
 
-        // Requested path item may or may not exist at this stage
-        // NOTES: If the requested Item is non-descendant type cannot proceed
-        //      : P2PmsgTreeCtrl's only handle descendant items
-        if ( !oItemParent.Exists(lpszItemName) )
-        {
-          wchar_t wTypeDelimiter = strItem[0];
-          if ( wTypeDelimiter == T_DescDelim ||
-               wTypeDelimiter == T_BackSlash ||
-               wTypeDelimiter == T_ForeSlash    )
-          {
-            //RefreshFolder(oItemParent);
-            if ( m_pfncP2PopulateCB )
-              m_pfncP2PopulateCB ( m_nfncP2PopulateCBKey, oItemParent.GetP2Pos(), FALSE );
-            if ( !oItemParent.Exists(lpszItemName) )
-              EVERR->MODULE
-                   //  L"%ls", never the path as the format itself: Message() is
-                   //  Message(LPCWSTR lpszFormat, ...) and runs the string
-                   //  through _vstprintf_s, so an object path containing a '%'
-                   //  was consuming a variadic argument that was never passed
-                   //  (finding M3 of the internal, unpublished security
-                   //  review). Paths reach here from callers,
-                   //  including the C ABI. %ls not %s - wide in both the MSVC
-                   //  and glibc dialects (see commit 5aa9b2a).
-                   ->Message(L"%ls", lpszObjectPath)
-                   ->Message("Path to object does not exist")
-                   ->Throw();
-          }
-        }
-
         // Select the current item
         // NOTES: Last item in list is the requested item
-        //      : A component that resolves to nothing ENDS the walk, and the
-        //        empty object is the answer -- "IsEmpty flags failed search",
-        //        as the contract above says. It cannot be assigned into
-        //        oItemParent and tested afterwards, because
-        //        P3PmsgField::operator=(const P3PmsgObject&) refuses anything
-        //        that is not a field and THROWS ("Invalid overloaded context"),
-        //        so an ordinary miss came out of here as a raised event rather
-        //        than an empty answer. Nor can the walk simply stop and hand
-        //        back what it has: oItemParent still holds the PARENT, which
-        //        would answer a failed search with the wrong object.
-        //      : Only the descendant components above throw for a miss, which
-        //        is deliberate and unchanged -- those get the populate callback
-        //        and then "Path to object does not exist". An '@' or a '^' that
-        //        finds nothing is an ordinary answer: an item that was never
-        //        pushed has no snapshot.
-        P3PmsgObject oSelected = oItemParent.SelectObject(lpszItemName);
+        //      : ONE selection per component. P3PmsgItem::Exists is itself
+        //        "!P3Pmsg_SelectObject(...).IsVoid()" (P2Pmsg.cpp), so asking
+        //        it and then selecting ran the whole lookup twice for every
+        //        component of every path. The answer is what the test was
+        //        after; only the populate callback below needs a second look,
+        //        and only when the first one missed.
+        P3PmsgObject oSelected = P3Pmsg_SelectObject ( &oParent, lpszItemName );
+
+        // NOTES: If the requested Item is non-descendant type cannot proceed
+        //      : P2PmsgTreeCtrl's only handle descendant items
         if ( oSelected.IsVoid() )
-          return P3PmsgObject();
-        //  The assignment below is the operator= described above, and it
-        //  throws for anything that is not a field. Where there is nothing
-        //  left to walk there is also nothing to assign INTO oItemParent for:
-        //  the object IS the answer, and handing it back is what the contract
-        //  says. ".Root.Item@^" -- the attribute collection as it stood at the
-        //  last push -- resolves to a collection, and the object-path spelling
-        //  has always returned it; only the walk could not carry it.
-        //
-        //  A non-field reached BEFORE the last component still throws, and
-        //  deliberately: the walk has no way to step off one.
-        if ( posItems == nullptr && !oSelected.IsField() )
-          return oSelected;
-        oItemParent = oSelected;
+        {
+          //  Only the DESCENDANT components throw for a miss, which is
+          //  deliberate and unchanged -- those get the populate callback and
+          //  then "Path to object does not exist". An '@' or a '^' that finds
+          //  nothing is an ordinary answer: an item that was never pushed has
+          //  no snapshot, so the empty object is the answer -- "IsEmpty flags
+          //  failed search", as the contract above says.
+          wchar_t wTypeDelimiter = strItem[0];
+          if ( wTypeDelimiter != T_DescDelim &&
+               wTypeDelimiter != T_BackSlash &&
+               wTypeDelimiter != T_ForeSlash    )
+            return P3PmsgObject();
+
+          //RefreshFolder(oParent);
+          if ( m_pfncP2PopulateCB )
+            m_pfncP2PopulateCB ( m_nfncP2PopulateCBKey, oParent.GetP2Pos(), FALSE );
+          oSelected = P3Pmsg_SelectObject ( &oParent, lpszItemName );
+          if ( oSelected.IsVoid() )
+            EVERR->MODULE
+                 //  L"%ls", never the path as the format itself: Message() is
+                 //  Message(LPCWSTR lpszFormat, ...) and runs the string
+                 //  through _vstprintf_s, so an object path containing a '%'
+                 //  was consuming a variadic argument that was never passed
+                 //  (finding M3 of the internal, unpublished security
+                 //  review). Paths reach here from callers,
+                 //  including the C ABI. %ls not %s - wide in both the MSVC
+                 //  and glibc dialects (see commit 5aa9b2a).
+                 ->Message(L"%ls", lpszObjectPath)
+                 ->Message("Path to object does not exist")
+                 ->Throw();
+        }
+
+        //  Whatever it is, the walk stands on it and keeps going. There is no
+        //  last-component special case any more: a non-field that ends the
+        //  path is handed back by the return below, which is the same object
+        //  by the same route as one the walk steps off.
+        oParent = oSelected;
       }
-      return oItemParent.r_Object();
+      return oParent;
     }
 
     // Tidy up, and

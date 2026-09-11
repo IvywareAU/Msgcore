@@ -1916,6 +1916,150 @@ static void Test_AttrCollectionPath()
 }
 
 // ---------------------------------------------------------------------------
+// P2PmsgMgr::RootPath2Object : a non-field reached part way along the walk
+// ---------------------------------------------------------------------------
+static void Test_RootPathContainers()
+{
+    //  The walk held a P3PmsgItem, so the assignment that carries it forward
+    //  was P3PmsgField::operator=(const P3PmsgObject&) -- which throws
+    //  "Invalid overloaded context" for anything that is not a field. A list
+    //  or a vector is an item but not a field (VBLockItem_IsField is false
+    //  for both), so a container anywhere BUT the last position ended the
+    //  path with a raised event.
+    //
+    //  The object-path spellings of the same questions have answered since §6
+    //  taught the selector about containers; it was only the root-path walk
+    //  that could not step off one. Every step of it is P3Pmsg_SelectObject,
+    //  a free function over P3PmsgObject with an arm for each kind there is,
+    //  so nothing about the walk needed a field -- only the variable did.
+    TF_CASE("a root path walks over a list and keeps going")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgList oList(L"Numbers", P3PmsgData((int)0));
+        oList.AddListTail(P3PmsgData((int)1));
+        oList.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Unit");
+        oList.r_Desc(P3PmsgField::AttrCMD_Create);
+        oList.r_Desc() += P3PmsgField(L"Leaf");
+        mgr.r_Desc() += oList;
+
+        //  Landing ON the list was never the problem -- §10 made a non-field
+        //  last component an answer rather than a throw.
+        P3PmsgObject oOn = mgr.RootPath2Object(L".Store.Numbers");
+        TF_CHECK(!oOn.IsVoid());
+        TF_CHECK(oOn.IsList());
+
+        //  One step further is the half that threw.
+        P3PmsgObject oAttr = mgr.RootPath2Object(L".Store.Numbers@Unit");
+        TF_CHECK(!oAttr.IsVoid());
+        P3PmsgObject oKid = mgr.RootPath2Object(L".Store.Numbers.Leaf");
+        TF_CHECK(!oKid.IsVoid());
+
+        //  And they are the same objects the object-path spellings answer.
+        P3PmsgObject oRoot = mgr.r_Object();
+        P3PmsgObject oAttrSel = P3Pmsg_SelectObject(&oRoot, L"Numbers@Unit");
+        P3PmsgObject oKidSel  = P3Pmsg_SelectObject(&oRoot, L"Numbers.Leaf");
+        TF_CHECK(!oAttrSel.IsVoid());
+        TF_CHECK(!oKidSel.IsVoid());
+        if (!oAttr.IsVoid() && !oAttrSel.IsVoid())
+            TF_CHECK(oAttr.GetP2Pos() == oAttrSel.GetP2Pos());
+        if (!oKid.IsVoid() && !oKidSel.IsVoid())
+            TF_CHECK(oKid.GetP2Pos() == oKidSel.GetP2Pos());
+
+        //  A list carries an attribute COLLECTION like any other item (§12).
+        P3PmsgObject oColl = mgr.RootPath2Object(L".Store.Numbers@");
+        TF_CHECK(!oColl.IsVoid());
+        TF_CHECK(oColl.IsAttr());
+    }
+
+    //  A vector is the third item type and reads identically -- the VBLockItem
+    //  header is the same six addresses whatever the ut union holds (§6).
+    TF_CASE("a root path walks over a vector and keeps going")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgVect oVect(2, L"Payload", P3PmsgData((int)0));
+        oVect.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Scale");
+        oVect.r_Desc(P3PmsgField::AttrCMD_Create);
+        oVect.r_Desc() += P3PmsgField(L"Note");
+        mgr.r_Desc() += oVect;
+
+        TF_CHECK(mgr.RootPath2Object(L".Store.Payload").IsVect());
+        TF_CHECK(!mgr.RootPath2Object(L".Store.Payload@Scale").IsVoid());
+        TF_CHECK(!mgr.RootPath2Object(L".Store.Payload.Note").IsVoid());
+    }
+
+    //  A COLLECTION part way along is the other non-field the walk can reach.
+    //  "@^" names the attribute collection as it stood at the last push (§9),
+    //  and the component after it is an ordinary name looked up inside it --
+    //  so "@^.Currency" and "^@Currency" are two spellings of one object, and
+    //  only the second of them resolved.
+    TF_CASE("a root path walks over an attribute collection")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        oLive.r_Stck().Push();
+        oLive.r_Attr() += P3PmsgField(L"Venue");        // after the push
+
+        P3PmsgObject oThrough = mgr.RootPath2Object(L".Store.BHP@^.Currency");
+        P3PmsgObject oAround  = mgr.RootPath2Object(L".Store.BHP^@Currency");
+        TF_CHECK(!oThrough.IsVoid());
+        TF_CHECK(!oAround.IsVoid());
+        if (!oThrough.IsVoid() && !oAround.IsVoid())
+            TF_CHECK(oThrough.GetP2Pos() == oAround.GetP2Pos());
+
+        //  It really is the snapshot's collection: Venue was added after the
+        //  push, so it is in the live one and not in this one.
+        TF_CHECK(!mgr.RootPath2Object(L".Store.BHP@Venue").IsVoid());
+        bool bThrewVenue = false;
+        try   { mgr.RootPath2Object(L".Store.BHP@^.Venue"); }
+        catch (P2Pevent* pEVT) { bThrewVenue = true; pEVT->Cancel(false); }
+        TF_CHECK(bThrewVenue);
+    }
+
+    //  The miss rules are the ones already on record, and the walk reaches
+    //  them now instead of dying one component early. A DESCENDANT component
+    //  that finds nothing throws "Path to object does not exist" -- it used to
+    //  throw "Invalid overloaded context" from the list above it, having never
+    //  asked about the name at all. An '@' or a '^' that finds nothing is an
+    //  ordinary empty answer. The component's own delimiter decides, as it
+    //  always has, not what is being searched.
+    TF_CASE("a miss under a container is the miss it always was")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgList oList(L"Numbers", P3PmsgData((int)0));
+        oList.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Unit");
+        oList.r_Desc(P3PmsgField::AttrCMD_Create);
+        oList.r_Desc() += P3PmsgField(L"Leaf");
+        mgr.r_Desc() += oList;
+
+        bool bThrewKid = false;
+        try   { mgr.RootPath2Object(L".Store.Numbers.Nobody"); }
+        catch (P2Pevent* pEVT) { bThrewKid = true; pEVT->Cancel(false); }
+        TF_CHECK(bThrewKid);
+
+        TF_CHECK(mgr.RootPath2Object(L".Store.Numbers@None").IsVoid());
+        TF_CHECK(mgr.RootPath2Object(L".Store.Numbers^").IsVoid());
+
+        //  And a root with no components at all still answers the root.
+        P3PmsgObject oRoot = mgr.RootPath2Object(L".Store");
+        TF_CHECK(!oRoot.IsVoid());
+        TF_CHECK(oRoot.GetP2Pos() == mgr.r_Object().GetP2Pos());
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3Pmsg_SelectObject : path components against a list or a vector
 // ---------------------------------------------------------------------------
 static void Test_ListPath()
@@ -3257,6 +3401,7 @@ void RunMsgcoreSuite()
     Test_CollectionStack();
     Test_GeneratedStackPath();
     Test_AttrCollectionPath();
+    Test_RootPathContainers();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();
