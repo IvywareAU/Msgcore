@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §18 say how to
+> every line of output below was run against this tree; §6, §7 and §19 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -64,6 +64,9 @@ followed nowhere:
 | `P2PmsgMgr::P2Pos2Path` | `IsField(pos)`, which is `VBLockItem_IsField` | **a list and a vector asserted, though `P3Pmsg_GetPath` builds both (§16)** |
 | `P2PmsgMgr::P2Pos2Path` | no arm for a collection at all | an object had a path the manager could not emit (§16) |
 | `P2PmsgMgr::P2Pos2Path`, anything else | `ASSERT(0)` | a debug assertion for a handle naming nothing (§16) |
+| `RootPath2Object`, the walk's strip | fired on a `.` with anything after it | **`.Store.BHP.^` was the snapshot ITEM, where `@^` is the collection's (§17)** |
+| `P3Pmsg_SelectObject`, the wrapper | guarded the leading-`.` rule on LENGTH | `.^` matched an empty name against the item's own, and came back void (§17) |
+| `P3Pmsg_SelectObjectRecurse`, field arm `.` | handed the rest of the path to the ITEM | `Item.^` was the item's snapshot; `Item@^` is the collection's (§17) |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
@@ -73,7 +76,7 @@ own half of that, §8), `dbfa789` (the half the tag could not reach, §8), `3f9e
 the library itself writes, §11), `d31f2c4` (the collection's own path, §12) and
 `8218904` (stepping off a container, §13), `5d48e5a` (a bare `@` anywhere, §14) and
 `2a03161` (the descendant collection, and the rule stated once, §15) and `0888659`
-(one arm per block kind, §16).
+(one arm per block kind, §16) and `c0409cb` (a bare `.` wherever it stands, §17).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -1202,20 +1205,93 @@ assertion into the running case as a failure, so against the unfixed library all
 cases fail — 25 checks — and the fourth reports `P2PmsgMgr.cpp(808) : Assertion failed!`
 by name.
 
-## 17. What is left
+## 17. `.^`, and the last delimiter that was not bare everywhere
 
-- **`.^` means two different things, and neither is the one §9 would predict.** In a root
-  path `.^` is a component the walk strips to `^`, so `.Store.BHP.^` is the snapshot
-  **item** — while `.Store.BHP^.` is the snapshot's descendant **collection**, and both
-  resolve. As an object path, `oField.SelectObject(L".^")` is void: `P3Pmsg_SelectObject`
-  reads the leading `.` as "this component names the object you are standing on" and matches
-  the empty name that follows against the item's real one. By §9's commuting rule `.^` ought
-  to name the collection's snapshot, and that object is reachable — `.Store.BHP^.` answers
-  it, and so does handing the collection to `P3Pmsg_SelectObject` with a `^`, both landing
-  on pos=798 in one run. It is only this spelling of it that misses. Predates all of this, and
-  no measurement here depends on it.
+§9's rule is that `^` commutes with `@` and with `.`. It did for `@`: `Item@^` and
+`Item^@` both name the attribute collection inside the snapshot, and §10 and §14 are the
+two steps that made that true. For `.` only one direction worked.
 
-## 18. Reproducing this document
+| spelling | was | ought |
+|---|---|---|
+| `Item^.` | the snapshot's descendant collection | — |
+| `Item.^`, as a root path | the snapshot **item** | the snapshot's descendant collection |
+| `Item.^`, as an object path | void | the snapshot's descendant collection |
+
+Three places tested for a `.` at the **end** of the path, where the rule §15 states is a
+`.` with no **name** after it.
+
+**The walk's strip, in `RootPath2Object`.** The splitter seeds a component with the
+delimiter that introduces it and absorbs a following `^` — it does exactly this for `@^`
+(§10) — so `.Store.BHP.^` reaches the walk as one component, `.^`:
+
+```
+  .Store.BHP.^           -> TRUE  root='Store' [.BHP][.^]
+  .Store.BHP^.           -> TRUE  root='Store' [.BHP][^][.]
+  .Store.BHP@^           -> TRUE  root='Store' [.BHP][@^]
+```
+
+The strip fired on "is there anything after the dot", so `.^` became `^` and selected the
+item's own snapshot. `@^` was never stripped, because `@` is not the descendant
+delimiter — which is why the two spellings one line of reasoning apart behaved
+differently.
+
+**The wrapper, `P3Pmsg_SelectObject`.** A leading `.` means "this component names the
+object you are standing on", and the guard against that reading was `lpszObjectPath[1] ==
+0`. `.^` is two characters, so it took the matching route: `ParseObjectPath` stopped on
+the `^` with an empty name, and the empty name was compared against `BHP`.
+
+**The field arm of `P3Pmsg_SelectObjectRecurse`.** The `@` arm hands the **rest** of the
+path to the attribute collection, which is what makes `Item@^` reach the collection's
+snapshot. The `.` arm handed the rest back to the **item**, so `Item.^` re-entered the
+same arm and took the `^` branch.
+
+All three now ask `P3Pmsg_IsPathDelimiter`, which answers TRUE for the terminator as well
+as for the five delimiters — one call covering both halves of "no name after it". A
+following **name** still goes back to the item: `Item.Last` wants a descendant by name,
+and the field arm's own tail already looks one up through `r_Desc().r_Curs().Goto`, so
+both routes land on the same object and the shorter one is left alone.
+
+**Measured as agreement between the two spellings of one question.** A root path
+`.Store.BHP<suffix>` and an object path `<suffix>` taken from `BHP` ask the same thing,
+and the walk is built to make them agree — it strips a name-carrying `.` off each
+component and hands the rest to `P3Pmsg_SelectObject`. Over 29 suffixes:
+
+```
+  suffix       root .Store.BHP+       object from BHP        agree
+  .^           845 SNAP item          0 (void)               NO      -> both 1220 SNAP desc coll
+  .^.          1220 SNAP desc coll    0 (void)               NO      -> both void
+  ..Last       681 Last live          0 (void)               NO      -> both 681
+  .^.Last      1267 Last SNAP         0 (void)               NO      -> both 1267
+  ..Close      1431 Close live        0 (void)               NO      -> both 1431
+  .Last        681 Last live          0 (void)               NO      -> unchanged, and §18
+  .Close       1431 Close live        0 (void)               NO      -> unchanged, and §18
+
+  22 agree, 7 differ     ->     27 agree, 2 differ
+```
+
+`.Store.BHP.^.` is the one spelling that **loses** an answer, and it should. It reached
+the snapshot's descendant collection only because `.^` meant the snapshot **item**, so the
+trailing `.` was asking an ITEM for its collection. With `.^` naming the collection, the
+trailing `.` asks a COLLECTION for one — the same void `..`, `@.`, `@@` and `^^` all
+answer, and §15's rule that a collection is not an item. The object is not lost: `.^` and
+`^.` both name it, which is the whole point.
+
+## 18. What is left
+
+- **A leading `.` still means something different in the two spellings.** `.Store.BHP.Last`
+  descends; `P3Pmsg_SelectObject(&oBHP, L".Last")` is void, because on an object path a
+  leading `.` asks "is the object I am standing on called this", and `BHP` is not called
+  `Last`. The walk strips a name-carrying `.` off each component before it selects, so the
+  same characters descend there. It is the last row of the sweep above that still reads NO,
+  it is deliberate, and §17's tests pin it so it stays deliberate rather than drifting.
+  Changing it would change what a rooted object path means, which is a larger question than
+  any of the sections above asked.
+
+Nothing else from this investigation is outstanding. That is not a claim that the grammar
+is now without defect — only that every case these seventeen sections measured has an
+answer, and that the answer is pinned by a test.
+
+## 19. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
