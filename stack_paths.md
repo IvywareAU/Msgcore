@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §19 say how to
+> every line of output below was run against this tree; §6, §7 and §20 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -67,6 +67,9 @@ followed nowhere:
 | `RootPath2Object`, the walk's strip | fired on a `.` with anything after it | **`.Store.BHP.^` was the snapshot ITEM, where `@^` is the collection's (§17)** |
 | `P3Pmsg_SelectObject`, the wrapper | guarded the leading-`.` rule on LENGTH | `.^` matched an empty name against the item's own, and came back void (§17) |
 | `P3Pmsg_SelectObjectRecurse`, field arm `.` | handed the rest of the path to the ITEM | `Item.^` was the item's snapshot; `Item@^` is the collection's (§17) |
+| `P3Pmsg_SelectObject`, the leading component | asserted the object's own name at any depth | **`.Last` asked `BHP` whether it is called `Last` (§18)** |
+| `P3Pmsg_SelectObject`, a match with nothing after it | recursed with an empty path | **`P3Pmsg_GetPath(&mgr)` is `.Store`, and `.Store` at the root answered void (§18)** |
+| `P3Pmsg_SelectObject`, the collection arms | the same discarded match | `Tag` answered where `.Tag` did not, on both collections (§18) |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
@@ -76,7 +79,8 @@ own half of that, §8), `dbfa789` (the half the tag could not reach, §8), `3f9e
 the library itself writes, §11), `d31f2c4` (the collection's own path, §12) and
 `8218904` (stepping off a container, §13), `5d48e5a` (a bare `@` anywhere, §14) and
 `2a03161` (the descendant collection, and the rule stated once, §15) and `0888659`
-(one arm per block kind, §16) and `c0409cb` (a bare `.` wherever it stands, §17).
+(one arm per block kind, §16) and `c0409cb` (a bare `.` wherever it stands, §17) and `2de26ac`
+(the root marker only where a path is rooted, §18).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -1276,22 +1280,78 @@ trailing `.` asks a COLLECTION for one — the same void `..`, `@.`, `@@` and `^
 answer, and §15's rule that a collection is not an item. The object is not lost: `.^` and
 `^.` both name it, which is the whole point.
 
-## 18. What is left
+## 18. A leading `.` was the root marker everywhere
 
-- **A leading `.` still means something different in the two spellings.** `.Store.BHP.Last`
-  descends; `P3Pmsg_SelectObject(&oBHP, L".Last")` is void, because on an object path a
-  leading `.` asks "is the object I am standing on called this", and `BHP` is not called
-  `Last`. The walk strips a name-carrying `.` off each component before it selects, so the
-  same characters descend there. It is the last row of the sweep above that still reads NO,
-  it is deliberate, and §17's tests pin it so it stays deliberate rather than drifting.
-  Changing it would change what a rooted object path means, which is a larger question than
-  any of the sections above asked.
+`P3Pmsg_GetPath` says what a path is rooted at, in its own first comment:
+
+```
+//  Process root
+//  NOTES: Defined by absence of parent.
+//       : May be physical root object ":Rootname", or
+//       : Floating item ".item"
+```
+
+It emits `.item1.item2@item3` for an object in a tree and `.item` for a floating one, and
+the **leading** component names the object the path starts from. `P3Pmsg_SelectObject`
+asserted that name at every depth instead. So `.Last` asked `BHP` whether `BHP` is called
+`Last`, while `.Store.BHP.Last` descends — `RootPath2Object` strips a name-carrying `.`
+off each component before it selects, and the raw object path has no such strip.
+
+The test is `HasParent()`. An object with a parent is not where a rooted path starts, so a
+leading `.` there is an ordinary descendant delimiter. That is §17's sweep finished:
+
+```
+  .Last        681 Last live          0 (void)        NO    ->   both 681
+  .Close       1431 Close live        0 (void)        NO    ->   both 1431
+
+  27 agree, 2 differ     ->     29 agree, 0 differ
+```
+
+**The root keeps the assertion**, and `P2PmsgMgr::Path2Object` is what needs it: a path
+rooted somewhere else has to be refused rather than hunted for among the root's
+descendants. The test for that now puts a descendant carrying the wrong root's name into
+the store first, so the refusal cannot be an accident of there being nothing to find.
+
+**Measuring it turned up a second defect in the same function.** A leading component that
+**matched**, with nothing after it, fell through to the recurse carrying an empty path —
+where `ParseObjectPath` produced an empty name and the `Goto` for it matched nothing:
+
+```
+  root  + ".Store"          -> (void)      ->   pos=48, the root
+  float + ".Floater"        -> (void)      ->   the floating item
+  desc coll + ".Last"       -> (void)      ->   pos=470, as "Last" already answered
+  attr coll + ".Currency"   -> (void)      ->   pos=1056, as "Currency" already answered
+```
+
+The first of those is §11's subject one level up: the library could not resolve the path
+it emits for a root. The last two are a leading `.` on a **collection**, where it was never
+the root marker at all — both arms descend by name, which is what `Goto` and `Exists` do —
+so only the discarded match was ever wrong there.
+
+The two collection arms also move **above** the item one, for the reason §16 gives: `IsAttr`
+and `IsDesc` read the block header, which every block has, while `IsField`, `IsList` and
+`IsVect` read a `VBLockItem`'s fields out of whatever block is there.
+
+**What goes with it, and it is a loss.** `.BHP.Last` asked *of* `BHP` used to resolve, by
+matching `BHP`'s own name and then descending. That is the assertion reaching where no path
+is rooted. It has no caller in this tree and none in Chartboard, and the same object is
+`Last`, `.Last` or `..Last` from there — but it did work, and now it does not.
+
+## 19. What is left
+
+- **A floating item's `P2Pos` is not an identity.** Asked twice of the same object it is
+  stable, but every COPY of a floating `P3PmsgField` carries a different SYS-heap address,
+  so `P3Pmsg_SelectObject(&oFloat, L".Floater")` answers the right object under a different
+  number. An item in a tree does not do this — `BHP` is pos 259 through every copy. It is
+  not a path question and nothing above depends on it; it is recorded because §18's
+  measurement is where it showed up, and because a test that identifies a floating object
+  by `P2Pos` would be testing the allocator.
 
 Nothing else from this investigation is outstanding. That is not a claim that the grammar
-is now without defect — only that every case these seventeen sections measured has an
-answer, and that the answer is pinned by a test.
+is without defect — only that every case these eighteen sections measured has an answer,
+and that the answer is pinned by a test.
 
-## 19. Reproducing this document
+## 20. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
