@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §22 say how to
+> every line of output below was run against this tree; §6, §7 and §23 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -79,6 +79,10 @@ followed nowhere:
 | `P3PmsgList` / `P3PmsgVect::operator bool` | `IsVoid()` | **true exactly when there was no list (§20)** |
 | `CListCtrl_Ext`, the column guard | tested the ROW, not the ITEM | **a missing column reached `r_data()` on a void field (§20)** |
 | `P3PmsgField`'s copy constructor, its second arm | guarded on a member zeroed the line above | a handle copy that never ran, in a class that copies by value (§20) |
+| `operator bool`, all six classes | an IMPLICIT conversion | **every comparison between two of them fell through to the built-in int one (§21)** |
+| `P3PmsgField::operator ==` | inherited nothing, so `oA == oB` asked bool | **a value copy, an unrelated item and an empty one all compared EQUAL (§21)** |
+| `P3PmsgField`, `operator !=` | `P3PmsgData`'s, which compares the DATA | **`a == b` and `a != b` were both true, and `!=` FAULTED on a void field (§21)** |
+| `P3PmsgField::operator == ( LPCTNAM )` | not const, hiding `P3PmsgName`'s two | **the only comparison the class meant to offer was the only one refused (§21)** |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
@@ -90,7 +94,7 @@ the library itself writes, §11), `d31f2c4` (the collection's own path, §12) an
 `2a03161` (the descendant collection, and the rule stated once, §15) and `0888659`
 (one arm per block kind, §16) and `c0409cb` (a bare `.` wherever it stands, §17) and `2de26ac`
 (the root marker only where a path is rooted, §18) and `48ff002` (a floating item is one
-object, §19) and `c8f1af6` (one question, one answer, §20).
+object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -1531,20 +1535,130 @@ because a collection hands back its own cursor and the next `SelectItem` moves i
 
 Three meanings, then, for one expression, and the suite now pins all three.
 
-## 21. What is left
+## 21. `==` and `!=` asked two different questions, and neither was identity
 
-- **A `P3PmsgField` cannot say whether it is a copy or a handle.** It can now say whether
-  it denotes anything, which is the question every caller in this solution was actually
-  asking, and `r_Object()` says which one you are ASKING for. But given a
-  `P3PmsgField&` parameter, nothing tells the callee whether writing through it reaches
-  the caller's item. Both spellings are correct for what they do and both are used
-  deliberately; a type that distinguished them would be a different library.
+§20 left it recorded that a `P3PmsgField` copies as a value, that
+`P3PmsgField oB = oA.r_Object()` copies as a handle, and that nothing at the call site
+says which you are holding. The first thing a caller would try is to ask the pair. So
+this is what `oA == oB` answered.
+
+**It answered whether both of them are non-void.** `operator bool` was an IMPLICIT
+conversion, so the built-in `operator ==(int, int)` was a viable candidate and the
+expression meant `(int)(bool)oA == (int)(bool)oB`. Against a store holding `AAA=1` and
+`BBB=2`:
+
+```
+  oTree == oHnd   (a handle on the same item)  -> true    (the item: SAME)
+  oTree == oCopy  (a value copy of it)         -> true    (the item: different)
+  oTree == oOther (a different item entirely)  -> true    (the item: different)
+  oTree == oEmpty (an empty floating item)     -> true    (the item: different)
+  oTree == oVoid  (a lookup that found nothing) -> false   (the item: different)
+```
+
+Five pairs and three wrong answers. Two of them are right — the handle, and the void —
+and both are right by accident: the only `false` this can produce is "exactly one of us
+is void", which is not a question anybody asks of a pair.
+
+**`!=` did something else again, and it was not the negation.** Declaring `operator ==`
+in `P3PmsgField` hides the base class's `==` — but name hiding is per name, so it does
+not hide `P3PmsgData::operator !=`, which was inherited, visible, and a comparison of the
+DATA. The same pair therefore answered both ways at once:
+
+```
+  oTree == oOther                               true       <- "are we both non-void?"  yes
+  oTree != oOther   -- the SAME pair            true       <- "do our values differ?"   yes
+```
+
+and on a field over a failed lookup, where there is no block to read, `!=` reached
+through to it and **faulted**:
+
+```
+  oVoidA == oVoidB                              true ok   asserts=0
+  oVoidA == oTree                               false ok  asserts=0
+  oVoidA != oTree
+                                                          <-- exit 3
+```
+
+**And the one comparison this class always meant to offer was the only one that did not
+compile.** `P3PmsgName` declares both of its comparisons `const`; `P3PmsgField` hides
+them with one that was not. Every expression below was put to the compiler on its own:
+
+| expression | before | after |
+|---|---|---|
+| `if ( oField )`, `!oField`, `a && b`, `?:`, `static_cast<bool>` | compiles | compiles |
+| `if ( oObject )`, `if ( oList )`, `if ( oAttr )`, `if ( oDesc )` | compiles | compiles |
+| `bool b = oField` / `return oField` | compiles | **rejected** C2440 |
+| `int n = oField` / `int n = oObject` | compiles | **rejected** C2440 |
+| `oField + 1` | compiles | **rejected** C2678 |
+| `oAttr == oDesc` | compiles | **rejected** C2678 |
+| `oFieldA == oFieldB` / `oFieldA != oFieldB` | compiles, wrongly | compiles, correctly |
+| `oObjectA == oObjectB` / `!=` | both, `!=` via bool | both, `!=` the negation |
+| `oConstField == L"AAA"` | **rejected** C2678 | compiles |
+
+Everything compiled except the one thing the class was for.
+
+So: **`operator bool` is explicit on all six classes, and the question the fall-through
+was answering badly is given a real operator.**
+
+- `P3PmsgField::operator ==` and `!=` against another field ask `P3PmsgObject`: the same
+  heap handle and the same block address, and therefore the SAME ITEM. A handle is equal
+  to the item it was taken from; a value copy of that item is not, however identically it
+  reads.
+- `P3PmsgObject` gains `!=` for the same reason.
+- `P3PmsgField::operator == ( LPCTNAM )` is `const`.
+- `if ( o )`, `!o`, `a && b`, `a ? x : y` and `static_cast<bool>(o)` are contextual
+  conversions and are untouched. A string literal still selects the name comparison, not
+  an identity test against a temporary field carrying that name — the suite pins that.
+
+The same two probes against the fixed library:
+
+```
+  oTree == oHnd   (a handle on the same item)  -> true    (the item: SAME)
+  oTree == oCopy  (a value copy of it)         -> false   (the item: different)
+  oTree == oOther (a different item entirely)  -> false   (the item: different)
+  oTree == oEmpty (an empty floating item)     -> false   (the item: different)
+  oTree == oVoid  (a lookup that found nothing) -> false   (the item: different)
+  oTree != oOther   -- the SAME pair            true ok   asserts=0
+  oVoidA != oTree                               true ok   asserts=0
+```
+
+**Nothing that exists changes behaviour, and that is measured twice.** Marking every
+`operator bool` explicit and compiling Msgcore, MsgcoreMFC, TargetCore, TargetCoreMFC,
+MsgcoreUtils, MsgFacade, TargetFacade, MscsUnitTests and Chartboard in both
+configurations produced **0 errors**. Declaring `==` and `!=` between two of these
+objects as `= delete` and repeating the sweep produced **0 errors**. Not one call site in
+the built tree used either — which is why a comparison that was wrong in three ways had
+never reported anything.
+
+### The asymmetry that is left on purpose
+
+`oField == oObject` compiles, because a `P3PmsgObject` converts to a `P3PmsgField`;
+`oObject == oField` does not, because the conversion back is spelled `r_Object()` and is
+a call. Making it symmetric means either a second implicit conversion or an overload
+taking one side as an object and the other as a field, and both of those hide which side
+is being asked. `oObject == oField.r_Object()` does not, so that is the spelling.
+
+## 22. What is left
+
+- **A field still cannot answer, alone, whether a write through it reaches a message.**
+  It can say whether it denotes anything (§20), and it can say whether it is the same item
+  as one you already hold (§21). Given only a `P3PmsgField&` and nothing to compare it to,
+  the callee still cannot tell a handle from a value copy. That is now a missing
+  comparand rather than a missing question, which is as far as this goes without a type
+  that distinguishes the two — and that would be a different library.
+
+- **`P2PSafePtr` carries the same shape and was not touched.** It declares
+  `operator SafePtrType*()` and `operator bool()` together, so `int n = ptr` compiles
+  there too; `ptr == ptr` does not, but for the opposite reason — C2593, the two
+  conversions are ambiguous rather than one of them silently winning. A refused
+  comparison is not the defect §21 fixed, and it is a raw-pointer template rather than a
+  Msgcore object, so it is recorded here and left alone.
 
 Nothing else from this investigation is outstanding. That is not a claim that the grammar
-is without defect — only that every case these twenty sections measured has an answer,
+is without defect — only that every case these twenty-one sections measured has an answer,
 and that the answer is pinned by a test.
 
-## 22. Reproducing this document
+## 23. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
