@@ -7240,9 +7240,44 @@ P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath )
     if ( *lpszObjectPath != T_DescDelim ||
          P3Pmsg_IsPathDelimiter ( lpszObjectPath + 1 ) )
       return P3Pmsg_SelectObjectRecurse ( pObject, lpszObjectPath );
-    lpszObjectPath++;
-    TNAME nsObjectname[MAX_TNAME_SIZE] = {0};
-    lpszObjectPath = ParseObjectPath ( lpszObjectPath, nsObjectname, ARRAYSIZE(nsObjectname) );
+    //  The WHOLE path is kept. A leading '.' that turns out not to be the
+    //  root marker is an ordinary descendant delimiter, and the arms below
+    //  have to be able to hand it on with the delimiter still attached.
+    LPCTNAM lpszWhole = lpszObjectPath;
+    TNAME   nsObjectname[MAX_TNAME_SIZE] = {0};
+    lpszObjectPath = ParseObjectPath ( lpszObjectPath + 1, nsObjectname, ARRAYSIZE(nsObjectname) );
+
+    //  THE COLLECTIONS ARE ASKED ABOUT FIRST, for the reason §16 gives: IsAttr
+    //  and IsDesc read the block header, which every block has, while IsField,
+    //  IsList and IsVect read a VBLockItem's fields out of whatever block is
+    //  there. Asked in this order the question never reaches a block that
+    //  cannot answer it. The two arms used to stand after the item one and
+    //  were reached only because a collection's ut union happened not to look
+    //  like a field.
+    //
+    //  A leading '.' on a COLLECTION was never the root marker: both arms
+    //  descend by name, which is what Goto and Exists do. Only the empty
+    //  remainder below is new.
+    if ( pObject->IsDesc() )
+    {
+      P3PmsgDesc oDesc = *pObject;
+      if ( !oDesc.r_Curs().Goto(nsObjectname) )
+        return P3PmsgObject();         // Selection path broken
+      if ( *lpszObjectPath == 0 )
+        return oDesc.r_Curs().r_Object();
+      return P3Pmsg_SelectObjectRecurse ( &oDesc.r_Curs().r_Object(), lpszObjectPath );
+    }
+    if ( pObject->IsAttr() )
+    {
+      P3PmsgAttr oAttr = *pObject;
+      //  Exists() IS the Goto -- it positions m_pCurs and answers whether it
+      //  landed -- so r_Curs() below is the object it found.
+      if ( !oAttr.Exists(nsObjectname) )
+        return P3PmsgObject();         // Selection path broken
+      if ( *lpszObjectPath == 0 )
+        return oAttr.r_Curs().r_Object();
+      return P3Pmsg_SelectObjectRecurse ( &oAttr.r_Curs().r_Object(), lpszObjectPath );
+    }
     //if ( pObject->IsNode() )
     //{
     //  P3PmsgNode oNode = *pObject;
@@ -7258,26 +7293,41 @@ P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath )
     //  a rooted path was never checked against the object it was rooted at.
     if ( pObject->IsField() || pObject->IsList() || pObject->IsVect() )
     {
+      //  AND ONLY WHERE A PATH COULD BE ROOTED. P3Pmsg_GetPath says what that
+      //  means in its own first comment -- "Process root. NOTES: Defined by
+      //  absence of parent" -- and emits ".item1.item2" for a root object and
+      //  ".item" for a floating one. Nothing else is where a rooted path
+      //  starts, so a leading '.' on an object that HAS a parent cannot be the
+      //  root marker and is an ordinary descendant delimiter.
+      //
+      //  Asserted at every depth instead, it made ".Last" on an item mean "are
+      //  you called Last" where the same characters descend in a root path:
+      //  ".Store.BHP.Last" resolves, P3Pmsg_SelectObject(&oBHP, L".Last") was
+      //  void. That was the last row of §17's agreement sweep still reading NO.
+      //
+      //  What goes with it: ".BHP.Last" asked OF BHP used to resolve, by
+      //  matching BHP's own name and then descending. It is the assertion
+      //  reaching where no path is rooted, and it has no caller here. The root
+      //  keeps it, which is what P2PmsgMgr::Path2Object relies on to refuse a
+      //  path rooted somewhere else.
+      if ( pObject->HasParent() )
+        return P3Pmsg_SelectObjectRecurse ( pObject, lpszWhole );
+
       P3PmsgField oField = *pObject;
       if ( oField.r_name().c_wcsicmp(nsObjectname) )
         return P3PmsgObject();         // Selection path broken
+      //  AND A MATCH WITH NOTHING AFTER IT IS THE ANSWER. It used to fall
+      //  through to the recurse below carrying an empty path, where
+      //  ParseObjectPath produced an empty name and the Goto for it matched
+      //  nothing. So the library could not resolve the path it emits for a
+      //  root: P3Pmsg_GetPath(&mgr) is ".Store", and handing ".Store" back to
+      //  the root answered void. Same for a floating item and its ".Floater",
+      //  and for either collection reached by a name with nothing after it.
+      if ( *lpszObjectPath == 0 )
+        return *pObject;
+      return P3Pmsg_SelectObjectRecurse ( pObject, lpszObjectPath );
     }
-    else if ( pObject->IsDesc() )
-    {
-      P3PmsgDesc oDesc = *pObject;
-      if ( !oDesc.r_Curs().Goto(nsObjectname) )
-        return P3PmsgObject();         // Selection path broken
-      return P3Pmsg_SelectObjectRecurse ( &oDesc.r_Curs().r_Object(), lpszObjectPath );
-    }
-    else if ( pObject->IsAttr() )
-    {
-      P3PmsgAttr oAttr = *pObject;
-      if ( !oAttr.Exists(nsObjectname) )
-        return P3PmsgObject();         // Selection path broken
-      return P3Pmsg_SelectObjectRecurse ( &oAttr.r_Curs().r_Object(), lpszObjectPath );
-    }
-    else
-      ASSERT(0);
+    ASSERT(0);
     return P3Pmsg_SelectObjectRecurse ( pObject, lpszObjectPath );
 }
 

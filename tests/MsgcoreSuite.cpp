@@ -2328,13 +2328,14 @@ static void Test_BareDotCommutes()
             TF_CHECK(oRoot.GetP2Pos() == oSel.GetP2Pos());
         }
 
-        //  ".Last" is the one spelling that legitimately differs, and it is
-        //  not this section's business: a leading '.' on an OBJECT path asks
-        //  "is the object I am standing on called this", which BHP is not. The
-        //  walk strips a name-carrying '.' before selecting, so the same
-        //  characters descend there. Pinned so the difference stays deliberate.
+        //  ".Last" was the one spelling that differed, and §18 is why it no
+        //  longer does: a leading '.' asserts the object's own name only where
+        //  a path could be ROOTED, which is an object with no parent. BHP has
+        //  one, so the '.' there is an ordinary descendant delimiter and both
+        //  spellings descend.
         TF_CHECK(!mgr.RootPath2Object(L".Store.BHP.Last").IsVoid());
-        TF_CHECK(P3Pmsg_SelectObject(&oFrom, L".Last").IsVoid());
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP.Last").GetP2Pos() ==
+                 P3Pmsg_SelectObject(&oFrom, L".Last").GetP2Pos());
     }
 
     //  Legalising a bare '.' part way along makes more spellings well-formed,
@@ -2373,6 +2374,120 @@ static void Test_BareDotCommutes()
         const P2Pos posSnapDesc = mgr.RootPath2Object(L".Store.BHP^.").GetP2Pos();
         TF_CHECK(posSnapDesc != 0);
         TF_CHECK(mgr.RootPath2Object(L".Store.BHP.^").GetP2Pos() == posSnapDesc);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A leading '.' is the root marker only where a path could be rooted
+// ---------------------------------------------------------------------------
+static void Test_RootedLeadingDot()
+{
+    //  P3Pmsg_GetPath says what a path is rooted at, in its own first comment:
+    //  "Process root. NOTES: Defined by absence of parent." It emits
+    //  ".item1.item2" for a root object and ".item" for a floating one, and
+    //  the leading component names the object the path starts from.
+    //
+    //  P3Pmsg_SelectObject asserted that name at every depth instead, so
+    //  ".Last" asked BHP whether BHP is called Last -- while ".Store.BHP.Last"
+    //  descends, because the walk strips a name-carrying '.' before selecting.
+    TF_CASE("a leading '.' descends on an object that has a parent")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Desc(P3PmsgField::AttrCMD_Create);
+        oInst.r_Desc() += P3PmsgField(L"Last");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        TF_CHECK(oLive.r_Object().HasParent());
+
+        P3PmsgObject oFrom = oLive.r_Object();
+        const P2Pos posLast = mgr.RootPath2Object(L".Store.BHP.Last").GetP2Pos();
+        TF_CHECK(posLast != 0);
+        TF_CHECK(P3Pmsg_SelectObject(&oFrom, L".Last").GetP2Pos() == posLast);
+        TF_CHECK(P3Pmsg_SelectObject(&oFrom, L"Last" ).GetP2Pos() == posLast);
+
+        //  What goes with it. ".BHP.Last" asked OF BHP used to resolve, by
+        //  matching BHP's own name and then descending -- the assertion
+        //  reaching where no path is rooted. It is void now, and deliberately:
+        //  BHP has no descendant called BHP.
+        TF_CHECK(P3Pmsg_SelectObject(&oFrom, L".BHP.Last").IsVoid());
+    }
+
+    //  The root keeps the assertion, and P2PmsgMgr::Path2Object is what needs
+    //  it: a path rooted somewhere else has to be refused rather than hunted
+    //  for among the root's descendants.
+    TF_CASE("the root still refuses a path rooted somewhere else")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"BHP");
+        //  A descendant carrying the name the wrong root asks for, so a miss
+        //  here cannot be an accident of there being nothing to find.
+        mgr.r_Desc() += P3PmsgField(L"Elsewhere");
+
+        P3PmsgObject oRoot = mgr.r_Object();
+        TF_CHECK(!oRoot.HasParent());
+        TF_CHECK(!mgr.Path2Object(L".Store.BHP").IsVoid());
+        TF_CHECK(mgr.Path2Object(L".Elsewhere.BHP").IsVoid());
+        TF_CHECK(mgr.Path2Object(L".Nobody.BHP").IsVoid());
+    }
+
+    //  And a component that matched with nothing after it is the answer. It
+    //  used to fall through carrying an empty path, where ParseObjectPath
+    //  produced an empty name and the Goto for it matched nothing -- so the
+    //  library could not resolve the path it emits for a root.
+    TF_CASE("the path the library emits for a root resolves at the root")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"BHP");
+
+        const CString strRootPath = P3Pmsg_GetPath(&mgr);
+        TF_CHECK(strRootPath == L".Store");
+
+        P3PmsgObject oRoot = mgr.r_Object();
+        P3PmsgObject oBack = P3Pmsg_SelectObject(&oRoot, strRootPath);
+        TF_CHECK(!oBack.IsVoid());
+        TF_CHECK(oBack.GetP2Pos() == oRoot.GetP2Pos());
+        TF_CHECK(!mgr.Path2Object(strRootPath).IsVoid());
+    }
+
+    //  The same empty remainder, on the two collections. A leading '.' was
+    //  never the root marker there -- both arms descend by name -- but the
+    //  match was thrown away just the same, so "Tag" answered and ".Tag" did
+    //  not.
+    TF_CASE("a collection answers a leading '.' with nothing after the name")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        oInst.r_Desc(P3PmsgField::AttrCMD_Create);
+        oInst.r_Desc() += P3PmsgField(L"Last");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+
+        P3PmsgObject oDescColl = oLive.r_Desc().r_Object();
+        P3PmsgObject oAttrColl = oLive.r_Attr().r_Object();
+
+        TF_CHECK(P3Pmsg_SelectObject(&oDescColl, L".Last").GetP2Pos() ==
+                 P3Pmsg_SelectObject(&oDescColl, L"Last" ).GetP2Pos());
+        TF_CHECK(!P3Pmsg_SelectObject(&oDescColl, L".Last").IsVoid());
+
+        TF_CHECK(P3Pmsg_SelectObject(&oAttrColl, L".Currency").GetP2Pos() ==
+                 P3Pmsg_SelectObject(&oAttrColl, L"Currency" ).GetP2Pos());
+        TF_CHECK(!P3Pmsg_SelectObject(&oAttrColl, L".Currency").IsVoid());
+
+        //  A miss is still a miss.
+        TF_CHECK(P3Pmsg_SelectObject(&oDescColl, L".Nobody").IsVoid());
+        TF_CHECK(P3Pmsg_SelectObject(&oAttrColl, L".Nobody").IsVoid());
     }
 }
 
@@ -3990,6 +4105,7 @@ void RunMsgcoreSuite()
     Test_DescCollectionPath();
     Test_P2Pos2Path();
     Test_BareDotCommutes();
+    Test_RootedLeadingDot();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();
