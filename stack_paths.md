@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-12. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §27 say how to
+> every line of output below was run against this tree; §6, §7 and §30 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -91,6 +91,9 @@ followed nowhere:
 | `P2PSafePtr::operator =`, taking a non-const reference | a temporary fell through to the RAW-POINTER arm | **`sp = MakeSP()` freed the payload and kept addressing it (§25)** |
 | `P2PSafePtr`'s copy paths, on an empty source | a count of zero, migrated and then raised to one | **two asserts and a use-after-free for copying an empty one (§25)** |
 | `P2PSafePtr`, every member but `operator->` | non-const | **a const safe pointer could not be tested, read, compared or assigned from (§25)** |
+| `P3PmsgField::IsSole` | forwarded to the object, which counts holders of the HEAP | **a field's OWN descendants made it answer "somebody else is looking" (§26)** |
+| `~P3PmsgObject`, after §23 | closed the heap and freed nothing | **every value copy kept a block on the shared heap — 4841 copies exhausted it (§27)** |
+| `P2PSafePtr::operator SafePtrType*()` | an IMPLICIT conversion | **`delete sp` and `sp[0]` compiled, and freed the payload under a live holder (§28)** |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
@@ -102,7 +105,7 @@ the library itself writes, §11), `d31f2c4` (the collection's own path, §12) an
 `2a03161` (the descendant collection, and the rule stated once, §15) and `0888659`
 (one arm per block kind, §16) and `c0409cb` (a bare `.` wherever it stands, §17) and `2de26ac`
 (the root marker only where a path is rooted, §18) and `48ff002` (a floating item is one
-object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21) and `da22f93` (where the block is, not whether there is a heap, §22) and `f77bb97` (copying the value and not the address of one, §23) and `a42f207` (the guarantee asked of the storage, §24) and `09adc6c` (the safe pointer's own conversions, §25).
+object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21) and `da22f93` (where the block is, not whether there is a heap, §22) and `f77bb97` (copying the value and not the address of one, §23) and `a42f207` (the guarantee asked of the storage, §24) and `09adc6c` (the safe pointer's own conversions, §25) and `eca8cd1` with `2109c8a` in TargetCore (the three entries What-is-left was carrying, §26-§28).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -2195,38 +2198,318 @@ through the DLL, both PASS; `MscsUnitTests` 125; C4; the golden image byte-ident
 4104 bytes; §17's agreement sweep 29 agree 0 differ; §18, §19, §22, §23 and §24 unchanged;
 Chartboard 0 errors and its four drivers 17, 13, 24 and 15 checks, none failing.
 
-## 26. What is left
+## 26. `IsSole`'s FALSE, narrowed to what it is actually about
 
-- **`IsSole`'s FALSE is still not a guarantee, and now it is measured rather than
-  assumed.** §24 pins the row: a field that has been asked for its descendants keeps a
-  sub-object holding the heap, so the count is two and the answer is false while the item
-  is still nobody else's. What would close it is a reference count per BLOCK rather than
-  per heap, which the image does not carry and which is a different library. The three
-  questions a caller can ask — where, whether, whose — each have an answer; only *whether*
-  has one that is certain in a single direction.
+§24 gave a caller a guarantee on TRUE and recorded that FALSE is not the opposite one,
+with the row that proves it: a field that has been asked for its descendants keeps a
+`P3PmsgDesc` that holds the heap, so the count is two and the answer is false while the
+item is still nobody else's. What would close it, that section said, is a reference count
+per BLOCK rather than per heap.
 
-- **A value copy walks the chain; a value copy of a value copy walks it again.** §23
-  duplicates every chained block at every copy, which is what a value copy means and also
-  what it costs: copying a grown value is now an allocation and a memcpy per link rather
-  than a pointer assignment. One link is the usual case and the cases above measure no
-  more than that. If a caller is ever found copying grown values in a loop, the answer is
-  to hand it a handle — `r_Object()` — and not to make the value copy shallow again.
+**That remains true, and it remains a different library.** `VBListHANDLE` is a runtime
+structure and not part of the image, so a per-block map could be added to it without the
+golden gate noticing -- but there is no lock of any kind on that handle, only `nRefCount`
+is atomic, and `P2PmsgHeap_Close` says in its own comment that AddRef and Close race
+across pump threads. Worse, a registry keyed on the block would have to hook every write
+to `m_aVBLock`, and two of those take no reference at all: `Connecta` returns early when
+the heap is unchanged, after assigning the new block, and `RehomeInlineItem` rewrites the
+address in place. `P3PmsgObject`'s members are public, so nothing could enforce it either.
 
-- **`delete sp` still compiles, and so does `sp[0]`.** Both reach through
-  `operator SafePtrType*()`, which §25 measured as load-bearing at eight call sites and
-  therefore left implicit: a conversion that hands out the raw pointer hands out
-  everything a raw pointer can do. Deleting through it frees the payload under a holder
-  that still counts one, and the holder's own destructor is then the second free --
-  measured, and left, because closing it means taking the conversion away and rewriting
-  those eight sites around `Dereference()` and `operator->`. What is NOT left is the same
-  thing happening without anybody writing it down: the two paths where the compiler chose
-  that arm on its own are closed.
+### But that row was never about a stranger
+
+The second holder is the field's OWN sub-object. `P3PmsgField` made it, holds it, and
+destroys it; `r_Attr` and `r_Desc` are where it comes from. A field can see its own parts
+even though an object cannot see any, so `P3PmsgField::IsSole` overrides rather than
+forwards and subtracts them.
+
+**Undercounting is safe and overcounting is not**, and that asymmetry is the whole design.
+A holder missed leaves the answer FALSE, and false promises nothing. A holder subtracted
+that was never mine reports TRUE with a stranger looking, and TRUE is a guarantee. So only
+the two sub-objects the class owns outright are counted, and each only when its heap is
+this heap.
+
+```
+-- the row §24 pinned --
+  a grown floater, no sub-objects yet      refs=1  sole=true
+  ... once it has been given a descendant  refs=2  sole=true
+  ... and it still reads what it held      7 / 1
+  a grown floater with an attribute        refs=2  sole=true
+  ... and a descendant as well             refs=3  sole=true
+
+-- what must not change --
+  a handle on a tree item                  refs=6  sole=false seen by the store      YES  agree
+  a value copy of a tree item              refs=0  sole=true  seen by the store      no   agree
+  a tree item with descendants of its own  refs=7  sole=false seen by the store      YES  agree
+  a shared grown floater, with descendants refs=3  sole=false seen by its partner    YES  agree
+
+-- what this still cannot lift --
+  a grown floater before a push            refs=1  sole=true
+  ... once it has been pushed              refs=1  sole=true
+  ... and it still reads what it held      5
+  a grown floater with two descendants     refs=2  sole=true
+  ... once a cursor has been taken on them refs=3  sole=false
+
+agree=4 open=0 GUARANTEE-BROKEN=0 asserts=0
+```
+
+The first block is the row §24 pinned, answered. The second is what had to not move, and
+the third is what this still cannot lift -- and it is now ONE thing rather than any
+sub-object at all. A cursor lives inside the collection that made it and there is no
+accessor to reach it from a field, so it is not subtracted, and that is pinned by a case
+so the claim in the NOTES stays true of the code. A push was the other candidate and turns
+out not to hold the heap at all: it costs nothing today, though it could not be subtracted
+either if it did.
+
+Three questions still, and the middle one is now answered more finely: where the item is
+-- `IsInline`; whether anyone ELSE can see a write -- `IsSole`, with the guarantee on true
+and my own parts no longer counted against me; whose item it is -- §21's `==`.
+
+## 27. A value copy took a block and never gave it back
+
+§23 gave a value copy its own copy of the chained payload block, and §26's second entry
+recorded what that costs: an allocation and a memcpy per link, at every copy. The entry
+said one link is the usual case and that a caller found copying grown values in a loop
+should be handed a handle instead.
+
+Writing that loop to time it is what found this. It does not run.
+
+```
+-- ten copies of one grown value, one at a time --
+  the source's own payload block   2343280238320
+  copy  0 payload block            2343280240448
+  copy  1 payload block            2343280242576   <-- a NEW block
+  copy  2 payload block            2343280244704   <-- a NEW block
+  copy  3 payload block            2343280247440   <-- a NEW block
+  copy  4 payload block            2343280249568   <-- a NEW block
+  copy  5 payload block            2343280251696   <-- a NEW block
+  copy  6 payload block            2343280253824   <-- a NEW block
+  copy  7 payload block            2343280255952   <-- a NEW block
+  copy  8 payload block            2343280258080   <-- a NEW block
+  copy  9 payload block            2343280260208   <-- a NEW block
+  climbing: nothing is given back
+
+-- ten P3PmsgData copies, the ordinary spelling --
+  the same address every time: the block is given back
+
+-- copies until something gives --
+  threw at copy 4841: 'Attempt to exceed maximum P2PmsgHeap size of 10000000 bytes'
+
+asserts=0
+```
+
+**The block is allocated on the heap the two objects SHARE**, which is right -- the AddRef
+has already settled the heap's lifetime, and §23 is careful about that. But a shared heap
+does not go away when the copy does, and `~P3PmsgObject` closes the heap and frees
+nothing. So the copy's block stayed allocated on a heap that was still open, and a source
+that outlives its copies accumulates one block per copy until the heap refuses. Note the
+second listing above: the ordinary `P3PmsgData` copy does give it back, because that one
+gets its OWN private heap and the heap is destroyed whole. Only the shared-heap arm --
+§23's new one -- leaks.
+
+`ReleaseInlineChain()` is the other half of `PrivatiseInlineChain`, and it was missing. It
+walks whichever chain the inline block carries and frees each link, and it is called from
+the four places an object stops naming its inline block -- the destructor, `Nullify`,
+`Connect`'s share arm and `Connecta` -- always before the heap the chain is on is closed.
+An item on a heap belongs to the message and is excluded by the same address test §23
+uses; an externally managed block is excluded by `m_xVBLock`.
+
+```
+-- ten copies of one grown value, one at a time --
+  the source's own payload block   2831058123136
+  copy  0 payload block            2831058125264
+  copy  1 payload block            2831058125264
+  copy  2 payload block            2831058125264
+  copy  3 payload block            2831058125264
+  copy  4 payload block            2831058125264
+  copy  5 payload block            2831058125264
+  copy  6 payload block            2831058125264
+  copy  7 payload block            2831058125264
+  copy  8 payload block            2831058125264
+  copy  9 payload block            2831058125264
+  the same address every time: the block is given back
+
+-- ten P3PmsgData copies, the ordinary spelling --
+  the same address every time: the block is given back
+
+-- copies until something gives --
+  20000 copies, no failure
+
+asserts=0
+```
+
+### How long the chain is, and what a copy of it costs
+
+```
+-- chain length by payload size --
+      wchars   links     chained
+           1       0           0  fits in the inline block
+           4       0           0  fits in the inline block
+           8       0           0  fits in the inline block
+          16       0           0  fits in the inline block
+          24       0           0  fits in the inline block
+          32       0           0  fits in the inline block
+          64       0           0  fits in the inline block
+         128       0           0  fits in the inline block
+         256       0           0  fits in the inline block
+         384       1         785
+         500       1        1017
+         508       1        1033
+         512       1        1041
+         600       1        1217
+        1024       1        2065
+        4096       1        8209
+       16384       1       32785
+       32000       1       64017
+       32700       1       65417
+       32768       -           -  THREW 'Buffer overrun (65536 vs 65535) blocked'
+       65536       -           -  THREW 'Buffer overrun (131072 vs 65535) blocked'
+      262144       -           -  THREW 'Buffer overrun (524288 vs 65535) blocked'
+     1048576       -           -  THREW 'Buffer overrun (2097152 vs 65535) blocked'
+
+-- the same value, grown again and again --
+  grown to    512 wchars   links=1  chained=1041
+  grown to   1024 wchars   links=1  chained=2065
+  grown to   1536 wchars   links=1  chained=3089
+  grown to   2048 wchars   links=1  chained=4113
+  grown to   2560 wchars   links=1  chained=5137
+  grown to   3072 wchars   links=1  chained=6161
+  grown to   3584 wchars   links=1  chained=7185
+  grown to   4096 wchars   links=1  chained=8209
+
+-- a grown NAME --
+  a name resized to 50   links=1
+
+-- what a copy costs --
+  the grown one chains 1 link(s); the small one 0
+  20000 copies of a value that fits    0 ms
+  20000 copies of a value that grew    16 ms
+
+longest chain seen=1 asserts=0
+```
+
+**A chain is one link long, and cannot be longer from this side.** Both
+`P2PmsgObject_NewVBLockData` and `P3PmsgName_ResizeName` REPLACE the chained block rather
+than appending to it -- growing a value eight times running leaves one link, not eight --
+and a payload past 65535 bytes is refused rather than split across blocks. A longer chain
+can only arrive already built, in an image, which is why the loops tolerate one. So the
+per-link cost the entry worried about is one allocation and one memcpy, permanently, and
+it measures at 16 ms for twenty thousand copies against 0 ms for twenty thousand copies of
+a value that fits. That is the whole of it, and it is not the reason to prefer a handle;
+the reason to prefer a handle is that a handle is a different thing.
+
+## 28. `delete sp` does not compile any more
+
+§25 made `P2PSafePtr`'s `operator bool` explicit and left `operator SafePtrType*()`
+implicit, having measured that call sites depend on it, and recorded what that left
+standing: `delete sp` and `sp[0]` compile, because a conversion that hands out the raw
+pointer hands out everything a raw pointer can do with it. Deleting through it frees the
+payload under a holder that still counts one, and the holder's own destructor is then the
+second free.
+
+Nobody had written either. That is not the same as nobody being able to.
+
+The count was nine, not eight -- the ninth is §25's own test, which reads the pointer out
+of a const safe pointer. Nine sites is a morning's work, so the conversion is explicit and
+they say `p_SafePtr()`: it hands over the pointer and KEEPS the ownership, which is the
+whole difference from `Dereference()` three lines below it in most of them.
+
+```
+  P2PeerCon.cpp  3842, 3907, 4147   PostP2PeerMsg ( spMsg )
+  P2PeerMsg.cpp  370, 376           ASSERT(!P2PeerMsg_IsPosted(spMsg))
+  P2Pwin32.cpp   1495               RemoveP2Pexplorer ( spP2PmsgPump )
+  P2Pwin32.cpp   3535               RemoveP2PmsgPump ( spP2PmsgPump )
+  P2Pwin32.cpp   5732               P2PeerMsg *pMsg = spMsg
+  MsgcoreSuite.cpp 4231             SafePtrProbe *pRaw = roHeld
+```
+
+Every expression again, against §25's declarations and against these:
+
+| expression | after §25 | after §28 |
+|---|---|---|
+| `if ( sp )` | compiles | compiles |
+| `!sp` | compiles | compiles |
+| `spA && spB` | compiles | compiles |
+| `sp ? 1 : 2` | compiles | compiles |
+| `static_cast<bool>(sp)` | compiles | compiles |
+| `if ( constSP )` | compiles | compiles |
+| `bool b = sp` | compiles | **rejected** C2440 |
+| `return sp` | compiles | **rejected** C2440 |
+| `int n = sp` | **rejected** C2440 | **rejected** C2440 |
+| `sp + 1` | **rejected** C2666 | **rejected** C2678 |
+| `spA - spB` | compiles | **rejected** C2678 |
+| `sp[0]` | compiles | **rejected** C2678 |
+| `delete sp` | compiles | **rejected** C2440 |
+| `sp += 1` | **rejected** C2676 | **rejected** C2676 |
+| `spA == spB` | compiles | compiles |
+| `spA != spB` | compiles | compiles |
+| `constSP == spB` | compiles | compiles |
+| `sp == pRaw` | compiles | compiles |
+| `sp == nullptr` | compiles | compiles |
+| `sp == 0` | **rejected** C2666 | compiles |
+| `spA < spB` | compiles | **rejected** C2678 |
+| `constSP->n` | compiles | compiles |
+| `*sp` | compiles | compiles |
+| `*constSP` | compiles | compiles |
+| `constSP.IsEmpty()` | compiles | compiles |
+| `Thing *t = constSP` | compiles | **rejected** C2440 |
+| `Thing *t = sp` | compiles | **rejected** C2440 |
+| `spA = spB` | compiles | compiles |
+| `spA = constSP` | compiles | compiles |
+| `spA = MakeSP()` | compiles | compiles |
+| `ThingSP c = MakeSP()` | compiles | compiles |
+| `ThingSP c = pRaw` | compiles | compiles |
+| `ThingSP c = 0` | compiles | compiles |
+
+Ten rows moved and they are three groups. **Four** are the ones this section is for:
+`delete sp`, `sp[0]`, `sp + 1` and `spA - spB` no longer compile. **Two** are the
+deliberate spelling changing: `Thing *t = sp` and `Thing *t = constSP` are now
+`sp.p_SafePtr()`, which is the trade. **Two** more are `bool b = sp` and `return sp`,
+which §25 noted still compiled because a `SafePtrType*` converts to bool on its own --
+take the pointer conversion out of the implicit set and that goes with it, so the type is
+bool-free after all, contextual conversions excepted. And **one** goes the other way:
+`sp == 0` compiles again, the bool candidate that made it ambiguous having gone. `spA <
+spB` follows `spA - spB`; ordering two safe pointers now needs `p_SafePtr()` on both,
+which is a fair thing to have to say.
+
+### The teeth for all three
+
+Different for each, and worth separating. §26's cases fail outright against the unfixed
+object -- five checks across four cases, and the run then stops in §27's loop case and
+does not finish, because that case is §27's tooth and it exhausts the heap. §27's tooth on
+its own is the probe above: 4841 copies and a refusal. §28 has no behavioural tooth at all,
+the way §24 had none -- against the unfixed template the cases do not compile, `p_SafePtr`
+not existing, and the table above is the measurement instead.
+
+### The gate
+
+Nine solutions in both configurations: **0 errors**. The suite 225 cases static and 220
+through the DLL, both PASS; `MscsUnitTests` 125; C4; the golden image byte-identical at
+4104 bytes; §17's agreement sweep 29 agree 0 differ; §18, §19, §22, §23, §24 and §25
+unchanged; Chartboard 0 errors and its four drivers 17, 13, 24 and 15 checks, none
+failing.
+
+## 29. What is left
+
+- **A cursor is the last holder `IsSole` cannot discount.** §26 subtracts the two
+  sub-objects a field owns outright; a `P3PmsgCurs` lives inside the `P3PmsgDesc` or
+  `P3PmsgAttr` that made it and there is no accessor to reach it from the field, so a
+  collection that has been walked answers FALSE from then on. That is the safe direction
+  — false promises nothing, and subtracting a holder that was not mine would break the
+  guarantee on true — and it is pinned by a case rather than assumed. Closing it means
+  either an accessor on both collection classes or the per-block count §26 argues against.
+
+- **A longer chain can only arrive in an image, and nothing here has ever seen one.** §27
+  measures every in-process path as producing exactly one link, because growth replaces
+  the chained block rather than appending to it, and a payload past 65535 bytes is refused
+  rather than split. The walk loops in `PrivatiseInlineChain`, `ReleaseInlineChain` and
+  `P2PmsgObject_NewVBLockData` all tolerate a longer one because a legacy image could
+  carry it. None of them has been put to one, for want of such an image to put them to.
 
 Nothing else from this investigation is outstanding. That is not a claim that the grammar
-is without defect — only that every case these twenty-five sections measured has an answer,
+is without defect — only that every case these twenty-eight sections measured has an answer,
 and that the answer is pinned by a test.
 
-## 27. Reproducing this document
+## 30. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
