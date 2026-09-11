@@ -2,7 +2,8 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6 and §8 say how to reproduce them.
+> every line of output below was run against this tree; §6, §7 and §9 say how to
+> reproduce them.
 
 ## 1. Summary
 
@@ -33,12 +34,14 @@ followed nowhere:
 | `P3Pmsg_SelectObjectRecurse`, list arm | `ASSERT(0)`, and nothing else | **no component of any kind resolved against a list** |
 | `P3Pmsg_SelectObjectRecurse`, vectors | no arm at all | a vector fell to the `ASSERT(0)` closing the function |
 | `P3Pmsg_SelectObject`, leading component | `IsField()`-only, then asserted and recursed anyway | a rooted path was never checked against the list it started at |
+| `MsgStck::Push` / `Pop`, list and vector | `ASSERT(0)` | **a list could not be pushed at all, so `List^` was always empty** |
+| `MsgStck::Pop`, any type | dropped the popped item while it still linked the one below | **one pop severed and leaked every generation under the one it restored** |
 | `P2PmsgMgr::RootPath2Object` | stripped off every component | `^` and `@` were looked up as plain child names |
 | `P3Pmsg_SplitRootPath` | refused a bare `^`, dropped a trailing one | **`.Root.Item^` silently answered with `Item` itself** |
 | `RootPath2Object`, on a miss | assigned a void object into a `P3PmsgItem` | threw `"Invalid overloaded context"` instead of answering |
 
-Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk) and `72e8f88` (lists
-and vectors, §6).
+Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
+vectors in a path, §6) and `d2763ce` (pushing them, §7).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -254,9 +257,7 @@ if ( pObject->IsField() || pObject->IsList() || pObject->IsVect() )
 
 The one place the type does matter is the stack, because `MsgStck` keeps an accessor per
 type and each *throws* if asked for the wrong one, so `^` dispatches to
-`r_list()` / `r_vect()` / `r_item()`. That branch is unreachable today: `MsgStck::Push()`
-still asserts for lists and vectors, so `IsStacked()` above it is what answers a `^` on
-one, and it answers false.
+`r_list()` / `r_vect()` / `r_item()`. All three arms are live — §7 is what made them so.
 
 ### Measured
 
@@ -309,11 +310,91 @@ git checkout HEAD -- P2Pmsg.cpp
 msbuild "Msgcore(2026).vcxproj" /p:Configuration=DebugLib /p:Platform=x64
 ```
 
-## 7. What `^` still does not do
+## 7. Pushing a list or a vector
 
-- **Pushing a list or a vector.** `MsgStck::Push()` and `Pop()` are `ASSERT(0)` for both,
-  so there is never anything on a list's `aStack` to follow. `List^` is a well-formed
-  question with an empty answer; §6 covers why it is no longer an assertion.
+§6 made `List^` resolve. It still answered nothing, because nothing could ever be *on* a
+list's stack: `MsgStck::Push()` and `Pop()` were `ASSERT(0)` for both container types.
+
+Almost nothing had to be written. `MsgStck__AllocItem` has dispatched on the item type
+since it was written — it sizes with `P2PmsgList_SizeofItem` / `P2PmsgVect_SizeofItem` and
+lays the block out with the matching `_InitItem` — so a list block was always allocatable.
+Push simply never called it for one.
+
+What the allocation does *not* carry is the payload. `VBLockList_Init` zeroes `aFirst`,
+`aLast` and `nItems`; `VBLockVect_Init` starts at zero elements. The name and data cells
+ride along with the block; the elements have to be walked over separately, with the same
+loops `P3PmsgList::operator=` and `P3PmsgVect::operator=` already use.
+
+The four parts every item type shares — name, data, attributes, descendants — are copied
+piece by piece rather than by whole-object assignment, and that is not fastidiousness:
+
+```cpp
+P3PmsgField&                             // P2Pmsg.cpp:3235
+P3PmsgField::operator = ( const P3PmsgField& rhs )
+{
+      ...
+      // Pushed components
+      if ( IsStacked() || rhs.IsStacked() )
+        r_Stck() = ((P3PmsgField&)rhs).r_Stck();
+}
+```
+
+`operator=` copies the **stack** as well, which inside a push would duplicate the very
+generations the push is re-linking. The field arm had always sidestepped it by hand;
+`MsgStck__CopyParts` now holds that in one place so the three arms cannot drift.
+
+### Two things had to come with it
+
+**`P3PmsgVect` had no `Drop()`.** Popping a vector would have reached `P3PmsgField::Drop`,
+which opens `ASSERT(OBJ__IsField())` — false for a vect — and then frees the item block
+with every element block and `aExtra` continuation still allocated. Added, mirroring
+`P3PmsgList::Drop`, with `Truncate()` doing the type-specific part. Nothing had dropped a
+vect before: containers drop their children through the base class, and no vect had ever
+been a stack generation.
+
+**`Pop` severed what it restored.** This one is older than anything above and applies to a
+plain field. `Pop` dropped the generation it had just restored from, and `Drop()` walks the
+stack — `P3PmsgField::Drop` and `P3PmsgList::Drop` both end with
+`if (IsStacked()) r_Stck().Drop()` — while `MsgStck::Drop` zeroes every link the rest of
+the way down and frees nothing. So the popped item had to be unlinked from the generation
+below it *before* being dropped, and it was not:
+
+```
+push "Gen0" / "Gen1" / "Gen2" / "Gen3", then pop once
+
+    before:   ^ -> Gen1        ^^ -> (void)      <- Gen0 still allocated, still correct
+    after:    ^ -> Gen1        ^^ -> Gen0
+```
+
+A single push and pop cannot see it — there is nothing below to sever — and a single push
+and pop was the only shape anything in the tree had exercised.
+
+### Measured
+
+`Test_StackContainers` pins six cases. Against the library built from the commit before the
+fix they fail, and then the process dies:
+
+```
+  - a pop leaves the generations below it intact
+      FAIL    !P3Pmsg_SelectObject(&oHost.r_Object(), L"^^").IsVoid()
+  - a list's elements survive a push and come back on the pop
+      ASSERT  MsgStck.cpp(145) : Assertion failed!     <- the Push list arm
+      FAIL    oList.IsStacked()
+      FAIL    !oWas.IsVoid()
+      FAIL    (int)oList.GetCount() == 3
+      FAIL    oList.GetNext(aPos).c_int() == 1
+
+  exit = -1073741819                                   <- 0xC0000005, reading
+                                                          elements off a list
+                                                          Pop never restored
+```
+
+After the fix: **112 cases, 532 checks, PASS** static and **PASS** dll, and
+`build_run_c4.bat` PASS. Reproduce it the way §6 says, stashing `MsgStck.cpp`,
+`MsgVect.cpp`, `MsgVect.h` and `P2Pmsg.cpp` against `d2763ce~1`.
+
+## 8. What `^` still does not do
+
 - **Collections.** `aStack` is a `VBLockItem` field; a `VBLockAttr` or `VBLockDesc` block
   has none. A `^` applied to the attribute or descendant *collection* is a broken path, not
   an assertion. The attributes and children **in** them are items and do have stacks.
@@ -321,11 +402,14 @@ msbuild "Msgcore(2026).vcxproj" /p:Configuration=DebugLib /p:Platform=x64
   Msgcore itself gains a component. It does emit a trailing `@` for an attribute path, and
   the splitter still drops that one — deliberately, so the `GetPath` → `RootPath2Object`
   round-trip is unchanged.
-- **`RootPath2Object` on a non-field hit.** A component that resolves to a list still
-  throws `"Invalid overloaded context"`, exactly as before; the new empty answer applies
-  only when the selection is void.
+- **`RootPath2Object` on a non-field hit.** It walks the path in a `P3PmsgItem`, and
+  `P3PmsgField::operator=(const P3PmsgObject&)` throws `"Invalid overloaded context"` for
+  anything that is not a field, so a component that resolves to a list throws before it can
+  answer. Unchanged here, and it predates all of this — but note that it is now easier to
+  reach than it was, because §6 is what made such a component resolve in the first place.
+  `Test_StackContainers` asks a descendant container directly for that reason.
 
-## 8. Reproducing this document
+## 9. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
