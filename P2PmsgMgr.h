@@ -90,6 +90,10 @@
 #include "wtypes.h"
 #include "P2Pmsg.h"
 #include "MsgAttr.h"
+//  P3PmsgDesc must be COMPLETE here: P2Pos2Path takes the address of
+//  r_Desc() for P3Pmsg_GetPath. It arrived transitively through MsgCurs.h
+//  and now says so.
+#include "MsgDesc.h"
 #include "MsgList.h"
 #include "MsgVect.h"
 #include "MsgCurs.h"

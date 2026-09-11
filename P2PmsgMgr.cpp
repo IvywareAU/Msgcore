@@ -794,18 +794,76 @@ P2PmsgMgr::P2Pos2Object ( P2Pos nP2Pos, BOOL bPageIn )
 CString
 P2PmsgMgr::P2Pos2Path ( P2Pos pos )
 {
-    if ( IsField(pos) )
+    //  ONE ARM PER BLOCK KIND, and the kind is read off the P3PmsgObject at
+    //  pos rather than from IsField(pos). IsField(pos) answers
+    //  VBLockItem_IsField, which is FALSE for a list and FALSE for a vector,
+    //  so six of the eleven things a P2Pos can name fell through to the
+    //  ASSERT(0) that used to stand here: a list, a vector, and all four
+    //  collections. Every one of them HAS a path. §6 taught
+    //  P3Pmsg_GetPath(const P3PmsgField*) about containers, §12 gave the
+    //  attribute collection an overload and §15 gave the descendant
+    //  collection one -- this was the one place that could still reach none
+    //  of it, so a path P3Pmsg_GetPath would build the manager would not.
+    if ( pos == 0 )
+      return CString();
+
+    P3PmsgObject oObject = P2Pos2Object ( pos );
+    if ( oObject.IsVoid() )
+      return CString();
+
+    //  THE COLLECTIONS ARE ASKED ABOUT FIRST, and not for tidiness. IsAttr
+    //  and IsDesc read the block header, which every block has. IsField,
+    //  IsList and IsVect go straight to VBLock_pItem and read a VBLockItem's
+    //  fields out of whatever block is actually there -- on a collection
+    //  block that is the ut union misread P2PmsgAttr_GetVBLockParentnn
+    //  already records. Asked in this order, the question is never put to a
+    //  block that cannot answer it.
+    if ( oObject.IsAttr() || oObject.IsDesc() )
     {
-      P3PmsgField oField = P2Pos2Field(pos).r_Object();
+      //  NEITHER OVERLOAD TAKES A P3PmsgObject. Both reach the owner through
+      //  the collection's back-pointer to the field it hangs off -- GetField()
+      //  -- and P3PmsgAttr(const P3PmsgObject&) sets only m_oObject, leaving
+      //  that pointer null. A collection converted straight from an object
+      //  therefore builds a lone '@' or '.' with no owner in front of it,
+      //  which is a string, not a path.
+      //
+      //  So the owner comes first: GetParent() on a collection block is
+      //  exactly the item the collection hangs off, and r_Attr()/r_Desc()
+      //  install the back-pointer the overloads want.
+      P3PmsgObject oOwner = oObject.GetParent();
+      if ( !oOwner.IsField() && !oOwner.IsList() && !oOwner.IsVect() )
+        return CString();     // Unparented collection; nothing to hang it off
+      P3PmsgField oField = oOwner;
+      return oObject.IsAttr() ? P3Pmsg_GetPath ( &oField.r_Attr() )
+                              : P3Pmsg_GetPath ( &oField.r_Desc() );
+    }
+
+    //  AN ITEM -- a field, a list or a vector. All three are VBLockItem
+    //  blocks and all three are what the P3PmsgField overload builds a path
+    //  for, because P3PmsgList and P3PmsgVect both derive from P3PmsgField
+    //  (§6). The CONVERTING CONSTRUCTOR takes all three; assignment would
+    //  throw "Invalid overloaded context" for the two that are not fields,
+    //  the same trap RootPath2Object carried until §13.
+    VBLock *pVBLock = (VBLock *)r_Object().Msg2Phys ( pos );
+    if ( pVBLock && VBLock_IsItem(pVBLock) )
+    {
+      P3PmsgField oField = oObject;
       return P3Pmsg_GetPath ( &oField );
     }
+
     //else if ( IsNode(pos) )
     //{
-    //  ASSERT(0);
     //  P3PmsgNode oNode = P2Pos2Node(pos).r_Object();
     //  return P3Pmsg_GetPath ( &oNode );
     //}
-    else ASSERT(0);
+
+    //  ANYTHING ELSE -- a name block, a data block, a stack block. None of
+    //  them is an object a path names, and none of them is a caller error
+    //  worth an ASSERT: §9's rule is that what a caller spells is the
+    //  caller's business. The empty string says "no path" the way a void
+    //  P3PmsgObject says "no object", and msgcore_mgr_p2pos2path already
+    //  keeps the two apart -- nullptr when the call threw, the string
+    //  otherwise.
     return CString();
 }
 P3PmsgObject

@@ -2084,6 +2084,151 @@ static void Test_DescCollectionPath()
 }
 
 // ---------------------------------------------------------------------------
+// P2PmsgMgr::P2Pos2Path : every kind of block a P2Pos can name
+// ---------------------------------------------------------------------------
+static void Test_P2Pos2Path()
+{
+    //  The manager answered for a plain field and asserted for everything
+    //  else, so an object could have a path P3Pmsg_GetPath would build and the
+    //  manager would not. Six of the eleven kinds fell through: a list and a
+    //  vector, because the test was IsField(pos) and IsField(pos) is
+    //  VBLockItem_IsField, which neither of them is; and all four collections,
+    //  because they are not items at all.
+    //
+    //  Every case here asserted before, and the framework folds an ASSERT into
+    //  the running case as a failure -- so these fail on the old code without
+    //  needing to name the assertion.
+    TF_CASE("a list and a vector have paths, not assertions")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgList oNums(L"Numbers");
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create);
+        mgr.r_Desc() += oNums;
+
+        P3PmsgVect oVect(3, L"Elem", P3PmsgData((int)0));
+        oVect.r_name() = L"Vec";
+        mgr.r_Desc() += oVect;
+
+        P3PmsgObject oList = mgr.RootPath2Object(L".Store.Numbers");
+        P3PmsgObject oVec  = mgr.RootPath2Object(L".Store.Vec");
+        TF_CHECK(oList.IsList());
+        TF_CHECK(oVec.IsVect());
+
+        TF_CHECK(mgr.P2Pos2Path(oList.GetP2Pos()) == L".Store.Numbers");
+        TF_CHECK(mgr.P2Pos2Path(oVec.GetP2Pos())  == L".Store.Vec");
+
+        //  §6 is why this is a one-line change rather than two new arms:
+        //  P3PmsgList and P3PmsgVect both derive from P3PmsgField, so the
+        //  P3PmsgField overload has built their paths all along. Only the
+        //  manager could not reach it -- and only because the CONVERTING
+        //  CONSTRUCTOR was never used. Assignment throws for a non-field,
+        //  which is the trap RootPath2Object carried until §13.
+        P3PmsgField oAsField = oList;
+        TF_CHECK(P3Pmsg_GetPath(&oAsField) == L".Store.Numbers");
+    }
+
+    //  §12 gave the attribute collection an overload and §15 the descendant
+    //  one, and both build a path from the collection's OWNER. A P3PmsgAttr
+    //  converted straight from a P3PmsgObject has no owner -- the constructor
+    //  sets only m_oObject and leaves GetField() null -- so the manager has to
+    //  find the owner first. GetParent() on a collection block is exactly the
+    //  item it hangs off.
+    TF_CASE("both collections have paths, and they name their owner")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        oInst.r_Desc(P3PmsgField::AttrCMD_Create);
+        oInst.r_Desc() += P3PmsgField(L"Last");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+
+        TF_CHECK(mgr.P2Pos2Path(oLive.r_Attr().r_Object().GetP2Pos()) == L".Store.BHP@");
+        TF_CHECK(mgr.P2Pos2Path(oLive.r_Desc().r_Object().GetP2Pos()) == L".Store.BHP.");
+
+        //  The root's own descendant collection, which is the shortest path
+        //  there is (§15).
+        TF_CHECK(mgr.P2Pos2Path(mgr.r_Desc().r_Object().GetP2Pos()) == L".Store.");
+
+        //  And the manager agrees with the overloads it is now dispatching to,
+        //  rather than merely producing something that looks similar.
+        TF_CHECK(mgr.P2Pos2Path(oLive.r_Attr().r_Object().GetP2Pos()) ==
+                 P3Pmsg_GetPath(&oLive.r_Attr()));
+        TF_CHECK(mgr.P2Pos2Path(oLive.r_Desc().r_Object().GetP2Pos()) ==
+                 P3Pmsg_GetPath(&oLive.r_Desc()));
+    }
+
+    //  A path that does not come back is not a path. Every spelling the
+    //  manager emits is handed straight back to RootPath2Object and has to
+    //  land on the P2Pos it was built from -- which is the check §12 made the
+    //  condition of emitting a collection path at all.
+    TF_CASE("every path the manager builds returns to the P2Pos it came from")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        oInst.r_Desc(P3PmsgField::AttrCMD_Create);
+        oInst.r_Desc() += P3PmsgField(L"Last");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgList oNums(L"Numbers");
+        oNums.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Unit");
+        mgr.r_Desc() += oNums;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        P3PmsgField oList = mgr.RootPath2Object(L".Store.Numbers");
+        TF_CHECK(!oLive.IsVoid());
+        TF_CHECK(!oList.IsVoid());
+
+        const P2Pos aPos[] = {
+            mgr.r_Object().GetP2Pos(),                      // the root item
+            oLive.GetP2Pos(),                               // a field
+            mgr.RootPath2Object(L".Store.BHP.Last").GetP2Pos(),
+            mgr.RootPath2Object(L".Store.BHP@Currency").GetP2Pos(),
+            oList.GetP2Pos(),                               // a list
+            oLive.r_Attr().r_Object().GetP2Pos(),           // its attr coll
+            oLive.r_Desc().r_Object().GetP2Pos(),           // its desc coll
+            mgr.r_Desc().r_Object().GetP2Pos(),             // the root's
+            oList.r_Attr().r_Object().GetP2Pos(),           // a list's attr coll
+        };
+
+        for (size_t i = 0; i < sizeof(aPos) / sizeof(aPos[0]); ++i)
+        {
+            const CString strPath = mgr.P2Pos2Path(aPos[i]);
+            TF_CHECK(!strPath.IsEmpty());
+            if (strPath.IsEmpty())
+                continue;
+            P3PmsgObject oBack = mgr.RootPath2Object(strPath);
+            TF_CHECK(!oBack.IsVoid());
+            if (!oBack.IsVoid())
+                TF_CHECK(oBack.GetP2Pos() == aPos[i]);
+        }
+    }
+
+    //  A P2Pos naming nothing is not a caller error worth an assertion. §9's
+    //  rule is that what a caller spells is the caller's business, and the
+    //  empty string says "no path" the way a void P3PmsgObject says "no
+    //  object" -- msgcore_mgr_p2pos2path keeps the two apart already, since it
+    //  answers nullptr only when the call threw.
+    TF_CASE("a P2Pos that names no object has no path, and does not assert")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"BHP");
+
+        TF_CHECK(mgr.P2Pos2Path(0).IsEmpty());
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3Pmsg_SplitRootPath : a bare '@' is a component wherever it stands
 // ---------------------------------------------------------------------------
 static void Test_BareAttrComponent()
@@ -3695,6 +3840,7 @@ void RunMsgcoreSuite()
     Test_RootPathContainers();
     Test_BareAttrComponent();
     Test_DescCollectionPath();
+    Test_P2Pos2Path();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();
