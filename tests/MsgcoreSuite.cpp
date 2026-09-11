@@ -1604,11 +1604,11 @@ static void Test_RootPath()
         catch (P2Pevent* pEVT) { bThrewRootless = true; pEVT->Cancel(false); }
         TF_CHECK(bThrewRootless);
 
-        //  A trailing '@' names no attribute and is still dropped rather than
-        //  refused, exactly as it always was. Deliberately outside this
-        //  change: it is the same shape as the trailing '.' the splitter has
-        //  always let through.
-        TF_CHECK(!mgr.RootPath2Object(L".Root.Alpha@").IsVoid());
+        //  A trailing '@' is not malformed -- it names the attribute
+        //  COLLECTION (§12), and Alpha has none, so this is an ordinary miss
+        //  rather than a refusal. A trailing '.' is still dropped.
+        TF_CHECK(mgr.RootPath2Object(L".Root.Alpha@").IsVoid());
+        TF_CHECK(!mgr.RootPath2Object(L".Root.Alpha.").IsVoid());
     }
 }
 
@@ -1770,6 +1770,148 @@ static void Test_GeneratedStackPath()
     {
         P3PmsgField oLoose(L"Loose");
         TF_CHECK(P3Pmsg_GetPath(&oLoose) == L".Loose");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// P3Pmsg_GetPath : the attribute collection, and the bare '@' that names it
+// ---------------------------------------------------------------------------
+static void Test_AttrCollectionPath()
+{
+    //  The P3PmsgAttr overload of GetPath -- the one that ends a path in a
+    //  bare '@' -- had no caller anywhere in the library, and it crashed.
+    //  P2PmsgAttr_GetVBLockParentnn took GetField()->r_Object(), which is the
+    //  owning ITEM's block, and read it through VBLock_pAttr: that picks
+    //  VBLockAttr's fields out of a VBLockItem's ut union, so the parent came
+    //  back as whatever bytes lay at that offset and Msg2Phys of it ran off
+    //  the arena. A P3PmsgAttr obtained the ordinary way, oItem.r_Attr(), was
+    //  a segfault.
+    //
+    //  Handed the right parent it was still wrong: a collection's parent is an
+    //  ITEM, every real item is a VBLock_Item block, and the overload's arms
+    //  tested VBLock_IsField and VBLock_IsList -- different block TYPES, never
+    //  true here. So the walk fell to its own ASSERT(0) and emitted a lone
+    //  '@' with no owner in front of it.
+    TF_CASE("an attribute collection has a path, and it names the owner")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+
+        const CString strColl = P3Pmsg_GetPath(&oLive.r_Attr());
+        TF_CHECK(strColl == L".Store.BHP@");
+
+        //  And an attribute in it still spells itself the way it always did,
+        //  which is the round-trip the old drop was said to be protecting.
+        P3PmsgField oAttr = oLive.SelectObject(L"@Currency");
+        TF_CHECK(!oAttr.IsVoid());
+        TF_CHECK(P3Pmsg_GetPath(&oAttr) == L".Store.BHP@Currency");
+    }
+
+    //  '@' with nothing after it names the COLLECTION, the way '^' with
+    //  nothing after it names a snapshot. The selector recursed into the
+    //  collection with an empty path, found no name to match and answered
+    //  void -- so the one object with no other spelling could not be reached,
+    //  and it is the object the overload above emits a path for.
+    TF_CASE("a bare '@' selects the collection, through either spelling")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+
+        P3PmsgObject oViaObject = oLive.SelectObject(L"@");
+        TF_CHECK(!oViaObject.IsVoid());
+        TF_CHECK(oViaObject.IsAttr());
+
+        //  P3Pmsg_SplitRootPath used to drop a trailing '@' and hand back the
+        //  components for ".Store.BHP", so the root path answered BHP.
+        CString        strRoot;
+        CList<CString> oItems;
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Store.BHP@", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 2);
+        if (oItems.GetCount() == 2)
+            TF_CHECK(oItems.GetTail() == L"@");
+
+        P3PmsgObject oViaRoot = mgr.RootPath2Object(L".Store.BHP@");
+        TF_CHECK(!oViaRoot.IsVoid());
+        if (!oViaObject.IsVoid() && !oViaRoot.IsVoid())
+            TF_CHECK(oViaObject.GetP2Pos() == oViaRoot.GetP2Pos());
+        if (!oViaRoot.IsVoid())
+            TF_CHECK(oViaRoot.GetP2Pos() != oLive.GetP2Pos());
+
+        //  The path the library writes for the collection comes back to it.
+        const CString strColl = P3Pmsg_GetPath(&oLive.r_Attr());
+        P3PmsgObject oBack = mgr.RootPath2Object(strColl);
+        TF_CHECK(!oBack.IsVoid());
+        if (!oBack.IsVoid() && !oViaObject.IsVoid())
+            TF_CHECK(oBack.GetP2Pos() == oViaObject.GetP2Pos());
+    }
+
+    //  An item with no attributes has no collection block, and r_Attr() hands
+    //  back an object that keeps the heap handle and carries no address --
+    //  which IsVoid() does not catch (§9). A miss, not the item, and not an
+    //  assertion.
+    TF_CASE("a bare '@' on an item with no attributes is a broken path")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc() += P3PmsgField(L"RIO");
+
+        P3PmsgField oBare = mgr.RootPath2Object(L".Store.RIO");
+        TF_CHECK(!oBare.IsVoid());
+        TF_CHECK(!oBare.IsAttributed());
+
+        TF_CHECK(oBare.SelectObject(L"@").IsVoid());
+        TF_CHECK(mgr.RootPath2Object(L".Store.RIO@").IsVoid());
+    }
+
+    //  A snapshot carries its own collections (§9), and since §11 gave the
+    //  snapshot a path the collection inside it gets one too -- built by the
+    //  same two steps, and resolved by the same two components.
+    TF_CASE("the collection inside a snapshot names itself through the '^'")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        oLive.r_Stck().Push();
+        oLive.r_Attr() += P3PmsgField(L"Venue");        // after the push
+
+        P3PmsgField oSnap = oLive.SelectObject(L"^");
+        TF_CHECK(!oSnap.IsVoid());
+
+        const CString strColl = P3Pmsg_GetPath(&oSnap.r_Attr());
+        TF_CHECK(strColl == L".Store.BHP^@");
+
+        P3PmsgObject oBack = mgr.RootPath2Object(strColl);
+        TF_CHECK(!oBack.IsVoid());
+        TF_CHECK(oBack.IsAttr());
+
+        //  And it is the snapshot's collection, not the live one -- §9's
+        //  identity, now reachable from a root path at both ends.
+        P3PmsgObject oViaColl = oLive.SelectObject(L"@^");
+        TF_CHECK(!oViaColl.IsVoid());
+        if (!oBack.IsVoid() && !oViaColl.IsVoid())
+            TF_CHECK(oBack.GetP2Pos() == oViaColl.GetP2Pos());
+        if (!oBack.IsVoid())
+            TF_CHECK(oBack.GetP2Pos() != oLive.SelectObject(L"@").GetP2Pos());
     }
 }
 
@@ -3114,6 +3256,7 @@ void RunMsgcoreSuite()
     Test_ListPath();
     Test_CollectionStack();
     Test_GeneratedStackPath();
+    Test_AttrCollectionPath();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();

@@ -6789,6 +6789,18 @@ P3Pmsg_GetPath ( const P3PmsgAttr *pAttr )
     CString strPath;
 
     // Process parent
+    //  A COLLECTION'S PARENT IS AN ITEM -- the item it hangs off -- and every
+    //  real item is a VBLock_Item block. VBLock_Field and VBLock_List are
+    //  different block TYPES, not item types, which is why every other walk in
+    //  this file spells the test "VBLock_IsX(pParent) || VBLockItem_IsX(...)".
+    //  So neither of the two arms that used to stand here could ever fire, the
+    //  path fell to the ASSERT(0) below them, and what came back was a lone
+    //  '@' with no owner in front of it. Both arms also appended a '.' before
+    //  that '@', which no spelling of an attribute path has ever carried.
+    //
+    //  Only if it got that far: P2PmsgAttr_GetVBLockParentnn was reading the
+    //  parent out of the owning item's block, so the usual outcome was a
+    //  segfault rather than a wrong string.
     VBLaddr aParent = P2PmsgAttr_GetVBLockParentnn ( pAttr );
     if ( aParent )
     {
@@ -6799,21 +6811,14 @@ P3Pmsg_GetPath ( const P3PmsgAttr *pAttr )
       //  strPath += P3Pmsg_GetPath ( &oNodeParent );
       //  strPath += _T(".");
       //}
-      if ( VBLock_IsField(pParent) )
+      if ( pParent && VBLock_IsItem(pParent) )
       {
-        P3PmsgField oFieldParent( pAttr->GetField()->GetP2PmsgHandle(), aParent, 0 );
-        strPath += P3Pmsg_GetPath ( &oFieldParent );
-        strPath += T_DescDelim; //_T(".");
-      }
-      else if ( VBLock_IsList(pParent) )
-      {
-        P3PmsgField oListParent( pAttr->GetField()->GetP2PmsgHandle(), aParent, 0 );
-        strPath += P3Pmsg_GetPath ( &oListParent );
-        strPath += T_DescDelim; //_T(".");
-      }
-      else if ( VBLock_IsRoot(pParent) )
-      {
-        ASSERT(0);
+        //  One arm for all three item types: a list and a vector carry
+        //  attributes exactly as a field does, and P3PmsgList and P3PmsgVect
+        //  both derive from P3PmsgField, so the owner's own path is built the
+        //  same way whichever it is (§6).
+        P3PmsgField oOwner( pAttr->GetField()->GetP2PmsgHandle(), aParent, 0 );
+        strPath += P3Pmsg_GetPath ( &oOwner );
       }
       else
       {
@@ -6822,6 +6827,9 @@ P3Pmsg_GetPath ( const P3PmsgAttr *pAttr )
     }
 
     // Tidy up, and
+    //  '@' with no name after it IS the component. It names the collection
+    //  itself, the way '^' with nothing after it names a snapshot (§5), and
+    //  P3Pmsg_SplitRootPath keeps it for the same reason.
     strPath += T_AttrDelim; //_T("@");
     return strPath;
 }
@@ -6927,8 +6935,22 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
         //  return *pObject;
         //return P3Pmsg_SelectObjectRecurse ( pObject, lpszObjectPath );
       }
+      //  '@' with nothing after it names the COLLECTION, the way '^' with
+      //  nothing after it names the snapshot below. Recursing into it with an
+      //  empty path looked for a name that was not there and answered void, so
+      //  the one object with no other spelling could not be reached -- and it
+      //  is the object P3Pmsg_GetPath emits a path for.
       if ( *lpszObjectPath == T_AttrDelim )
-        return P3Pmsg_SelectObjectRecurse ( &oField.r_Attr().r_Object(), ++lpszObjectPath );
+      {
+        if ( *++lpszObjectPath == 0 )
+        {
+          P3PmsgObject oAttrColl = oField.r_Attr().r_Object();
+          if ( oAttrColl.GetVBLocknn() == 0 )
+            return P3PmsgObject();     // No attributes; selection path broken
+          return oAttrColl;
+        }
+        return P3Pmsg_SelectObjectRecurse ( &oField.r_Attr().r_Object(), lpszObjectPath );
+      }
       //  '^' follows the item's stack: the aStack address a Push() wrote, so a
       //  path can name a value the field USED to hold. The delimiter has been
       //  in the grammar from the start -- ParseObjectPath stops on it,
@@ -7345,7 +7367,18 @@ strItemname=strLast;
     //  value Item held before its last push, and it came back as the component
     //  list for ".Root.Item", which is Item itself. A wrong object, silently,
     //  and the shortest way to spell the question.
-    if ( strItemname.GetLength() == 1 && strItemname[0] == T_StckDelim )
+    //
+    //  A trailing '@' reads exactly the same way and was discarded for exactly
+    //  as long: ".Root.Item@" asks for Item's ATTRIBUTE COLLECTION, and came
+    //  back as Item. The reason given for dropping it was that P3Pmsg_GetPath
+    //  emits one and the round-trip had to survive -- but the only overload
+    //  that emits a trailing '@' is the one for a collection, which had no
+    //  caller and crashed before it got there (§12). A path to an attribute,
+    //  "@Currency", has a name after the delimiter and never came through
+    //  here. So the drop was protecting a round-trip that could not happen,
+    //  and keeping the component is what makes one.
+    if ( strItemname.GetLength() == 1 && ( strItemname[0] == T_StckDelim ||
+                                           strItemname[0] == T_AttrDelim    ) )
       oCListItems.AddTail ( strItemname );
     return TRUE;
 }

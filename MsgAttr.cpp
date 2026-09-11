@@ -728,8 +728,24 @@ P2PmsgAttr_GetVBLockParentnn ( const P3PmsgAttr *pAttr )
 {
     if ( pAttr->GetField() == 0 )
       return 0;
+    //  THE COLLECTION'S OWN BLOCK, not the owning item's. GetField()->r_Object()
+    //  is the ITEM -- P3PmsgAttr holds a pointer back to the field it belongs
+    //  to, which is what GetField() means -- and reading it through
+    //  VBLock_pAttr picks VBLockAttr's fields out of a VBLockItem's ut union.
+    //  The parent came back as whatever bytes lay at that offset, and
+    //  Msg2Phys of that ran off the arena: P3Pmsg_GetPath segfaulted on a
+    //  P3PmsgAttr obtained the ordinary way, oItem.r_Attr().
+    //
+    //  The collection lives at the item's aExtra, which is what
+    //  P3PmsgAttr__GetVBLocknn reads and what MsgAttr's own link routines
+    //  write into a child's aParent.
     //TODO:LJM deprecated below VBLock *pVBLock   = P3PmsgAttr__VBLock ( pAttr );
-    VBLock *pVBLock   = ptrVBLOCK(pAttr->GetField()->r_Object()); //->r_Object().GetVBLock();
+    VBLaddr aVBLockAttr = P3PmsgAttr__GetVBLocknn ( pAttr );
+    if ( aVBLockAttr == 0 )
+      return 0;                        // No attributes; no collection block
+    VBLock *pVBLock   = (VBLock *)pAttr->GetField()->r_Object().Msg2Phys ( aVBLockAttr );
+    if ( pVBLock == nullptr || !VBLock_IsAttr(pVBLock) )
+      return 0;
     UCHAR   uVBLock   = pVBLock->oHdr.uVBLockDefs;
     ASSERT(VBLock_IsLinked(pVBLock));
     return VBLockAttr_GetParent ( uVBLock, VBLock_pAttr(pVBLock) );
