@@ -993,6 +993,114 @@ static void Test_RootPath()
 }
 
 // ---------------------------------------------------------------------------
+// P3Pmsg_SelectObject : path components against a list or a vector
+// ---------------------------------------------------------------------------
+static void Test_ListPath()
+{
+    //  A list and a vector are ITEMS. The VBLockItem header carries the same
+    //  six addresses -- aParent, aPrev, aNext, aExtra, aStack, aDescn --
+    //  whatever the ut union under it holds, so a list has attributes and
+    //  descendants of its own exactly as a field does. The selector did not:
+    //  its list arm was ASSERT(0) in its entirety and there was no vector arm
+    //  at all, so a path that named a list and then kept going tripped an
+    //  assertion in a debug build and came back void in a release one.
+    //
+    //  Landing ON a list always worked -- P3PmsgCurs::Goto connects
+    //  m_oP3PmsgList for a match of that type and the descendant arm returns
+    //  straight from the cursor. It is the step AFTER that which had nowhere
+    //  to go.
+    TF_CASE("'@' reaches an attribute of a list")
+    {
+        P3PmsgList oList(L"Numbers", P3PmsgData((int)0));
+        oList.AddListTail(P3PmsgData((int)1));
+        oList.AddListTail(P3PmsgData((int)2));
+        oList.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Unit");
+
+        P3PmsgItem oHost(L"Host");
+        oHost.r_Desc(P3PmsgField::AttrCMD_Create);
+        oHost.r_Desc() += oList;
+
+        //  The list itself: this half was never broken.
+        P3PmsgObject oFound = P3Pmsg_SelectObject(&oHost.r_Object(), L"Numbers");
+        TF_CHECK(!oFound.IsVoid());
+        TF_CHECK(oFound.IsList());
+
+        //  One step further is the half that was.
+        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"Numbers@Unit").IsVoid());
+        TF_CHECK( P3Pmsg_SelectObject(&oHost.r_Object(), L"Numbers@None").IsVoid());
+    }
+
+    TF_CASE("a descendant name resolves through a list")
+    {
+        P3PmsgList oList(L"Numbers", P3PmsgData((int)0));
+        oList.AddListTail(P3PmsgData((int)1));
+        oList.r_Desc(P3PmsgField::AttrCMD_Create);
+        oList.r_Desc() += P3PmsgField(L"Kid");
+
+        P3PmsgItem oHost(L"Host");
+        oHost.r_Desc(P3PmsgField::AttrCMD_Create);
+        oHost.r_Desc() += oList;
+
+        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"Numbers.Kid").IsVoid());
+        TF_CHECK( P3Pmsg_SelectObject(&oHost.r_Object(), L"Numbers.Nobody").IsVoid());
+    }
+
+    //  MsgStck::Push() still asserts for a list, so there is never anything on
+    //  a list's aStack to follow. The question is legitimate all the same, and
+    //  the answer has to be the ordinary void -- not the assertion the list arm
+    //  used to raise for every component alike.
+    TF_CASE("'^' on a list is a miss, not an assertion")
+    {
+        P3PmsgList oList(L"Numbers", P3PmsgData((int)0));
+        oList.AddListTail(P3PmsgData((int)1));
+
+        P3PmsgItem oHost(L"Host");
+        oHost.r_Desc(P3PmsgField::AttrCMD_Create);
+        oHost.r_Desc() += oList;
+
+        TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"Numbers^").IsVoid());
+        TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"Numbers^.Kid").IsVoid());
+    }
+
+    //  A vector was worse off than a list: it had no arm of its own, so it fell
+    //  past every test to the ASSERT(0) that closes the function.
+    TF_CASE("'@' reaches an attribute of a vector")
+    {
+        P3PmsgVect oVect(2, L"Payload", P3PmsgData((int)0));
+        oVect.r_data(0).c_int(5);
+        oVect.r_data(1).c_int(6);
+        oVect.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Unit");
+
+        P3PmsgItem oHost(L"Host");
+        oHost.r_Desc(P3PmsgField::AttrCMD_Create);
+        oHost.r_Desc() += oVect;
+
+        P3PmsgObject oFound = P3Pmsg_SelectObject(&oHost.r_Object(), L"Payload");
+        TF_CHECK(!oFound.IsVoid());
+        TF_CHECK(oFound.IsVect());
+
+        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"Payload@Unit").IsVoid());
+        TF_CHECK( P3Pmsg_SelectObject(&oHost.r_Object(), L"Payload^"    ).IsVoid());
+    }
+
+    //  The rooted form. P3Pmsg_SelectObject checks the leading component
+    //  against the object it is standing on before recursing, and that test was
+    //  IsField()-only: a list reached its ASSERT(0) and then recursed anyway,
+    //  so the name was never actually checked.
+    TF_CASE("a rooted path checks the name of a list it starts at")
+    {
+        P3PmsgList oList(L"Numbers", P3PmsgData((int)0));
+        oList.AddListTail(P3PmsgData((int)1));
+        oList.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Unit");
+
+        TF_CHECK(!P3Pmsg_SelectObject(&oList.r_Object(), L".Numbers@Unit").IsVoid());
+
+        //  A leading component that names something else is a broken path.
+        TF_CHECK(P3Pmsg_SelectObject(&oList.r_Object(), L".Other@Unit").IsVoid());
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P2Pevent : fluent event / exception builder
 // ---------------------------------------------------------------------------
 static void Test_Event()
@@ -1725,6 +1833,7 @@ void RunMsgcoreSuite()
     Test_VBLockItem_UnknownType();
     Test_Stack();
     Test_RootPath();
+    Test_ListPath();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();

@@ -6813,8 +6813,19 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
       return P3Pmsg_SelectObjectRecurse ( &oNode.r_Curs().r_Object(), lpszParsedname );
     }*/
 
-    // Items
-    if ( pObject->IsField() )
+    // Items, lists and vectors
+    //  One arm, three item types. The VBLockItem header is the same six
+    //  addresses -- aParent, aPrev, aNext, aExtra, aStack, aDescn -- whatever
+    //  the ut union under it holds, and P3PmsgList and P3PmsgVect both derive
+    //  from P3PmsgField, so '.', '@', '^' and a descendant name mean on a list
+    //  or a vector exactly what they mean on a field. Reaching here with one is
+    //  ordinary: P3PmsgCurs::Goto connects m_oP3PmsgList / m_oP3PmsgVect for a
+    //  match of that type (MsgCurs.cpp), so any path that names a list and then
+    //  keeps going arrives in this function with IsList() true. That used to be
+    //  an ASSERT(0) below and then a void return -- no component of any kind
+    //  resolved against a list, and a vector had no arm at all and fell through
+    //  to the ASSERT(0) at the end of the function.
+    if ( pObject->IsField() || pObject->IsList() || pObject->IsVect() )
     {
       P3PmsgField oField = *pObject;
       if ( *lpszObjectPath == T_DescDelim )
@@ -6847,7 +6858,16 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
       {
         if ( !oField.IsStacked() )
           return P3PmsgObject();       // Nothing pushed; selection path broken
-        P3PmsgField& oStacked = oField.r_Stck().r_item();
+        //  MsgStck keeps one accessor per item type and each THROWS if asked
+        //  for the wrong one, so the type has to be re-tested here even though
+        //  everything above this line is type-agnostic. MsgStck::Push() still
+        //  asserts for lists and vectors -- only a field can be pushed today --
+        //  so IsStacked() above is what actually answers them, and it answers
+        //  false. Dispatching anyway costs a branch and means this arm is
+        //  already right on the day Push grows the other two.
+        P3PmsgField& oStacked = pObject->IsList() ? (P3PmsgField&)oField.r_Stck().r_list()
+                              : pObject->IsVect() ? (P3PmsgField&)oField.r_Stck().r_vect()
+                              :                     (P3PmsgField&)oField.r_Stck().r_item();
         if ( *++lpszObjectPath == 0 )
           return oStacked.r_Object();  // Path ends on the pushed item itself
         return P3Pmsg_SelectObjectRecurse ( &oStacked.r_Object(), lpszObjectPath );
@@ -6863,12 +6883,6 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
       if ( *lpszParsedname == 0 )
         return oField.r_Desc().r_Curs().r_Object();
       return P3Pmsg_SelectObjectRecurse ( &oField.r_Desc().r_Curs().r_Object(), lpszParsedname );
-    }
-
-    // Lists
-    if ( pObject->IsList() )
-    {
-      ASSERT(0);
     }
 
     // Attributes
@@ -6967,7 +6981,13 @@ P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath )
     //  if ( oField.r_name().c_wcsicmp(nsObjectname) )
     //    return P3PmsgObject();         // Selection path broken
     //}
-    if ( pObject->IsField() )
+    //  Lists and vectors take the field test here for the same reason they
+    //  share the field arm of the recurse above: the name lives in the
+    //  VBLockField the ut union carries whichever of the three it is, so
+    //  matching the leading component against it is the same operation. They
+    //  used to reach the ASSERT(0) below and then recurse anyway, which meant
+    //  a rooted path was never checked against the object it was rooted at.
+    if ( pObject->IsField() || pObject->IsList() || pObject->IsVect() )
     {
       P3PmsgField oField = *pObject;
       if ( oField.r_name().c_wcsicmp(nsObjectname) )
