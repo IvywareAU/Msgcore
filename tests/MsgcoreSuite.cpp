@@ -3110,6 +3110,163 @@ static void Test_HandleOrCopy()
     }
 }
 // ---------------------------------------------------------------------------
+// P3PmsgObject : can anything else see a write through this?
+// ---------------------------------------------------------------------------
+
+//  Grow a field past its inline block, in place. Returning one by value would
+//  copy it, and a copy is a fresh inline item -- the opposite of what these
+//  need.
+static void GrowPastInline ( P3PmsgField& oField, int nValue )
+{
+    CString sBig(L'x', 1024);
+    oField.r_data() = P3PmsgData((LPCWSTR)(LPCTSTR)sBig);
+    oField.r_data() = P3PmsgData((int)nValue);
+}
+
+static void Test_SoleStorage()
+{
+    //  THE ROW §24 NAMED. A duplicate that has grown is on a heap, so IsInline
+    //  says false -- and it is on a heap OF ITS OWN, which nothing else holds,
+    //  so a write through it reaches nobody. IsInline's false was not a
+    //  guarantee of anything; this is.
+    TF_CASE("a duplicate that has grown is still nobody else's")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        P3PmsgField oStore = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        P3PmsgField oCopy  = mgr.r_Desc().SelectItem(L"AAA");
+        GrowPastInline(oCopy, 5);
+
+        TF_CHECK(!oCopy.IsInline());       // the block did leave the object
+        TF_CHECK(oCopy.IsSole());          // ... and took nobody with it
+
+        //  Which is what a write does.
+        oCopy.r_data().c_int(4321);
+        TF_CHECK_EQ(oStore.r_data().c_int(), 1);
+        TF_CHECK(!(oCopy == oStore));      // §21 says whose it is
+    }
+
+    //  The two questions, asked of the same object, answered differently --
+    //  which is the whole point of there being two.
+    TF_CASE("where the block is and whether anyone else holds it")
+    {
+        P3PmsgField oF(L"BBB", P3PmsgData((int)1));
+        TF_CHECK(oF.IsInline());           // in the object
+        TF_CHECK(oF.IsSole());             // so nowhere else
+
+        GrowPastInline(oF, 2);
+        TF_CHECK(!oF.IsInline());          // on a heap now
+        TF_CHECK(oF.IsSole());             // ... its own, and only its own
+    }
+
+    //  Sole stops the instant a second name exists, and comes back when that
+    //  name goes away -- the count is of holders, and holders come and go.
+    TF_CASE("sharing ends sole, and letting go restores it")
+    {
+        P3PmsgField oF(L"CCC");
+        GrowPastInline(oF, 3);
+        TF_CHECK(oF.IsSole());
+        {
+            P3PmsgField oHnd = oF.r_Object();
+            TF_CHECK(!oF.IsSole());
+            TF_CHECK(!oHnd.IsSole());
+            TF_CHECK(oHnd == oF);
+            oHnd.r_data().c_int(33);
+        }
+        TF_CHECK(oF.IsSole());
+        TF_CHECK_EQ(oF.r_data().c_int(), 33);   // and the write stayed
+    }
+
+    //  A small floater is sole for the other reason: the block never left.
+    TF_CASE("an item still inside its object is sole by being inside it")
+    {
+        P3PmsgField oF(L"DDD", P3PmsgData((int)4));
+        TF_CHECK(oF.IsInline());
+        TF_CHECK(oF.IsSole());
+
+        P3PmsgField oCopy = oF;            // a value copy, not a handle
+        TF_CHECK(oCopy.IsSole());
+        TF_CHECK(oF.IsSole());             // taking one changed neither
+
+        P3PmsgField oShare = oF.r_Object();
+        TF_CHECK(!oF.IsSole());            // ... but taking a NAME did
+        TF_CHECK(!oShare.IsSole());
+    }
+
+    //  Anything in a message is held by the message.
+    TF_CASE("nothing in a tree is sole")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        TF_CHECK(!mgr.IsSole());                       // the root
+        TF_CHECK(!mgr.r_Desc().r_Object().IsSole());   // its descendants
+        TF_CHECK(!mgr.r_Desc().SelectItem(L"AAA").r_Object().IsSole());
+
+        //  ... and a write through a handle proves why.
+        P3PmsgField oHnd = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        oHnd.r_data().c_int(111);
+        TF_CHECK_EQ(mgr.r_Desc().SelectItem(L"AAA").r_data().c_int(), 111);
+    }
+
+    //  A collection inherits it, and grows a heap the same way an item does.
+    TF_CASE("a collection is sole until it is named twice")
+    {
+        P3PmsgList oList;
+        TF_CHECK(oList.IsSole());
+        oList.AddListTail(P3PmsgData((int)1));   // ... which gives it a heap
+        TF_CHECK(!oList.IsInline());
+        TF_CHECK(oList.IsSole());
+
+        P3PmsgList oShare;
+        oShare = oList.r_Object();
+        TF_CHECK(!oList.IsSole());
+        TF_CHECK(!oShare.IsSole());
+        oShare.AddListTail(P3PmsgData((int)2));
+        TF_CHECK_EQ((int)oList.GetCount(), 2);
+    }
+
+    //  A void field denotes no storage, so it is not the sole holder of any.
+    TF_CASE("void is not sole either")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        P3PmsgObject oRoot = mgr.r_Object();
+        P3PmsgField  oVoid(P3Pmsg_SelectObject(&oRoot, L"NoSuchItem"));
+
+        TF_CHECK(oVoid.IsVoid());
+        TF_CHECK(!oVoid.IsSole());
+        TF_CHECK(!oVoid.IsInline());
+    }
+
+    //  FALSE IS NOT THE OPPOSITE GUARANTEE, and this is the row that says so.
+    //  The count is of holders of the HEAP; a field that has been asked for
+    //  its descendants keeps a sub-object that holds it, and answers false
+    //  from then on while still being the only name for its own item. Pinned
+    //  so the claim in the NOTES stays true of the code.
+    TF_CASE("false says the question is open, not that anyone is looking")
+    {
+        P3PmsgField oF(L"EEE", P3PmsgData((int)7));
+        GrowPastInline(oF, 7);
+        TF_CHECK(oF.IsSole());
+
+        oF.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"kid", P3PmsgData((int)1));
+        TF_CHECK(!oF.IsSole());            // a second HOLDER of the heap ...
+
+        //  ... which is this object's own, and names a different block. The
+        //  item is still nobody else's, and IsSole cannot say so.
+        TF_CHECK_EQ(oF.r_data().c_int(), 7);
+        TF_CHECK_EQ((int)oF.r_Desc().GetCount(), 1);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3PmsgObject : a value copy copies the VALUE, not the address of one
 // ---------------------------------------------------------------------------
 
@@ -4896,6 +5053,7 @@ void RunMsgcoreSuite()
     Test_ConstFieldName();
     Test_HandleOrCopy();
     Test_ValueCopiesItsPayload();
+    Test_SoleStorage();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();

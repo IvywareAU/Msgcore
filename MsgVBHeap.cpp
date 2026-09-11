@@ -3632,6 +3632,28 @@ P2PmsgHeap_AddRef ( P2PmsgHANDLE hVBHeap )
                   pHandle -> nRefCount++;
     return hVBHeap;
 }
+//
+//  How many holders this heap has
+//  NOTES: The count AddRef raises and Close lowers, read rather than changed.
+//         One means the caller asking is the only holder there is: nothing
+//         else in the process can reach this heap, so nothing else can be
+//         looking at anything on it.
+//       : IT COUNTS HOLDERS OF THE HEAP, NOT NAMES FOR A BLOCK. Two holders
+//         may name two different blocks, so >1 does not establish that any
+//         particular block is shared -- it establishes only that the question
+//         is open. ==1 is the half that settles, and it settles it for every
+//         block on the heap at once. Refer P3PmsgObject::IsSole, which is the
+//         reason this is readable.
+//       : A null handle answers 0, which is neither: there is no heap, and
+//         where the block is instead is a question for the object.
+int
+P2PmsgHeap_RefCount ( P2PmsgHANDLE hVBHeap ) noexcept
+{
+    if ( hVBHeap == nullptr )
+      return 0;
+    const VBListHANDLE *pHandle = static_cast<const VBListHANDLE *>(hVBHeap);
+    return pHandle -> nRefCount.load ( );
+}
 
 BOOL
 P2PmsgHeap_Close ( P2PmsgHANDLE hVBList )

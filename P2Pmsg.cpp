@@ -3205,7 +3205,13 @@ P3PmsgObject::IsVoid ( ) const noexcept
 //       : IT DOES NOT SAY WHOSE ITEM IT IS. A value copy that has since grown
 //         lives on a heap too, and answers false here while reaching nothing
 //         the caller holds. For whose, there is a comparand and it is §21's
-//         `==`. What this adds is the answer that needs none.
+//         `==`. What this adds is an answer that needs none.
+//       : AND ITS FALSE IS NOT A GUARANTEE, which is what that row means: true
+//         says a write reaches nobody, false says only that the block is not
+//         in here. IsSole below is the same guarantee asked of the STORAGE
+//         rather than of the block, and it covers that row. Ask this one when
+//         the question is where the item is; ask that one when the question is
+//         whether anyone else can see a write. §24.
 //       : A void object answers false -- it denotes no item, so the item is
 //         not inside it either. Ask IsVoid() first, as with every other
 //         question in this family.
@@ -3214,6 +3220,51 @@ P3PmsgObject::IsInline ( ) const noexcept
 {
     return ( m_aVBLock != 0 && m_aVBLock == (VBLaddr)&m_oVBLock[0] )
              ? true : false;
+}
+//
+//  Can anything at all, other than me, see a write through me?
+//  NOTES: TRUE IS A GUARANTEE: no. FALSE is not the opposite guarantee, and
+//         says only that the question is open -- which is the shape IsInline
+//         has as well, and the reason for this is that IsInline's guarantee
+//         covers too little. IsInline asks where the BLOCK is and answers
+//         false for a duplicate that has since grown, which lives on a heap of
+//         its very own and reaches nothing at all. §24 recorded that row. This
+//         asks after the STORAGE and answers it true.
+//       : Two ways to be sole, and they are the two ways to own storage. The
+//         block is INSIDE this object, which is IsInline and which nothing
+//         else in the process can address -- §22 rehomes an item before it is
+//         ever shared and §23 duplicates a value's payload, so an inline block
+//         is reachable only through the object carrying it. Or the block is on
+//         a heap THIS OBJECT IS THE ONLY HOLDER OF: every object that names a
+//         heap holds a reference to it (Connecta AddRefs, and the copy
+//         constructor and Connect do too), so a count of one means there is no
+//         second object to be looking.
+//       : WHAT FALSE DOES NOT SAY. The count is of holders of the HEAP, not of
+//         names for the BLOCK, so a second holder may be naming something else
+//         entirely -- including one of this object's own sub-objects. A field
+//         that has been asked for its descendants keeps a P3PmsgDesc that holds
+//         the heap, and answers false from then on while still being the only
+//         name for its item. Measured, and left: narrowing it further needs a
+//         count per block, which is a different library.
+//       : It follows that false is not "shared" and must not be read as it.
+//         For WHOSE the comparand is §21's `==`, which is exact in both
+//         directions and needs the other object to compare against. This is
+//         the answer available when there is nothing to compare to.
+//       : A void object answers false. It denotes no storage, so it is not the
+//         sole holder of any -- ask IsVoid() first, as with the rest of this
+//         family.
+//       : A heap handle handed out raw by GetP2PmsgHandle() and held without
+//         an AddRef is outside the count and outside this guarantee. That is
+//         the ownership contract the rest of the file keeps; this reads the
+//         count it maintains.
+bool
+P3PmsgObject::IsSole ( ) const noexcept
+{
+    if ( m_aVBLock == 0 )
+      return false;                    // Void: no storage to be sole holder of
+    if ( m_aVBLock == (VBLaddr)&m_oVBLock[0] )
+      return true;                     // The block is in here, so nowhere else
+    return P2PmsgHeap_RefCount ( m_hVBList ) == 1;
 }
 bool
 P3PmsgObject::IsData ( ) const
@@ -4142,6 +4193,21 @@ bool
 P3PmsgField::IsInline ( ) const
 {
     return OBJ__.IsInline ( );
+}
+//
+//  Can a write through this field be seen anywhere but here?
+//  NOTES: The object's question, asked of the object -- as IsVoid() and
+//         IsInline() are. A callee handed a P3PmsgField& and nothing to
+//         compare it to can ask this one and get a guarantee out of TRUE:
+//         whatever it writes, nobody else is looking.
+//       : FALSE IS NOT THE OPPOSITE. Refer P3PmsgObject::IsSole for what it
+//         does and does not settle, and §21's `==` for whose item it is.
+//       : P3PmsgList and P3PmsgVect inherit it, and it is virtual for the same
+//         reason IsVoid() is.
+bool
+P3PmsgField::IsSole ( ) const
+{
+    return OBJ__.IsSole ( );
 }
 bool
 P3PmsgField::IsStacked ( ) const

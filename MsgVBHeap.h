@@ -145,6 +145,13 @@ P2PmsgHANDLE
 P2PmsgHeap_AddRef ( P2PmsgHANDLE hVBHeap );
 BOOL
 P2PmsgHeap_Close  ( P2PmsgHANDLE hVBHeap );
+//  How many holders this heap has -- the count AddRef raises and Close lowers.
+//  ONE means the asker is the only holder, and so that nothing else in the
+//  process can be looking at anything on this heap.  It counts holders of the
+//  HEAP and not names for a block: >1 leaves the question open rather than
+//  answering it the other way.  0 for a null handle.
+int
+P2PmsgHeap_RefCount ( P2PmsgHANDLE hVBHeap ) noexcept;
 void
 P2PmsgHeap_InitBSTRio ( VBListBSTRio *pBSTRio, VBLsize nSizeofBSTRio, UCHAR uAddrType );
 VBLaddr

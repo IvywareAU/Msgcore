@@ -594,6 +594,14 @@ class Msgcore_EXT P3PmsgObject
       //  implementation for what it does not settle.
       bool
         IsInline ( ) const noexcept;
+
+      //  Can anything other than me see a write through me?  TRUE is a
+      //  guarantee that nothing can; FALSE says only that the question is
+      //  open.  That is IsInline's guarantee widened to cover the storage
+      //  rather than the block -- refer the implementation for the row it
+      //  covers and the one it does not.
+      bool
+        IsSole ( ) const noexcept;
       bool
         IsData ( ) const;
       bool
@@ -829,6 +837,11 @@ class Msgcore_EXT P3PmsgField : public P3PmsgName, public P3PmsgData
       //  through it reaches nobody.  Refer P3PmsgObject::IsInline.
       virtual bool
         IsInline ( ) const;
+
+      //  Can a write through this field be seen anywhere but here?  TRUE
+      //  guarantees not.  Refer P3PmsgObject::IsSole.
+      virtual bool
+        IsSole ( ) const;
       virtual bool
         IsDirty ( ) const;
       virtual bool
