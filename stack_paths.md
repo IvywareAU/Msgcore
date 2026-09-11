@@ -37,12 +37,13 @@ followed nowhere:
 | `MsgStck::Push` / `Pop`, list and vector | `ASSERT(0)` | **a list could not be pushed at all, so `List^` was always empty** |
 | `MsgStck::Pop`, any type | dropped the popped item while it still linked the one below | **one pop severed and leaked every generation under the one it restored** |
 | `P3PmsgVect::Drop` | did not exist, so the base class ran | **deleting a vect from a container asserted; no stack needed** |
+| `MsgStck::Drop` | unlinked every generation and freed none | **every pushed block leaked, for every caller** |
 | `P2PmsgMgr::RootPath2Object` | stripped off every component | `^` and `@` were looked up as plain child names |
 | `P3Pmsg_SplitRootPath` | refused a bare `^`, dropped a trailing one | **`.Root.Item^` silently answered with `Item` itself** |
 | `RootPath2Object`, on a miss | assigned a void object into a `P3PmsgItem` | threw `"Invalid overloaded context"` instead of answering |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
-vectors in a path, §6) and `d2763ce` (pushing them, §7).
+vectors in a path, §6), `d2763ce` (pushing them, §7) and `099417d` (releasing them, §7).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -388,9 +389,9 @@ Two of the three cases that catch it (`Test_VectDrop`) never touch `MsgStck`:
 **`Pop` severed what it restored.** This one is older than anything above and applies to a
 plain field. `Pop` dropped the generation it had just restored from, and `Drop()` walks the
 stack — `P3PmsgField::Drop` and `P3PmsgList::Drop` both end with
-`if (IsStacked()) r_Stck().Drop()` — while `MsgStck::Drop` zeroes every link the rest of
-the way down and frees nothing. So the popped item had to be unlinked from the generation
-below it *before* being dropped, and it was not:
+`if (IsStacked()) r_Stck().Drop()` — while `MsgStck::Drop` zeroed every link the rest of
+the way down (see below). So the popped item had to be unlinked from the generation below
+it *before* being dropped, and it was not:
 
 ```
 push "Gen0" / "Gen1" / "Gen2" / "Gen3", then pop once
@@ -402,9 +403,55 @@ push "Gen0" / "Gen1" / "Gen2" / "Gen3", then pop once
 A single push and pop cannot see it — there is nothing below to sever — and a single push
 and pop was the only shape anything in the tree had exercised.
 
+**`MsgStck::Drop` freed nothing.** It walked to the deepest generation, zeroed each
+`aStack` on the way back up, and returned — so every pushed item block, and the name and
+data blocks hanging off it, stayed allocated with nothing pointing at them. Every caller
+wants the storage back: the three `Drop()`s above all reach it while dismantling an item,
+MsgFacade's `FacadeNode` exposes it as the COM *drop the stack* verb, and TargetCore's
+`P2PeerMsg` calls it when it replaces one stack with another.
+
+The explicit recursion went with the fix. The `Drop()` it now calls on the generation
+itself ends with `if (IsStacked()) r_Stck().Drop()`, so it re-enters `MsgStck::Drop` for
+the next one down and the chain unwinds on its own; unlinking before the free is what keeps
+that from reading a block that has already gone. The generation is dropped **by its own
+type**, for the reason the paragraph above gives.
+
+Measured inside an IOMAGE manager, where a `P2Pos` is an image offset and Msgcore's
+allocator is the only claimant:
+
+```
+push, note the snapshot's P2Pos, Drop, push an identical item
+
+    after:    first = 537    second = 537     <- the vacated block, reused
+    before:   second != first                 <- a fresh block; the first never came back
+```
+
+A standalone `P3PmsgItem` is no good for this. It sits on the SYS heap, where a `P2Pos` is
+a raw CRT pointer and Msgcore is not the only thing allocating from it — every transient
+`P3PmsgDesc` a path selection news up competes for the same block, so reuse there is luck
+rather than evidence.
+
+**Still open, from the same measurement.** For a stack more than one deep the blocks do not
+come back into use, even though all three `OBJ__Free` calls run — verified by
+instrumenting them. The three generations are contiguous 206-byte allocations; the next
+round takes its first block from the *end* of the coalesced span and then allocates fresh
+past it, leaving the rest unused:
+
+```
+depth 1:  537  537  537  537            <- steady, the block is reused every round
+depth 2:  743  949 1155 1361            <- +206 a round
+depth 3:  949 1361 1773 2185            <- +412 a round, two generations' worth
+```
+
+That is linear in the rounds and it is a free-list characteristic rather than anything in
+`MsgStck::Drop`, so it is not fixed here and wants its own investigation. The third case in
+`Test_StackDrop` is named for what it actually checks — the chain is emptied and the live
+item survives — and it passes *without* the fix, because unlinking was always the half that
+worked.
+
 ### Measured
 
-`Test_StackContainers` pins six cases, `Test_VectDrop` two more. Against the library built
+`Test_StackContainers` pins six cases, `Test_VectDrop` two more and `Test_StackDrop` three. Against the library built
 from the commit before the fix they fail, and then the process dies:
 
 ```
@@ -422,7 +469,7 @@ from the commit before the fix they fail, and then the process dies:
                                                           Pop never restored
 ```
 
-After the fix: **114 cases, 538 checks, PASS** static and **PASS** dll, and
+After the fix: **117 cases, 563 checks, PASS** static and **PASS** dll, and
 `build_run_c4.bat` PASS. Reproduce it the way §6 says, checking out `MsgStck.cpp`,
 `MsgVect.cpp`, `MsgVect.h` and `P2Pmsg.cpp` from `d2763ce~1` — or just `MsgVect.cpp` and
 `MsgVect.h` to isolate the vect `Drop` on its own.
