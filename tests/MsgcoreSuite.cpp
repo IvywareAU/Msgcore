@@ -2613,6 +2613,157 @@ static void Test_FloatingIdentity()
 }
 
 // ---------------------------------------------------------------------------
+// "Is there anything here?" is one question with one answer
+// ---------------------------------------------------------------------------
+static void Test_VoidPredicates()
+{
+    //  Every class in this family answers it twice -- IsVoid() and
+    //  operator bool -- and the two used to disagree, in opposite directions
+    //  between classes, and inverted outright on P3PmsgList and P3PmsgVect.
+    TF_CASE("IsVoid and operator bool agree, in every state an item can be in")
+    {
+        P3PmsgField oNothing;
+        TF_CHECK(oNothing.IsVoid() == !(bool)oNothing);
+        TF_CHECK(oNothing.r_Object().IsVoid() == !(bool)oNothing.r_Object());
+        TF_CHECK(oNothing.IsVoid() == oNothing.r_Object().IsVoid());
+
+        P3PmsgField oFloat(L"Floater");
+        TF_CHECK(oFloat.IsVoid() == !(bool)oFloat);
+        TF_CHECK(oFloat.r_Object().IsVoid() == !(bool)oFloat.r_Object());
+        TF_CHECK(oFloat.IsVoid() == oFloat.r_Object().IsVoid());
+
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        P3PmsgField oTree = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        TF_CHECK(oTree.IsVoid() == !(bool)oTree);
+        TF_CHECK(oTree.r_Object().IsVoid() == !(bool)oTree.r_Object());
+        TF_CHECK(!oTree.IsVoid());
+
+        P3PmsgField oCopy = mgr.r_Desc().SelectItem(L"AAA");
+        TF_CHECK(oCopy.IsVoid() == !(bool)oCopy);
+        TF_CHECK(oCopy.IsVoid() == oCopy.r_Object().IsVoid());
+    }
+
+    //  A floating item is something, and it was reported as nothing because
+    //  the question asked about the HEAP rather than the item.
+    TF_CASE("a floating item is something")
+    {
+        P3PmsgField oFloat(L"Floater");
+        TF_CHECK(!oFloat.IsVoid());
+        TF_CHECK((bool)oFloat);
+        TF_CHECK(!oFloat.r_Object().IsVoid());
+        TF_CHECK((bool)oFloat.r_Object());
+    }
+
+    //  And §19 is why asking about the heap could not stand: an inline item
+    //  is rehomed the first time it is shared, so the heap appears when
+    //  somebody takes a copy of the handle. Asking must not decide the answer.
+    TF_CASE("sharing a floating item does not change whether it is anything")
+    {
+        P3PmsgField oFloat(L"Floater");
+        const bool bVoidBefore = oFloat.IsVoid();
+        const bool bBoolBefore = (bool)oFloat.r_Object();
+
+        P3PmsgObject oShared = oFloat.r_Object();   // the copy that rehomes it
+
+        TF_CHECK(oFloat.IsVoid()        == bVoidBefore);
+        TF_CHECK((bool)oFloat.r_Object() == bBoolBefore);
+        TF_CHECK(oFloat.r_name().c_wcsicmp(L"Floater") == 0);
+    }
+
+    //  The answer that must not change: a lookup that found nothing.
+    TF_CASE("a lookup that found nothing is void, as a field and as an object")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        P3PmsgObject oRoot = mgr.r_Object();
+        P3PmsgObject oMiss = P3Pmsg_SelectObject(&oRoot, L"NoSuchItem");
+        TF_CHECK(oMiss.IsVoid());
+        TF_CHECK(!(bool)oMiss);
+
+        P3PmsgField oMissField(oMiss);
+        TF_CHECK(oMissField.IsVoid());
+        TF_CHECK(!(bool)oMissField);
+    }
+
+    TF_CASE("an emptied field is void")
+    {
+        P3PmsgField oFloat(L"Floater");
+        TF_CHECK(!oFloat.IsVoid());
+        oFloat.Nullify();
+        TF_CHECK(oFloat.IsVoid());
+        TF_CHECK(!(bool)oFloat);
+        TF_CHECK(oFloat.r_Object().IsVoid());
+    }
+
+    //  P3PmsgList and P3PmsgVect returned IsVoid() from operator bool, so
+    //  `if ( oList )` was true exactly when there was no list. Neither had a
+    //  caller in this solution, which is why nothing had noticed.
+    TF_CASE("a list and a vector answer the right way round")
+    {
+        P3PmsgList oList;
+        oList.AddListTail(P3PmsgData((int)1));
+        oList.AddListTail(P3PmsgData((int)2));
+        TF_CHECK_EQ((int)oList.GetCount(), 2);
+        TF_CHECK((bool)oList);
+        TF_CHECK(oList.IsVoid() == !(bool)oList);
+
+        P3PmsgVect oVect(3, L"Elem", P3PmsgData((int)0));
+        TF_CHECK((bool)oVect);
+        TF_CHECK(oVect.IsVoid() == !(bool)oVect);
+    }
+
+    //  §20's own statement, pinned so that the arm removed from the copy
+    //  constructor is not revived by accident: a P3PmsgField copies as a
+    //  VALUE, and the handle is spelled r_Object().
+    TF_CASE("a field copy is a second item; r_Object() is the item")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        P3PmsgField oCopy = mgr.r_Desc().SelectItem(L"AAA");
+        P3PmsgField oHnd  = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+
+        TF_CHECK(oCopy.GetP2Pos() != oHnd.GetP2Pos());
+        TF_CHECK_EQ(oCopy.r_data().c_int(), 1);
+
+        oCopy.r_data().c_int(222);
+        TF_CHECK_EQ(mgr.r_Desc().SelectItem(L"AAA").r_data().c_int(), 1);
+
+        oHnd.r_data().c_int(333);
+        TF_CHECK_EQ(mgr.r_Desc().SelectItem(L"AAA").r_data().c_int(), 333);
+    }
+
+    //  And why the library writes r_Object() rather than binding a reference:
+    //  a collection hands back its own cursor, and the next Select moves it.
+    TF_CASE("a collection hands back its cursor, and the next Select moves it")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+        mgr.r_Desc() += P3PmsgField(L"BBB", P3PmsgData((int)2));
+
+        P3PmsgField& oCurs = mgr.r_Desc().SelectItem(L"AAA");
+        TF_CHECK(oCurs.r_name().c_wcsicmp(L"AAA") == 0);
+
+        P3PmsgField oHeld = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        mgr.r_Desc().SelectItem(L"BBB");
+
+        TF_CHECK(oCurs.r_name().c_wcsicmp(L"BBB") == 0);   // the cursor moved
+        TF_CHECK(oHeld.r_name().c_wcsicmp(L"AAA") == 0);   // the handle did not
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3Pmsg_SplitRootPath : a bare '@' is a component wherever it stands
 // ---------------------------------------------------------------------------
 static void Test_BareAttrComponent()
@@ -4228,6 +4379,7 @@ void RunMsgcoreSuite()
     Test_BareDotCommutes();
     Test_RootedLeadingDot();
     Test_FloatingIdentity();
+    Test_VoidPredicates();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();

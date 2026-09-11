@@ -376,9 +376,13 @@ P3PmsgList::operator += ( const P3PmsgData& rhs )
 }
 
 
+//  Does this list denote an item?  (Refer P3PmsgObject::operator bool)
+//  NOTES: This returned IsVoid() -- the answer inverted -- so `if ( oList )`
+//         was true exactly when there was no list. It has no caller in this
+//         solution, which is why nothing had noticed.
 P3PmsgList::operator bool ( )
 {
-    return IsVoid();
+    return !IsVoid ( );
 }
 
 //P3PmsgField&

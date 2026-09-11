@@ -211,9 +211,11 @@ P3PmsgDesc::operator [] ( LPCTNAM lpszName )
     return m_pCurs->r_item();
 }
 
+//  Does this descendant collection denote an item?
+//  NOTES: Refer P3PmsgAttr::operator bool.
 P3PmsgDesc::operator bool ( ) const
 {
-    return r_Object();
+    return !r_Object().IsVoid ( );
 }
 
 //  Memory management

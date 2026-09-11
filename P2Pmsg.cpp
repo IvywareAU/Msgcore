@@ -2671,9 +2671,28 @@ P3PmsgObject::operator == ( const P3PmsgObject& rhs ) const
     return false;
 }
 
+//
+//  Does this object denote an item?
+//  NOTES: EXACTLY !IsVoid(), and nothing else. It used to answer "is there a
+//         heap", which is a different question and gave the opposite answer to
+//         IsVoid() on the one state where they differ: an object carrying an
+//         inline block -- a floating item, or a standalone value. IsVoid() has
+//         asked "m_hVBList==0 && m_aVBLock==0" since 2025-02-18; this did not
+//         follow it.
+//       : §19 made that gap move. An inline item is rehomed onto a heap the
+//         first time it is shared, so a floating object answered false here,
+//         then true, with nothing about the item changed -- merely because
+//         somebody took a copy of the handle. Asking a question must not be
+//         what decides its answer.
+//       : Every caller in this tree and in Chartboard reads it as "did I get
+//         anything?" -- P3PmsgAttr and P3PmsgDesc delegate to it, GetParent
+//         walks are guarded by it, and RootPath2Object failures are detected
+//         with it. All of them are handed either a tree object or a void one,
+//         so none of them changes behaviour; only the floating case is
+//         corrected.
 P3PmsgObject::operator bool ( ) const noexcept
 {
-    return m_hVBList ? true : false;
+    return !IsVoid ( );
 }
 
 //  Allocate a new VBLock of memory from the P2PmsgHeap
@@ -3141,21 +3160,33 @@ P3PmsgField::P3PmsgField ( )
 {
     RenderThisSafe ( );
 }
+//
+//  A P3PmsgField copies as a VALUE
+//  NOTES: RenderThisSafe builds this field its own item and then operator=
+//         copies rhs into it, member by member -- name, data, attributes,
+//         descendants, stack. The result is a second item that reads the same,
+//         not a second handle on the first, and that is what it has always
+//         been.
+//       : What stood here was an arm that AddRef'd rhs's heap and shared its
+//         block -- a HANDLE copy -- behind `if ( !OBJ__hVBList )`, testing a
+//         member of THIS field that RenderThisSafe had just set to zero on the
+//         line above. Connecta(0,...) returns early when the handle it is
+//         given already matches, so the guard was true on every call and the
+//         arm below it never ran. It has been removed rather than repaired:
+//         reviving it would flip every field copy in this tree and in
+//         Chartboard from a value to an alias, silently, which is a decision
+//         and not a bug fix.
+//       : THE HANDLE IS SPELLED r_Object(). `P3PmsgField oB = oA` is a copy of
+//         the item; `P3PmsgField oB = oA.r_Object()` is the item. The library
+//         writes the second wherever it means to write through -- refer
+//         P3PmsgRefactor_DataType and P2Pmsg_UpgradeMove -- because a collection
+//         hands back its cursor, and the next Select moves it.
 P3PmsgField::P3PmsgField ( const P3PmsgField& rhs )
            : P3PmsgName ( (P3PmsgField *)0 ), P3PmsgData ( (P3PmsgField *)0 )
 {
     RenderThisSafe ( );
-    if ( !OBJ__hVBList )
-    {
-     *this = rhs;
-      return;
-    }
-    if ( rhs.OBJ__hVBList )
-      OBJ__hVBList = P2PmsgHeap_AddRef ( rhs.OBJ__hVBList );
-    if ( rhs.OBJ__hVBList )
-      OBJ__uVBLock = P2PmsgHeap_Addrnn ( rhs.OBJ__hVBList );
-    m_oObject    = rhs.m_oObject;
-    ASSERT(rhs.OBJ__IsField());
+    ASSERT(OBJ__hVBList==nullptr);
+   *this = rhs;
 }
 P3PmsgField::P3PmsgField ( LPCTSTR lpszName, size_t nSize )
            : P3PmsgName ( (P3PmsgField *)0 ), P3PmsgData ( (P3PmsgField *)0 )
@@ -3427,13 +3458,22 @@ P3PmsgField::operator [] ( LPCTNAM lpszName )
     return r_Desc()[lpszName];
 }
 
+//
+//  `if ( oField )` -- does this field denote an item?
+//  NOTES: EXACTLY !IsVoid(), as it is on P3PmsgObject and now on P3PmsgList
+//         and P3PmsgVect, so that `if ( oField )` asks one question with one
+//         answer wherever it is written.
+//       : It used to answer "is it populated" -- a name of non-zero length or
+//         data that is not NULL -- which is a reasonable question wearing the
+//         spelling of a different one. A floating item therefore answered
+//         `if ( oField )` true while `oField.IsVoid()` also answered true, in
+//         the same breath. Where the old meaning is wanted it is still two
+//         calls away: !r_data().IsNull() and r_name().c_size().
+//       : Its one caller in this solution asked the question about the wrong
+//         variable -- refer CListCtrl_Ext -- and never fired.
 P3PmsgField::operator bool ( ) const
 {
-    if ( r_data().DataType() != VBLockData_NULL )
-      return true;
-    if ( r_name().c_size() > 0 )
-      return true;
-    return false;
+    return !IsVoid ( );
 }
 
 // Chained reference exposures
@@ -3805,12 +3845,25 @@ P3PmsgField::IsDirty ( ) const
     return false;
 }
 
+//
+//  Does this field denote NO item?
+//  NOTES: The object's question, asked of the object. It used to answer "is
+//         there a heap", which reported a floating item -- one with a name, a
+//         value and, after §19, an identity -- as void, and which §19 then
+//         made mutable: sharing the item rehomes its block onto a heap, so the
+//         answer changed from void to not-void with nothing about the item
+//         changed.
+//       : P3PmsgObject::IsVoid asks whether there is a block at all, which is
+//         the question every caller here means. A field built over a void
+//         object -- a lookup that found nothing -- has no block and is still
+//         void; a field that Nullify() has emptied is too, because
+//         P3PmsgObject::Nullify clears m_aVBLock as well as the handle.
+//       : P3PmsgList and P3PmsgVect inherit this, and their operator bool is
+//         built on it.
 bool
 P3PmsgField::IsVoid ( ) const
 {
-    if ( OBJ__hVBList == nullptr )
-      return true;
-    return false;
+    return OBJ__.IsVoid ( );
 }
 bool
 P3PmsgField::IsStacked ( ) const

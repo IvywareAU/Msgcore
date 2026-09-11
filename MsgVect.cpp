@@ -448,9 +448,11 @@ ASSERT(r_Object().IsVect());
 //}
 
 
+//  Does this vector denote an item?  (Refer P3PmsgObject::operator bool)
+//  NOTES: Inverted, as P3PmsgList::operator bool was, and equally uncalled.
 P3PmsgVect::operator bool ( )
 {
-    return IsVoid();
+    return !IsVoid ( );
 }
 
 //P3PmsgField&

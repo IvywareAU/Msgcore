@@ -223,9 +223,12 @@ P3PmsgAttr::operator [] ( LPCTNAM lpszName )
     return m_pCurs->r_item ( );
 }
 
+//  Does this attribute collection denote an item?
+//  NOTES: Spelled out rather than leaning on P3PmsgObject's conversion, so
+//         that the one question reads the same on every class that answers it.
 P3PmsgAttr::operator bool ( ) const
 {
-    return r_Object();
+    return !r_Object().IsVoid ( );
 }
 
 //  Memory management
