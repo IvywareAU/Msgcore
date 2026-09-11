@@ -322,14 +322,26 @@ class Msgcore_EXT P2PmsgMgr : public P3PmsgItem
       //         OTHER VIEWS. This handle is not a view -- it is not a
       //         P3PmsgObject, it was never Connect()ed and it names no block --
       //         and counting it would change what the equality means. It would
-      //         also report the guarantee for the one block on the heap whose
-      //         address is a function of the handle alone: P2PmsgHeap_Connect()
-      //         returns the store root, which is this manager's own item, so the
-      //         premise the count rests on elsewhere -- that a block cannot be
-      //         named without a counted reference to reach it through -- is the
-      //         one premise that does not hold here. A raw handle held without
-      //         an AddRef is already outside the count; refer the NOTES on
-      //         P3PmsgObject::IsSole.
+      //         also report the guarantee for the one block on the heap that
+      //         needs no counted reference to name it. Measured, this is worse
+      //         than "a function of the handle": the store root is at the
+      //         literal constant 48 on every store, at every addressing width,
+      //         with or without a tree -- P2PmsgHeap_Connect() returns it and
+      //         GetP2Pos() answers 48. So P3PmsgField(h,48,0), built from an
+      //         exported handle and nothing else, reaches this manager's own
+      //         item and can write a grandchild one statement after a
+      //         subtracting store answered sole=true. The premise the count
+      //         rests on everywhere else -- that a block cannot be named
+      //         without a counted reference to reach it through -- is the one
+      //         premise that does not hold here, and it fails by a constant
+      //         rather than by a derivation.
+      //       : EVERY OTHER SOLE OBJECT IS ON A SYSTEM HEAP, where that premise
+      //         holds without exception: P2PmsgHeap_Connect and
+      //         P2PmsgHeap_IsRoot fall through to ASSERT(0) and hand back ~0u,
+      //         so a SYS handle names nothing. The store is the only case, and
+      //         it is the case the subtraction would have covered. A raw handle
+      //         held without an AddRef is already outside the count; refer the
+      //         NOTES on P3PmsgObject::IsSole.
       //       : Pinned by Test_SoleManagerHoldsItsHeap in tests/MsgcoreSuite.cpp,
       //         which asserts the shortfall is exactly one and the numbers that
       //         make it up.

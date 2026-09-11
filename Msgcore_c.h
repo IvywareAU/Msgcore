@@ -294,6 +294,57 @@ MSGCORE_C_API int
 msgcore_field_is_descendant(MsgFieldHandle hField);
 
 // ---------------------------------------------------------------------------
+// Exclusivity — the one predicate on this surface whose FALSE means nothing
+//
+// CONTRACT: the two answers are NOT symmetric. A caller that reads them as if
+// they were is wrong in the direction that loses data.
+//
+//   TRUE IS A GUARANTEE. Nothing else in this process holds the storage under
+//   hField: no other handle from this API, no C++ object inside the library,
+//   nobody. A write made through hField cannot be seen by anyone else, so the
+//   caller may mutate the item in place instead of copying it, and may keep
+//   that licence until it makes a call that could hand the item out again
+//   (rule 2 above applies to the handle regardless).
+//
+//   FALSE IS NOT THE OPPOSITE OF IT, AND DOES NOT MEAN "SOMEONE ELSE IS
+//   LOOKING". It means only that the guarantee could not be established. The
+//   answer is a reference count over the whole heap compared against the
+//   references this field can prove are its own, so it reads FALSE whenever
+//   that proof is merely SHORT -- and two entirely unshared shapes make it
+//   short. A cursor taken on a field's own descendants holds the heap and
+//   cannot be attributed back to the field that owns it. A store manager holds
+//   one reference on its own heap that is not a view of any item at all, so the
+//   root of a manager nobody else has touched reads FALSE. In both, the item is
+//   nobody's but the caller's and the answer is still 0.
+//
+//   So FALSE is "unknown", and its only sound use is to decline the in-place
+//   write. It is NOT evidence of a second holder. Do not use it to detect
+//   sharing, to infer a reference count, or to decide that a copy is owed to
+//   somebody else -- there may be no somebody else.
+//
+// The asymmetry is deliberate and is not a defect awaiting a fix. An answer
+// wrong in the TRUE direction licenses a write another view can see, which is
+// silent corruption; an answer wrong in the FALSE direction costs a caller one
+// unnecessary copy. The library therefore subtracts only the holders it can
+// prove are its own and accepts FALSE for everything else. A future version may
+// narrow FALSE further -- it will never be promoted into a guarantee, and no
+// caller should be written as though it had been.
+//
+// For WHOSE item it is, rather than whether anyone else holds it, compare
+// msgcore_field_get_p2pos values: that is exact in both directions, and needs
+// the other handle to compare against. This is the question that can be asked
+// when there is nothing to compare to.
+//
+// An invalid, destroyed or wrong-kind handle returns 0, as the predicates above
+// do. 0 is also the answer that promises nothing, so a bad handle can never
+// manufacture the guarantee.
+//
+// Since 3.1.0. Guard a portable call with MSGCORE_VERSION_AT_LEAST(3,1,0).
+// ---------------------------------------------------------------------------
+MSGCORE_C_API int
+msgcore_field_is_sole(MsgFieldHandle hField);
+
+// ---------------------------------------------------------------------------
 // P3PmsgList — doubly-linked list of P3PmsgData
 // ---------------------------------------------------------------------------
 

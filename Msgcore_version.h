@@ -29,40 +29,68 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.0.0 is tag
-//         v3.0.0. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.1.0 is tag
+//         v3.1.0. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
+//       : What that rule is about is a PUBLISHED binary. The number moves here
+//         in the same commit that moves the supported surface, so the header
+//         and tools\ci\exports-flat.manifest cannot disagree about what 3.1.0
+//         contains; the tag is applied when the release ships. aa0366b got
+//         that backwards - it tagged v3.1.0 before the release was ready - and
+//         355cff5 took both the tag and the number back. The number is free
+//         again, and this is the first change since v3.0.0 that actually moves
+//         the supported surface.
 //
 #pragma once
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
 //
-//  3.0.0.0, the identity chosen for the first PUBLIC release. The number is
-//  set by the project rather than derived from this tree's own release
-//  history: the development identity that preceded it here was 1.0.0, and no
-//  binary carrying it was published. This number is deliberately INDEPENDENT
-//  of TargetCore's, which happens to share it at this release and is under no
+//  3.1.0.0. The 3.x number was set by the project rather than derived from
+//  this tree's own release history: the development identity that preceded it
+//  here was 1.0.0, and no binary carrying it was published. It is deliberately
+//  INDEPENDENT of TargetCore's, which happened to share 3.0.0 and is under no
 //  obligation to keep doing so - TargetCore links Msgcore but does not ship
 //  as it, and a shared number would force a lockstep release neither wants.
+//
+//  MINOR, because the SUPPORTED surface GREW and nothing on it moved. The flat
+//  C ABI of Msgcore_c.h gains exactly one function against v3.0.0 -
+//  msgcore_field_is_sole - and no declaration, signature, type or contract
+//  already there is touched. That is the textbook MINOR shape in both
+//  directions: a consumer built against 3.0.0 links against a 3.1.0 DLL
+//  unchanged, and a consumer built against 3.1.0 that calls the new export
+//  cannot link against a 3.0.0 DLL. PATCH would be a lie in the second half.
+//
+//  And the bump is load-bearing rather than ceremonial, because
+//  MSGCORE_VERSION_AT_LEAST is the ONLY way a portable consumer can guard that
+//  call. Left at 3.0.0 the macro would answer the same for a surface that has
+//  the export and one that does not, which is the one job it has.
+//
+//  The mangled C++ export half is still broken against v3.0.0, unchanged by
+//  this: _N() is gone from Msgcore.h, and P3PmsgData's c_bool / c_char / c_int
+//  / ... accessors traded a T& return for a by-value return taking a setter
+//  argument. SECURITY.md's "Supported versions" section calls that half
+//  toolchain-pinned and internal, so it sits outside what this number
+//  promises - but a C++ consumer pinned to 3.0.0 has to recompile, and that is
+//  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
-#define MSGCORE_VERSION_MINOR  0
+#define MSGCORE_VERSION_MINOR  1
 #define MSGCORE_VERSION_PATCH  0
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,0,0,0
+#define MSGCORE_VERSION_COMMAS 3,1,0,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.0.0.0"
+#define MSGCORE_VERSION_STRING "3.1.0.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03000000 is 3.0.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03000000
+//  0x03010000 is 3.1.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03010000
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

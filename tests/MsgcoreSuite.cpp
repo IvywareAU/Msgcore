@@ -5801,6 +5801,269 @@ static void Test_UntrustedBSTRioGate()
 #endif
 
 // ---------------------------------------------------------------------------
+// A validator whose name says it tests must not WRITE.
+//
+// P2PmsgHeap_AssertValidAlloc repairs the block it judges: where the block is
+// not VBLock_Linked it sets the bit and carries on. VBLock_Init stamps
+// `uVBLock | VBLock_Alloc` and no Linked bit (P2PmsgVBLock.cpp:327), so this is
+// not a corner: a block straight out of P2PmsgHeap_Alloc arrives without it.
+// Wrapped in ASSERT(...), as P2Pmsg.cpp wrapped it, what Release loses is
+// therefore the WRITE rather than the check, and the two builds leave different
+// bytes in the block.
+//
+// P2PmsgHeap_IsValidAlloc is the split-out pure form, and these cases are what
+// "pure" is allowed to mean: the same answer, no byte moved, no assertion
+// raised. The third case is the one that would catch a re-merge -- the repairing
+// form must still repair, because five in-tree callers rely on it doing so.
+//
+// STATIC LINK ONLY, for the reason Test_ImageAddressBounds gives: no
+// P2PmsgHeap_* symbol is on the DLL's exported surface.
+#ifdef Msgcore_STATIC
+static int  s_nPureAsserts = 0;
+static bool s_bPureSwallow = false;
+static int __cdecl PureAssertCounter ( int nReportType, char *szMsg, int *pnRet )
+{
+    (void)szMsg;
+    if ( nReportType != _CRT_ASSERT )
+      return FALSE;
+    ++s_nPureAsserts;
+    //  FALSE by default, so TestFramework's own hook still sees the assertion
+    //  and still fails the case: the counting is there to NAME the line, not to
+    //  hide it. The one case that sets s_bPureSwallow is the one whose whole
+    //  subject is a function that asserts BY DESIGN -- the repairing validator
+    //  -- where letting it through would fail a case for doing the thing the
+    //  case exists to demonstrate.
+    if ( !s_bPureSwallow )
+      return FALSE;
+    if ( pnRet ) *pnRet = 0;             // do not break
+    return TRUE;
+}
+
+static UCHAR DefsOf ( P2PmsgHANDLE hHeap, VBLaddr aVBLock )
+{
+    const VBLock *pVBLock = (const VBLock *)P2PmsgHeap_Addr2Phys ( hHeap, aVBLock );
+    return pVBLock->oHdr.uVBLockDefs;
+}
+
+static void Test_IsValidAllocIsPure()
+{
+    //  P2PmsgHeap_CreateSYS opens by asserting that the addressing width
+    //  matches the pointer width of the build, so this has to follow the build
+    //  rather than name a width.
+    const UCHAR  uAddr   = ( sizeof(void *) == 8 ) ? VBLock_Addr64 : VBLock_Addr32;
+    P2PmsgHANDLE hHeap   = P2PmsgHeap_CreateSYS ( uAddr, 1u << 20 );
+    VBLaddr      aVBLock = P2PmsgHeap_Alloc ( hHeap, VBLock_Item, 64 );
+
+    TF_CASE("a fresh block is Alloc and not Linked -- the repair arm is live code")
+    {
+        TF_CHECK(aVBLock != 0);
+        TF_CHECK((DefsOf(hHeap,aVBLock) & VBLock_Alloc ) != 0);
+        TF_CHECK((DefsOf(hHeap,aVBLock) & VBLock_Linked) == 0);
+    }
+
+    TF_CASE("P2PmsgHeap_IsValidAlloc answers without writing and without asserting")
+    {
+        const UCHAR uBefore = DefsOf(hHeap,aVBLock);
+        s_nPureAsserts = 0;
+        _CrtSetReportHook2 ( _CRT_RPTHOOK_INSTALL, PureAssertCounter );
+        const bool bAnswer = P2PmsgHeap_IsValidAlloc ( hHeap, aVBLock );
+        _CrtSetReportHook2 ( _CRT_RPTHOOK_REMOVE, PureAssertCounter );
+
+        TF_CHECK(!bAnswer);                       // not Linked, so not valid
+        TF_CHECK_EQ((int)DefsOf(hHeap,aVBLock), (int)uBefore);   // and NOT repaired
+        TF_CHECK_EQ(s_nPureAsserts, 0);
+    }
+
+    TF_CASE("P2PmsgHeap_AssertValidAlloc still repairs, which is why the two exist")
+    {
+        const UCHAR uBefore = DefsOf(hHeap,aVBLock);
+        //  This one asserts by design -- ASSERT(bResult) sits beside the repair
+        //  -- so the hook in front of TestFramework's swallows it and counts
+        //  it instead. Counted, because "it repaired and said nothing" would be
+        //  a different function from the one described here.
+        s_nPureAsserts = 0;
+        s_bPureSwallow = true;
+        _CrtSetReportHook2 ( _CRT_RPTHOOK_INSTALL, PureAssertCounter );
+        const bool  bAnswer = P2PmsgHeap_AssertValidAlloc ( hHeap, aVBLock );
+        _CrtSetReportHook2 ( _CRT_RPTHOOK_REMOVE, PureAssertCounter );
+        s_bPureSwallow = false;
+        TF_CHECK_EQ(s_nPureAsserts, 1);
+
+        //  Same answer as the pure form gave, and a different block afterwards.
+        TF_CHECK(!bAnswer);
+        TF_CHECK((uBefore & VBLock_Linked) == 0);
+        TF_CHECK((DefsOf(hHeap,aVBLock) & VBLock_Linked) != 0);
+
+        //  And the repair is a state change rather than a one-off: the pure
+        //  form now says yes about the very block it said no about.
+        TF_CHECK(P2PmsgHeap_IsValidAlloc ( hHeap, aVBLock ));
+    }
+
+    TF_CASE("the pure form is quiet on a block that is fine")
+    {
+        s_nPureAsserts = 0;
+        _CrtSetReportHook2 ( _CRT_RPTHOOK_INSTALL, PureAssertCounter );
+        const bool bAnswer = P2PmsgHeap_IsValidAlloc ( hHeap, aVBLock );
+        _CrtSetReportHook2 ( _CRT_RPTHOOK_REMOVE, PureAssertCounter );
+        TF_CHECK(bAnswer);
+        TF_CHECK_EQ(s_nPureAsserts, 0);
+    }
+
+    P2PmsgHeap_Free  ( hHeap, aVBLock );
+    P2PmsgHeap_Close ( hHeap );
+}
+#else
+static void Test_IsValidAllocIsPure()
+{
+    TF_CASE("IsValidAlloc purity -- static link only, heap API is not exported")
+    {
+        TF_CHECK(true);
+    }
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// The refusal that could not fire.
+//
+// P2PmsgHeap_CreateBSTRio(VBListBSTRio*) used to open with
+//
+//     if ( !P2PmsgHeap_AssertValidBSTRio(pBSTRio) )   // <-- the IMAGE buffer
+//       EVERR->MODULE->Message("Corrupted BSTRio heap")->Throw();
+//
+// and P2PmsgHANDLE is `void *`, so handing it a VBListBSTRio* compiled without
+// a word. The validator static_casts to VBListHANDLE* and early-returns TRUE
+// when the byte at the uVBListType offset is not the BSTRio type code. That
+// offset is 4 -- uVBListType follows the four-byte atomic nRefCount -- and byte
+// 4 of a VBListBSTRio is the low byte of oDefs.uComp2, which P2PmsgHeap_IsBSTRio
+// two lines earlier has just insisted is the exact complement of oDefs.uDefs1,
+// whose low byte is the type code. No 8-bit value is its own complement, so the
+// early return was unconditional and the refusal below it unreachable.
+//
+// The call is gone. What these cases pin is WHY removing it removed nothing --
+// the identity that makes the early return certain, and the measured answer on
+// a deliberately corrupt image. A later reader restoring the line has to get
+// past a case that says what it would do.
+#ifdef Msgcore_STATIC
+bool P2PmsgHeap_AssertValidBSTRio ( P2PmsgHANDLE hVBHeap );   // not on the header
+
+static void Test_BSTRioValidatorContract()
+{
+    wchar_t szDir[MAX_PATH]  = { 0 };
+    wchar_t szPath[MAX_PATH] = { 0 };
+    GetTempPathW(MAX_PATH, szDir);
+    swprintf_s(szPath, MAX_PATH, L"%smscs_bstrio_contract.p2p", szDir);
+
+    {
+        P2PmsgMgr oMgr(VBLock_Addr32, 2048, 1u << 20);
+        oMgr.r_Desc(P3PmsgField::AttrCMD_Create);
+        oMgr.r_Desc() += P3PmsgField(L"contract", P3PmsgData((int)35));
+        oMgr.Save(szPath);
+    }
+
+    char    *pFile = nullptr;
+    VBLsize  nFile = 0;
+    {
+        FILE *f = nullptr;
+        if (_wfopen_s(&f, szPath, L"rb") == 0 && f)
+        {
+            fseek(f, 0, SEEK_END);
+            long n = ftell(f);
+            fseek(f, 0, SEEK_SET);
+            if (n > 0)
+            {
+                pFile = new char[(size_t)n];
+                nFile = (VBLsize)fread(pFile, 1, (size_t)n, f);
+            }
+            fclose(f);
+        }
+    }
+    _wremove(szPath);
+
+    TF_CASE("byte 4 of a BSTRio image is the COMPLEMENT of its type byte")
+    {
+        TF_CHECK(pFile != nullptr && nFile > 8);
+        if ( !pFile || nFile <= 8 ) return;
+        const UCHAR *pu = (const UCHAR *)pFile;
+        TF_CHECK(P2PmsgHeap_IsBSTRio(pFile) != FALSE);
+        //  pu[0] is oDefs.uDefs1's low byte, which InitBSTRio writes as the
+        //  heap type code; pu[4] is oComp2's, which is its complement. The
+        //  validator reads pu[4] as uVBListType and compares it to pu[0]'s
+        //  value, so the comparison can never succeed.
+        TF_CHECK_EQ((int)pu[4], (int)(UCHAR)~pu[0]);
+        TF_CHECK(pu[4] != pu[0]);
+    }
+
+    TF_CASE("handed the image buffer the validator answers true, corrupt or not")
+    {
+        if ( !pFile || !nFile ) { TF_CHECK(false); return; }
+
+        //  Honest, then the smallest corruption the block walk refuses -- the
+        //  one Test_UntrustedBSTRioGate uses, one too many allocated entries.
+        for ( int i = 0; i < 2; i++ )
+        {
+            char *pImage = new char[(size_t)nFile];
+            memcpy ( pImage, pFile, (size_t)nFile );
+            if ( i )
+              ((VBListBSTRio *)pImage)->oKeys.nAllocEntries += 1;
+
+            char *pWas = new char[(size_t)nFile];
+            memcpy ( pWas, pImage, (size_t)nFile );
+
+            s_nPureAsserts = 0;
+            _CrtSetReportHook2 ( _CRT_RPTHOOK_INSTALL, PureAssertCounter );
+            const bool bAnswer = P2PmsgHeap_AssertValidBSTRio ( (P2PmsgHANDLE)pImage );
+            _CrtSetReportHook2 ( _CRT_RPTHOOK_REMOVE, PureAssertCounter );
+
+            TF_CHECK(bAnswer);                                  // always true
+            TF_CHECK_EQ(s_nPureAsserts, 0);                     // always silent
+            TF_CHECK_EQ(memcmp(pWas,pImage,(size_t)nFile), 0);  // always a no-op
+
+            delete[] pWas;
+            delete[] pImage;
+        }
+    }
+
+    TF_CASE("the single-argument overload still accepts an image this process built")
+    {
+        //  The deletion must not have taken a working path with it, and the
+        //  overload must still refuse what it is contracted to refuse.
+        if ( !pFile || !nFile ) { TF_CHECK(false); return; }
+
+        char *pImage = new char[(size_t)nFile];
+        memcpy ( pImage, pFile, (size_t)nFile );
+        P2PmsgHANDLE hHeap = nullptr;
+        try { hHeap = P2PmsgHeap_CreateBSTRio ( (VBListBSTRio *)pImage ); }
+        catch (P2Pevent* pEVT) { if (pEVT) pEVT->Cancel(false); delete[] pImage; }
+        TF_CHECK(hHeap != nullptr);
+        if ( hHeap ) P2PmsgHeap_Close ( hHeap );
+
+        //  And the classification refusal above it is untouched.
+        char    szNot[64] = { 0 };
+        bool    bRefused  = false;
+        CString strWhy;
+        try { P2PmsgHeap_CreateBSTRio ( (VBListBSTRio *)szNot ); }
+        catch (P2Pevent* pEVT)
+        {
+            bRefused = true;
+            if (pEVT) { strWhy = pEVT->GetMessage(); pEVT->Cancel(false); }
+        }
+        TF_CHECK(bRefused);
+        TF_CHECK(strWhy.Find(L"Not BSTRio heap type") >= 0);
+    }
+
+    delete[] pFile;
+}
+#else
+static void Test_BSTRioValidatorContract()
+{
+    TF_CASE("BSTRio validator contract -- static link only, heap API is not exported")
+    {
+        TF_CHECK(true);
+    }
+}
+#endif
+
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // VBHeap : the closer-fit search
 // ---------------------------------------------------------------------------
@@ -6342,4 +6605,6 @@ void RunMsgcoreSuite()
     Test_IOmageLayoutGeneration();
     Test_ImageAddressBounds();
     Test_UntrustedBSTRioGate();
+    Test_IsValidAllocIsPure();
+    Test_BSTRioValidatorContract();
 }

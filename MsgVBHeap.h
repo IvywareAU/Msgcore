@@ -280,6 +280,22 @@ bool
 P2PmsgHeap_AssertVBlocks ( P2PmsgHANDLE hVBHeap );
 bool
 P2PmsgHeap_AssertValidAlloc ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock );
+//  THE PURE ONE, and the reason there are two.  P2PmsgHeap_AssertValidAlloc is
+//  a developer aid that REPAIRS: where the block it is judging is not Linked it
+//  sets the bit and carries on (MsgVBHeap.cpp, the SYS and BSTRio arms), which
+//  makes it useless to a caller that wants to refuse on the answer -- promoting
+//  such a call out of an ASSERT(...) would start running that write in Release,
+//  where the ASSERT had been keeping it out.  Debug and Release leave different
+//  bytes in the block for exactly that reason, and that is a defect rather than
+//  a design.
+//
+//  P2PmsgHeap_IsValidAlloc asks the same question with no write on any path and
+//  no assertion on any path.  Use it wherever the answer is going to decide
+//  something -- item 19's own prescription, a named refusal in every build.
+//  Use the Assert form only where the heap is this process's own and a broken
+//  invariant is this code's bug.
+bool
+P2PmsgHeap_IsValidAlloc ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock );
 
 ///////////////////////////////////////////////////////////////////////
 //  Triggers

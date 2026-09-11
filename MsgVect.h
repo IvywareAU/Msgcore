@@ -142,8 +142,6 @@ class Msgcore_EXT P3PmsgVect : public P3PmsgField
       bool
         IsData ( int nElem );
       bool
-        IsName ( int nElem );
-      bool
         IsField ( int nElem );
       bool
         IsList ( int nElem );

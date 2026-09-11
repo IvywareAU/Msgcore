@@ -1378,23 +1378,58 @@ P2PmsgHeapSYS_AssertValid ( P2PmsgHANDLE hP2PmsgHeap ) noexcept
 //  Returns:     bResult
 //                 true... Validated
 //                 false.. Failed
-bool
-P2PmsgHeap_AssertValidAllocSYS ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
+//
+//  TWO ENTRY POINTS, ONE BODY, and the parameter below is what separates them.
+//
+//  P2PmsgHeap_AssertValidAllocSYS is not a predicate and never has been: when
+//  the block is not Linked it SETS THE BIT and carries on, which is the hack
+//  its own TODO admits to. VBLock_Init (P2PmsgVBLock.cpp:327) stamps
+//  `uVBLock | VBLock_Alloc` and no Linked bit at all, so the repair is live
+//  code on a fresh block rather than a theoretical arm. Wrapped in ASSERT(...)
+//  -- which is how P2Pmsg.cpp called it -- what Release loses is therefore not
+//  a check but a WRITE, and the two builds leave different bytes in the block.
+//
+//  So a caller that wants to REFUSE on the answer cannot use it: promoting the
+//  call out of the ASSERT would start running an image write in Release. The
+//  split is what makes the promotion available. bRepair gates the write AND the
+//  assertions together, because they are the same job -- a developer aid on a
+//  heap this process owns, where a broken invariant is our bug and stopping on
+//  it is right. The pure form is for the other job: a caller about to say no by
+//  name, which wants an answer and nothing else, in every build.
+//
+//  The pure form is exactly this body with bRepair false, rather than a second
+//  copy of the checks, so the two cannot drift apart and answer differently.
+static bool
+P2PmsgHeap_ValidAllocSYS ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock, bool bRepair )
 {
     bool          bResult = true;
     VBListHANDLE *pHandle = (VBListHANDLE *)hP2PmsgHeap;
     if ( IsBadWritePtr((void*)aVBLock,4) )
-    {  ASSERT(0); return false; }      // Out of range
+    {  if (bRepair) ASSERT(0); return false; }      // Out of range
     VBLock       *pVBLock = (VBLock *)P2PmsgHeap_Addr2Phys ( hP2PmsgHeap, aVBLock );
     if ( !VBLock_IsLinked(pVBLock) )   // TODO:LJM this hack needs tidying up
-    { bResult = false; ASSERT(bResult);if(!VBLock_IsFree(pVBLock)&&VBLock_IsAddr(pVBLock,pHandle->uAddrType)&&VBLock_IsAlloc(pVBLock))pVBLock->oHdr.uVBLockDefs|=VBLock_Linked;}
+    { bResult = false; if (bRepair) { ASSERT(bResult);if(!VBLock_IsFree(pVBLock)&&VBLock_IsAddr(pVBLock,pHandle->uAddrType)&&VBLock_IsAlloc(pVBLock))pVBLock->oHdr.uVBLockDefs|=VBLock_Linked; } }
     if ( !VBLock_IsAlloc(pVBLock) )
-    { bResult = false; ASSERT(0); }
+    { bResult = false; if (bRepair) ASSERT(0); }
     if (  VBLock_IsFree(pVBLock) )
-    { bResult = false; ASSERT(0); }
+    { bResult = false; if (bRepair) ASSERT(0); }
     if ( !VBLock_IsAddr(pVBLock,pHandle->uAddrType) )
-    { bResult = false; ASSERT(0); }
+    { bResult = false; if (bRepair) ASSERT(0); }
     return bResult;
+}
+//  The repairing form. Unchanged in behaviour, name and every byte it writes.
+bool
+P2PmsgHeap_AssertValidAllocSYS ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
+{
+    return P2PmsgHeap_ValidAllocSYS ( hP2PmsgHeap, aVBLock, true );
+}
+//  The pure form. No write on any path, and no assertion either: its callers
+//  refuse by name, and §38 deleted two assertions for sitting four lines above
+//  a correct named refusal.
+bool
+P2PmsgHeap_IsValidAllocSYS ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
+{
+    return P2PmsgHeap_ValidAllocSYS ( hP2PmsgHeap, aVBLock, false );
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -1909,29 +1944,45 @@ P2PmsgHeap_AssertValidFree ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
 //  Returns:     bResult
 //                 true... Validated
 //                 false.. Failed
-bool
-P2PmsgHeap_AssertValidAllocBSTRio ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
+//  The same split as the SYS arm above, for the same reason and with one extra
+//  guard on the write: this arm judges IMAGE bytes, so the repair was already
+//  skipped inside P2PmsgHeap_UntrustedGate. bRepair is the second condition on
+//  it, not a replacement for the first -- a gate says "these bytes are not ours
+//  to fix", bRepair says "this caller did not ask anyone to fix anything".
+static bool
+P2PmsgHeap_ValidAllocBSTRio ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock, bool bRepair )
 {
     bool          bResult = true;
     VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hP2PmsgHeap);
     if ( !P2PmsgHeap_BlockFits ( hP2PmsgHeap, aVBLock ) )
-    {  VBHEAP_ASSERT0(); return false; }      // Out of range, or straddling the end
+    {  if (bRepair) VBHEAP_ASSERT0(); return false; }  // Out of range, or straddling the end
     VBLock       *pVBLock = (VBLock *)P2PmsgHeap_Addr2Phys ( hP2PmsgHeap, aVBLock );
     if ( !VBLock_IsAlloc(pVBLock) )
-    { bResult = false; VBHEAP_ASSERT0(); }
+    { bResult = false; if (bRepair) VBHEAP_ASSERT0(); }
     //  The repair below sets a flag bit IN THE IMAGE. On a heap we own that is
     //  the hack its comment says it is; on an image off a socket it is the
     //  validator writing to the bytes it was asked to judge, so it is skipped
     //  inside a gate and the block is simply refused.
     if ( !VBLock_IsLinked(pVBLock) )   // TODO:LJM this hack needs tidying up
-    { bResult = false; VBHEAP_ASSERT0();if(!P2PmsgHeap_InUntrustedGate()&&!VBLock_IsFree(pVBLock)&&VBLock_IsAddr(pVBLock,pHandle->uAddrType)&&VBLock_IsAlloc(pVBLock))pVBLock->oHdr.uVBLockDefs|=VBLock_Linked;}
+    { bResult = false; if (bRepair) { VBHEAP_ASSERT0();if(!P2PmsgHeap_InUntrustedGate()&&!VBLock_IsFree(pVBLock)&&VBLock_IsAddr(pVBLock,pHandle->uAddrType)&&VBLock_IsAlloc(pVBLock))pVBLock->oHdr.uVBLockDefs|=VBLock_Linked; } }
     if (  VBLock_IsFree(pVBLock) )
-    { bResult = false; VBHEAP_ASSERT0(); }
+    { bResult = false; if (bRepair) VBHEAP_ASSERT0(); }
     if ( !VBLock_IsAddr(pVBLock,pHandle->uAddrType) )
-    { bResult = false; VBHEAP_ASSERT0(); }
+    { bResult = false; if (bRepair) VBHEAP_ASSERT0(); }
     return bResult;
 }
+bool
+P2PmsgHeap_AssertValidAllocBSTRio ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
+{
+    return P2PmsgHeap_ValidAllocBSTRio ( hP2PmsgHeap, aVBLock, true );
+}
+bool
+P2PmsgHeap_IsValidAllocBSTRio ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
+{
+    return P2PmsgHeap_ValidAllocBSTRio ( hP2PmsgHeap, aVBLock, false );
+}
 #define P2PmsgHeap_AssertValidAllocIOMAGE P2PmsgHeap_AssertValidAllocBSTRio
+#define P2PmsgHeap_IsValidAllocIOMAGE     P2PmsgHeap_IsValidAllocBSTRio
 
 bool
 P2PmsgHeap_AssertValidBSTRio ( P2PmsgHANDLE hP2PmsgHeap )
@@ -2924,6 +2975,30 @@ P2PmsgHeap_AssertValidAlloc ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock )
     ASSERT(0);
     return false;
 }
+//
+//  The same question, asked by a caller that is about to act on the answer.
+//  Answers TRUE only where AssertValidAlloc would have answered true WITHOUT
+//  repairing anything first, writes nothing on any arm, and raises nothing:
+//  every caller of this one refuses by name, and an assertion four lines above
+//  a correct named refusal is what §38 deleted two sites for.
+//
+//  An unrecognised heap type answers false here rather than ASSERT(0)-ing.
+//  The repairing form keeps its marker because it has nothing else to say; this
+//  one has a caller that will say it properly.
+bool
+P2PmsgHeap_IsValidAlloc ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock )
+{
+    const VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBHeap);
+    if ( pHandle == nullptr )
+      return false;
+    if ( pHandle->uVBListType == P2PmsgHeap_IOMAGE )
+      return P2PmsgHeap_IsValidAllocIOMAGE(hVBHeap,aVBLock);
+    if ( pHandle->uVBListType == P2PmsgHeap_SYSTEM )
+      return P2PmsgHeap_IsValidAllocSYS(hVBHeap,aVBLock);
+    if ( pHandle->uVBListType == P2PmsgHeap_BSTRio )
+      return P2PmsgHeap_IsValidAllocBSTRio(hVBHeap,aVBLock);
+    return false;
+}
 
 ///////////////////////////////////////////////////////////////////////
 //
@@ -3561,10 +3636,32 @@ P2PmsgHeap_CreateBSTRio ( VBListBSTRio *pBSTRio )
       EVERR->MODULE
            ->Message("Not BSTRio heap type")
            ->Throw();
-    if ( !P2PmsgHeap_AssertValidBSTRio(pBSTRio) )
-      EVERR->MODULE
-           ->Message("Corrupted BSTRio heap")
-           ->Throw();
+    // BUGFIX: removed P2PmsgHeap_AssertValidBSTRio(pBSTRio) and the "Corrupted
+    // BSTRio heap" refusal that hung off it. It is the BSTRio twin of the type
+    // confusion P2PmsgHeap_InitIOMAGE removed for the Linux port, and it was
+    // not merely usually a no-op here, it was ALWAYS one -- P2PmsgHANDLE is
+    // `void *` (Msgcore.h:35), so passing a VBListBSTRio* compiles silently,
+    // and the validator's first act is static_cast<VBListHANDLE*> followed by
+    // an early `return true` when the byte at the uVBListType offset is not
+    // P2PmsgHeap_BSTRio. That byte is offset 4, which in VBListHANDLE is
+    // uVBListType (after the 4-byte atomic nRefCount) and in a VBListBSTRio is
+    // the low byte of oDefs.uComp2 -- the COMPLEMENT of the type byte. The
+    // IsBSTRio test two lines above has just insisted that uComp2 == ~uDefs1
+    // exactly, so the byte read is ~P2PmsgHeap_BSTRio, and no 8-bit value is
+    // its own complement. The early return was therefore unconditional and the
+    // refusal below it unreachable, on every image, in every build.
+    //
+    // Measured before removing, over §32's nineteen-image corpus: answered
+    // `true` with zero assertions and zero bytes changed on all fifteen BSTRio
+    // images, the four corrupt ones included. And measured the other way too,
+    // which is what decides the shape of the fix: handed the HANDLE it is
+    // contracted to take, the same walk still answers `true` on all thirteen it
+    // can be run on, because outside a gate its VBHEAP_DIAGs assert and REPAIR
+    // rather than setting bResult false -- on f11_collate_nogrow.dat it
+    // rewrites the image's free-list keys. So the correctly-typed call is not a
+    // refusal this path was missing; it is a WRITE this path does not want. The
+    // structural gate on the untrusted path is the walk at the call site above,
+    // and on this path it is the assertion at the end of this function.
     // The BSTRio half of the same check (M6). aSize1 and the addressing width
     // both come off the wire; nSizeofMax below is derived from the second and
     // nSizeofAlloc from the first, so without this they can disagree from the
@@ -4958,7 +5055,24 @@ static int nCount = 1;
       ASSERT(VBHeap_IsLinked(pVBHeap));//TODO: delete
       ASSERT(VBHeap_IsFree(pVBHeap));//TODO: delete
       ASSERT(VBHeap_IsAddr(pVBHeap,uVBLock));
-      P2PmsgHeap_AssertValidBSTRio ( pBSTRio );
+      // BUGFIX: removed P2PmsgHeap_AssertValidBSTRio(pBSTRio) here. It is the
+      // line-for-line twin of the call P2PmsgHeap_InitIOMAGE removed below, and
+      // the note there applies word for word: the image BUFFER is passed to a
+      // validator that expects a VBListHANDLE*, which static_casts it and reads
+      // uVBListType/uAddrType out of the image's own bytes. The IOMAGE form
+      // early-returned "usually"; this one early-returns ALWAYS, because the
+      // byte at the uVBListType offset of a VBListBSTRio is the low byte of
+      // oDefs.uComp2 and this function has just written it as ~uDefs1, whose
+      // low byte is ~P2PmsgHeap_BSTRio. Not a sampled developer aid firing one
+      // time in a hundred: nothing at all, one time in a hundred.
+      //
+      // Nothing replaces it. The four ASSERTs above already test this block,
+      // and they test it through the block pointer rather than through a
+      // handle-shaped reading of the image. Calling the validator on a real
+      // handle is not available here -- there is no handle at this point, the
+      // caller has not built one yet -- and it would be the wrong thing anyway:
+      // outside a gate that walk REPAIRS the keys this function has just
+      // written, which is a validator undoing the initialiser.
       nCount = 1;
     }
 }

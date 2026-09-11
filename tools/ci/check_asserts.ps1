@@ -54,21 +54,43 @@
     are 250 and it is the CALLWRAP form that numbers 277. The 277 was real; it
     was measuring the more serious category and calling it the other one.
 
-    SIX OF THE `predicate` COUNT ARE NOT ASSERTIONS, and the figure in
-    assert-baseline.txt has carried them since the day it was banked. PowerShell's
-    -match is case-INSENSITIVE unless you spell it -cmatch, so the classifier's
-    \b(?:ASSERT|P2PASSERT)\s*\( also matches `->Assert()` -- P2Pevent's fluent
+    THE CLASSIFIER USED TO MATCH CASE-INSENSITIVELY, AND SEVEN SITES PAID FOR IT.
+    Fixed here -- -cnotmatch and -cmatch at the two lines that find the macro -- and
+    the figures moved for it, which is the whole content of this commit.
+
+    PowerShell's -match is case-INSENSITIVE unless you spell it -cmatch, so
+    \b(?:ASSERT|P2PASSERT)\s*\( also matched `->Assert()` -- P2Pevent's fluent
     builder, six call sites, all of them in MsgVBHeap.cpp (2525, 2545, 2625, 2644,
-    3916, 3973 as of 46a63f8). The inner text after the paren is `)->Throw();`, which
-    is neither `0)` nor an identifier, so each lands in `predicate`. They are the
-    OPPOSITE of what this script is against: every one sits on a branch that ends
-    in ->Throw() or ->Cancel(), which is item 19's own prescription -- assert in
-    Debug, refuse in Release. Worse, P2Pevent::Assert is `{ ASSERT(0); return this; }`
-    (Msgexception.h:353), already counted once as the `marker` it is, so the six are
-    a second count of one site. Read the banked predicate figure as six high.
-    NOT FIXED HERE. Spelling it -cmatch drops the number by six in the same breath
-    as the stale-baseline re-bank, and two corrections landing in one figure is how
-    a baseline stops meaning one thing. It wants its own commit and its own reason.
+    3942, 3999 as of 1e5c442). The text after the paren is `)->Throw();`, neither `0)`
+    nor an identifier, so each landed in `predicate`. They are the OPPOSITE of what
+    this script is against: every one sits on a branch ending in ->Throw() or
+    ->Cancel(), which is item 19's own prescription -- assert in Debug, refuse in
+    Release.
+
+    The seventh is the one this header itself got wrong. P2Pevent::Assert is
+    `Assert ( ) { ASSERT(0); return this; }` (Msgexception.h:353), and what stood here
+    said it was "already counted once as the marker it is". It was not. On its own
+    definition line the case-insensitive regex matched the METHOD NAME first, so the
+    capture opened after `Assert (` and $inner was ` ) { ASSERT(0); return this; }` --
+    neither `0)` nor an identifier. The one real ASSERT(0) behind all six call sites
+    was itself banked as a `predicate`. -cmatch walks past the name to the macro and
+    the site lands where it belongs.
+
+    So the correction is not minus six from `predicate`. It is minus SEVEN from
+    `predicate` and PLUS ONE to `marker`: 190 -> 183, 208 -> 209, callwrap unmoved at
+    247, TOTAL 645 -> 639. The marker ceiling rises and no assertion was written to
+    raise it; the site is as old as Msgexception.h and was always in the tree, just
+    filed under the wrong form. That is the one case where banking a rise is not a
+    regression, and it is written here so it stays distinguishable from one that is.
+
+    WHAT IS STILL CASE-INSENSITIVE, ON PURPOSE. -Detail's ValidateSet is
+    case-insensitive and hands $Detail back in the caller's own spelling, so the
+    `-eq $Detail` filtering the listing must stay that way or `-Detail CALLWRAP`
+    validates and then prints nothing. The two classifier regexes spell both cases in
+    their character classes and read identically either way. The -notlike file filter
+    and the baseline key lookups are case-insensitive over a tree that gives them
+    nothing to disagree about, and are left alone: tightening a filter is how files
+    quietly stop being counted, which is the failure this script already has.
 
     WHAT THIS CANNOT DO. Decide whether a given site is load-reachable. That is
     a call-graph question and this is a grep; the baseline stops the counts
@@ -117,11 +139,13 @@ foreach ($f in $files) {
     foreach ($line in (Get-Content -LiteralPath $f)) {
         $n++
         $t = $line.Trim()
-        if ($t -notmatch '\b(?:ASSERT|P2PASSERT)\s*\(') { continue }
+        # -cnotmatch / -cmatch, not -notmatch / -match: the macro is spelled in caps and
+        # P2Pevent::Assert is not it. See the header.
+        if ($t -cnotmatch '\b(?:ASSERT|P2PASSERT)\s*\(') { continue }
         if ($t.StartsWith('//')) { continue }        # commented out: not in any build
 
         $inner = ''
-        if ($t -match '\b(?:ASSERT|P2PASSERT)\s*\((?<a>.*)') { $inner = $Matches.a }
+        if ($t -cmatch '\b(?:ASSERT|P2PASSERT)\s*\((?<a>.*)') { $inner = $Matches.a }
 
         $kind = if ($inner -match '^\s*0\s*\)') { 'marker' }
                 elseif ($inner -match '^\s*[A-Za-z_][A-Za-z0-9_:]*\s*\(') { 'callwrap' }

@@ -22,178 +22,18 @@
 # register keeps relearning -- a number nobody prints is a number nobody reads -- and
 # working it down is the actual product of this check.
 #
+# THERE ARE NONE LEFT. The seed run banked 159 and the block holding them stood at the
+# top of this file for eleven sections of stack_paths.md; it is gone, and the arguments
+# that replaced it are at the bottom, under "THE BACKLOG". The count is still printed at
+# zero, because -Seed can put a hundred and fifty back with one switch and the run that
+# does it should say so out loud.
+#
 # There is one thing this file cannot do: it cannot notice that a binding's BEHAVIOUR
 # drifted from the C++ it wraps. msgcore_mgr_load began refusing stored images that
 # 0278981's walks now judge, with no signature change and no line here. Only a test
 # catches that, and none did.
 
 
-# ---------------------------------------------------------------------------------
-#  UNTRIAGED -- banked by -Seed, not decided by anybody.
-#
-#  Each line below says only that the member had no counterpart on the day the
-#  check was first run. Replacing UNTRIAGED with a real reason IS the triage, and
-#  the count is printed on every run so the backlog cannot go quiet.
-# ---------------------------------------------------------------------------------
-cxx-to-c  MsgStck::~MsgStck    # UNTRIAGED (dtor, MsgStck.h:81)
-cxx-to-c  MsgStck::AssertValid    # UNTRIAGED (method, MsgStck.h:125)
-cxx-to-c  MsgStck::MsgStck    # UNTRIAGED (ctor, MsgStck.h:73)
-cxx-to-c  MsgStck::operator=    # UNTRIAGED (operator, MsgStck.h:95)
-cxx-to-c  MsgStck::Print    # UNTRIAGED (method, MsgStck.h:127)
-cxx-to-c  MsgStck::r_data    # UNTRIAGED (method, MsgStck.h:110)
-cxx-to-c  MsgStck::r_item    # UNTRIAGED (method, MsgStck.h:114)
-cxx-to-c  MsgStck::r_list    # UNTRIAGED (method, MsgStck.h:116)
-cxx-to-c  MsgStck::r_name    # UNTRIAGED (method, MsgStck.h:112)
-cxx-to-c  MsgStck::r_vect    # UNTRIAGED (method, MsgStck.h:118)
-cxx-to-c  P2PmsgMgr::~P2PmsgMgr    # UNTRIAGED (dtor, P2PmsgMgr.h:179)
-cxx-to-c  P2PmsgMgr::AssertValid    # UNTRIAGED (method, P2PmsgMgr.h:275)
-cxx-to-c  P2PmsgMgr::Attacheap    # UNTRIAGED (method, P2PmsgMgr.h:184)
-cxx-to-c  P2PmsgMgr::Factory    # UNTRIAGED (method, P2PmsgMgr.h:199)
-cxx-to-c  P2PmsgMgr::operator=    # UNTRIAGED (operator, P2PmsgMgr.h:226)
-cxx-to-c  P2PmsgMgr::P2PmsgMgr    # UNTRIAGED (ctor, P2PmsgMgr.h:170)
-cxx-to-c  P2PmsgMgr::P2Pos2Attr    # UNTRIAGED (method, P2PmsgMgr.h:233)
-cxx-to-c  P2PmsgMgr::P2Pos2Field    # UNTRIAGED (method, P2PmsgMgr.h:231)
-cxx-to-c  P2PmsgMgr::P2Pos2Object    # UNTRIAGED (method, P2PmsgMgr.h:237)
-cxx-to-c  P2PmsgMgr::P2Pos2Path    # UNTRIAGED (method, P2PmsgMgr.h:235)
-cxx-to-c  P2PmsgMgr::Path2Object    # UNTRIAGED (method, P2PmsgMgr.h:239)
-cxx-to-c  P2PmsgMgr::Print    # UNTRIAGED (method, P2PmsgMgr.h:277)
-cxx-to-c  P2PmsgMgr::SelectTrigger    # UNTRIAGED (method, P2PmsgMgr.h:252)
-cxx-to-c  P2PmsgMgr::SharedMode    # UNTRIAGED (method, P2PmsgMgr.h:190)
-cxx-to-c  P2PmsgMgr::TriggerDELETE    # UNTRIAGED (method, P2PmsgMgr.h:260)
-cxx-to-c  P2PmsgMgr::TriggerINSERT    # UNTRIAGED (method, P2PmsgMgr.h:254)
-cxx-to-c  P2PmsgMgr::TriggerUPDATE    # UNTRIAGED (method, P2PmsgMgr.h:258)
-cxx-to-c  P2PmsgRecurs::~P2PmsgRecurs    # UNTRIAGED (dtor, MsgCurs.h:217)
-cxx-to-c  P2PmsgRecurs::AssertValid    # UNTRIAGED (method, MsgCurs.h:258)
-cxx-to-c  P2PmsgRecurs::c_wstr    # UNTRIAGED (method, MsgCurs.h:241)
-cxx-to-c  P2PmsgRecurs::operator++    # UNTRIAGED (operator, MsgCurs.h:224)
-cxx-to-c  P2PmsgRecurs::operator=    # UNTRIAGED (operator, MsgCurs.h:222)
-cxx-to-c  P2PmsgRecurs::P2PmsgRecurs    # UNTRIAGED (ctor, MsgCurs.h:213)
-cxx-to-c  P2PmsgRecurs::r_attr    # UNTRIAGED (method, MsgCurs.h:243)
-cxx-to-c  P2PmsgRecurs::r_data    # UNTRIAGED (method, MsgCurs.h:245)
-cxx-to-c  P2PmsgRecurs::r_item    # UNTRIAGED (method, MsgCurs.h:249)
-cxx-to-c  P2PmsgRecurs::r_list    # UNTRIAGED (method, MsgCurs.h:251)
-cxx-to-c  P2PmsgRecurs::r_name    # UNTRIAGED (method, MsgCurs.h:247)
-cxx-to-c  P2PmsgRecurs::r_vect    # UNTRIAGED (method, MsgCurs.h:253)
-cxx-to-c  P3PmsgAttr::~P3PmsgAttr    # UNTRIAGED (dtor, MsgAttr.h:84)
-cxx-to-c  P3PmsgAttr::AssertValid    # UNTRIAGED (method, MsgAttr.h:149)
-cxx-to-c  P3PmsgAttr::Connect    # UNTRIAGED (method, MsgAttr.h:89)
-cxx-to-c  P3PmsgAttr::Create    # UNTRIAGED (method, MsgAttr.h:118)
-cxx-to-c  P3PmsgAttr::Nullify    # UNTRIAGED (method, MsgAttr.h:87)
-cxx-to-c  P3PmsgAttr::operator[]    # UNTRIAGED (operator, MsgAttr.h:106)
-cxx-to-c  P3PmsgAttr::operator+=    # UNTRIAGED (operator, MsgAttr.h:98)
-cxx-to-c  P3PmsgAttr::operator=    # UNTRIAGED (operator, MsgAttr.h:94)
-cxx-to-c  P3PmsgAttr::operatorbool    # UNTRIAGED (operator, MsgAttr.h:108)
-cxx-to-c  P3PmsgAttr::P3PmsgAttr    # UNTRIAGED (ctor, MsgAttr.h:75)
-cxx-to-c  P3PmsgAttr::Print    # UNTRIAGED (method, MsgAttr.h:153)
-cxx-to-c  P3PmsgAttr::PushBack    # UNTRIAGED (method, MsgAttr.h:158)
-cxx-to-c  P3PmsgAttr::r_Curs    # UNTRIAGED (method, MsgAttr.h:144)
-cxx-to-c  P3PmsgAttr::r_Object    # UNTRIAGED (method, MsgAttr.h:113)
-cxx-to-c  P3PmsgAttr::SetPermissions    # UNTRIAGED (method, MsgAttr.h:167)
-cxx-to-c  P3PmsgAttr::VerifyContainment    # UNTRIAGED (method, MsgAttr.h:151)
-cxx-to-c  P3PmsgBSTR::~P3PmsgBSTR    # UNTRIAGED (dtor, P2PmsgBSTR.h:144)
-cxx-to-c  P3PmsgBSTR::AssertValid    # UNTRIAGED (method, P2PmsgBSTR.h:179)
-cxx-to-c  P3PmsgBSTR::Exists    # UNTRIAGED (method, P2PmsgBSTR.h:192)
-cxx-to-c  P3PmsgBSTR::GetDefaultP2Pmsgnn    # UNTRIAGED (method, P2PmsgBSTR.h:190)
-cxx-to-c  P3PmsgBSTR::GetP2Pmsgnn    # UNTRIAGED (method, P2PmsgBSTR.h:186)
-cxx-to-c  P3PmsgBSTR::Init    # UNTRIAGED (method, P2PmsgBSTR.h:149)
-cxx-to-c  P3PmsgBSTR::InitData    # UNTRIAGED (method, P2PmsgBSTR.h:155)
-cxx-to-c  P3PmsgBSTR::InitItem    # UNTRIAGED (method, P2PmsgBSTR.h:157)
-cxx-to-c  P3PmsgBSTR::IsDirty    # UNTRIAGED (method, P2PmsgBSTR.h:210)
-cxx-to-c  P3PmsgBSTR::IsFragmented    # UNTRIAGED (method, P2PmsgBSTR.h:208)
-cxx-to-c  P3PmsgBSTR::operator=    # UNTRIAGED (operator, P2PmsgBSTR.h:162)
-cxx-to-c  P3PmsgBSTR::P2Piomage    # UNTRIAGED (method, P2PmsgBSTR.h:170)
-cxx-to-c  P3PmsgBSTR::P2PiomageSize    # UNTRIAGED (method, P2PmsgBSTR.h:172)
-cxx-to-c  P3PmsgBSTR::P3PmsgBSTR    # UNTRIAGED (ctor, P2PmsgBSTR.h:116)
-cxx-to-c  P3PmsgBSTR::PrepareP2Piomage    # UNTRIAGED (method, P2PmsgBSTR.h:168)
-cxx-to-c  P3PmsgBSTR::Print    # UNTRIAGED (method, P2PmsgBSTR.h:181)
-cxx-to-c  P3PmsgBSTR::r_data    # UNTRIAGED (method, P2PmsgBSTR.h:200)
-cxx-to-c  P3PmsgBSTR::r_datn    # UNTRIAGED (method, P2PmsgBSTR.h:196)
-cxx-to-c  P3PmsgBSTR::r_item    # UNTRIAGED (method, P2PmsgBSTR.h:194)
-cxx-to-c  P3PmsgBSTR::r_name    # UNTRIAGED (method, P2PmsgBSTR.h:198)
-cxx-to-c  P3PmsgBSTR::ReleaseP2Piomage    # UNTRIAGED (method, P2PmsgBSTR.h:174)
-cxx-to-c  P3PmsgBSTR::SetDefaultP2Pmsgnn    # UNTRIAGED (method, P2PmsgBSTR.h:188)
-cxx-to-c  P3PmsgBSTR::SetDefaultSizeof    # UNTRIAGED (method, P2PmsgBSTR.h:206)
-cxx-to-c  P3PmsgBSTR::VBLockBSTR_vp    # UNTRIAGED (method, P2PmsgBSTR.h:202)
-cxx-to-c  P3PmsgCurs::~P3PmsgCurs    # UNTRIAGED (dtor, MsgCurs.h:106)
-cxx-to-c  P3PmsgCurs::AssertValid    # UNTRIAGED (method, MsgCurs.h:169)
-cxx-to-c  P3PmsgCurs::c_wstr    # UNTRIAGED (method, MsgCurs.h:150)
-cxx-to-c  P3PmsgCurs::operator--    # UNTRIAGED (operator, MsgCurs.h:119)
-cxx-to-c  P3PmsgCurs::operator++    # UNTRIAGED (operator, MsgCurs.h:115)
-cxx-to-c  P3PmsgCurs::operator=    # UNTRIAGED (operator, MsgCurs.h:111)
-cxx-to-c  P3PmsgCurs::operatorP3PmsgData&    # UNTRIAGED (operator, MsgCurs.h:129)
-cxx-to-c  P3PmsgCurs::operatorP3PmsgField&    # UNTRIAGED (operator, MsgCurs.h:123)
-cxx-to-c  P3PmsgCurs::operatorP3PmsgList&    # UNTRIAGED (operator, MsgCurs.h:125)
-cxx-to-c  P3PmsgCurs::operatorP3PmsgName&    # UNTRIAGED (operator, MsgCurs.h:121)
-cxx-to-c  P3PmsgCurs::operatorP3PmsgVect&    # UNTRIAGED (operator, MsgCurs.h:127)
-cxx-to-c  P3PmsgCurs::P3PmsgCurs    # UNTRIAGED (ctor, MsgCurs.h:100)
-cxx-to-c  P3PmsgCurs::r_attr    # UNTRIAGED (method, MsgCurs.h:162)
-cxx-to-c  P3PmsgCurs::r_data    # UNTRIAGED (method, MsgCurs.h:152)
-cxx-to-c  P3PmsgCurs::r_desc    # UNTRIAGED (method, MsgCurs.h:164)
-cxx-to-c  P3PmsgCurs::r_item    # UNTRIAGED (method, MsgCurs.h:156)
-cxx-to-c  P3PmsgCurs::r_list    # UNTRIAGED (method, MsgCurs.h:158)
-cxx-to-c  P3PmsgCurs::r_name    # UNTRIAGED (method, MsgCurs.h:154)
-cxx-to-c  P3PmsgCurs::r_Object    # UNTRIAGED (method, MsgCurs.h:148)
-cxx-to-c  P3PmsgCurs::r_vect    # UNTRIAGED (method, MsgCurs.h:160)
-cxx-to-c  P3PmsgDesc::~P3PmsgDesc    # UNTRIAGED (dtor, MsgDesc.h:113)
-cxx-to-c  P3PmsgDesc::AssertValid    # UNTRIAGED (method, MsgDesc.h:178)
-cxx-to-c  P3PmsgDesc::Connect    # UNTRIAGED (method, MsgDesc.h:118)
-cxx-to-c  P3PmsgDesc::Create    # UNTRIAGED (method, MsgDesc.h:145)
-cxx-to-c  P3PmsgDesc::Nullify    # UNTRIAGED (method, MsgDesc.h:116)
-cxx-to-c  P3PmsgDesc::operator[]    # UNTRIAGED (operator, MsgDesc.h:133)
-cxx-to-c  P3PmsgDesc::operator+=    # UNTRIAGED (operator, MsgDesc.h:127)
-cxx-to-c  P3PmsgDesc::operator=    # UNTRIAGED (operator, MsgDesc.h:123)
-cxx-to-c  P3PmsgDesc::operatorbool    # UNTRIAGED (operator, MsgDesc.h:135)
-cxx-to-c  P3PmsgDesc::P3PmsgDesc    # UNTRIAGED (ctor, MsgDesc.h:104)
-cxx-to-c  P3PmsgDesc::Print    # UNTRIAGED (method, MsgDesc.h:182)
-cxx-to-c  P3PmsgDesc::PushBack    # UNTRIAGED (method, MsgDesc.h:187)
-cxx-to-c  P3PmsgDesc::r_Curs    # UNTRIAGED (method, MsgDesc.h:173)
-cxx-to-c  P3PmsgDesc::r_Object    # UNTRIAGED (method, MsgDesc.h:140)
-cxx-to-c  P3PmsgDesc::SetPermissions    # UNTRIAGED (method, MsgDesc.h:196)
-cxx-to-c  P3PmsgDesc::VerifyContainment    # UNTRIAGED (method, MsgDesc.h:180)
-cxx-to-c  P3PmsgField::~P3PmsgField    # UNTRIAGED (dtor, P2Pmsg.h:648)
-cxx-to-c  P3PmsgField::AssertValid    # UNTRIAGED (method, P2Pmsg.h:729)
-cxx-to-c  P3PmsgField::Connect    # UNTRIAGED (method, P2Pmsg.h:653)
-cxx-to-c  P3PmsgField::Nullify    # UNTRIAGED (method, P2Pmsg.h:651)
-cxx-to-c  P3PmsgField::operator[]    # UNTRIAGED (operator, P2Pmsg.h:678)
-cxx-to-c  P3PmsgField::operator+=    # UNTRIAGED (operator, P2Pmsg.h:670)
-cxx-to-c  P3PmsgField::operator=    # UNTRIAGED (operator, P2Pmsg.h:660)
-cxx-to-c  P3PmsgField::operatorbool    # UNTRIAGED (operator, P2Pmsg.h:682)
-cxx-to-c  P3PmsgField::operatorP3PmsgData&    # UNTRIAGED (operator, P2Pmsg.h:680)
-cxx-to-c  P3PmsgField::P3PmsgField    # UNTRIAGED (ctor, P2Pmsg.h:634)
-cxx-to-c  P3PmsgField::Print    # UNTRIAGED (method, P2Pmsg.h:733)
-cxx-to-c  P3PmsgField::r_Attr    # UNTRIAGED (method, P2Pmsg.h:691)
-cxx-to-c  P3PmsgField::r_data    # UNTRIAGED (method, P2Pmsg.h:689)
-cxx-to-c  P3PmsgField::r_Desc    # UNTRIAGED (method, P2Pmsg.h:693)
-cxx-to-c  P3PmsgField::r_name    # UNTRIAGED (method, P2Pmsg.h:687)
-cxx-to-c  P3PmsgField::r_Object    # UNTRIAGED (method, P2Pmsg.h:697)
-cxx-to-c  P3PmsgField::r_Stck    # UNTRIAGED (method, P2Pmsg.h:695)
-cxx-to-c  P3PmsgField::RewindCurs    # UNTRIAGED (method, P2Pmsg.h:655)
-cxx-to-c  P3PmsgField::VerifyContainment    # UNTRIAGED (method, P2Pmsg.h:731)
-cxx-to-c  P3PmsgList::~P3PmsgList    # UNTRIAGED (dtor, MsgList.h:64)
-cxx-to-c  P3PmsgList::AssertValid    # UNTRIAGED (method, MsgList.h:132)
-cxx-to-c  P3PmsgList::Connect    # UNTRIAGED (method, MsgList.h:67)
-cxx-to-c  P3PmsgList::IsDirty    # UNTRIAGED (method, MsgList.h:145)
-cxx-to-c  P3PmsgList::operator+=    # UNTRIAGED (operator, MsgList.h:105)
-cxx-to-c  P3PmsgList::operator=    # UNTRIAGED (operator, MsgList.h:95)
-cxx-to-c  P3PmsgList::operatorbool    # UNTRIAGED (operator, MsgList.h:111)
-cxx-to-c  P3PmsgList::operatorP3PmsgData&    # UNTRIAGED (operator, MsgList.h:109)
-cxx-to-c  P3PmsgList::P3PmsgList    # UNTRIAGED (ctor, MsgList.h:50)
-cxx-to-c  P3PmsgList::Print    # UNTRIAGED (method, MsgList.h:136)
-cxx-to-c  P3PmsgList::VerifyContainment    # UNTRIAGED (method, MsgList.h:134)
-cxx-to-c  P3PmsgVect::~P3PmsgVect    # UNTRIAGED (dtor, MsgVect.h:64)
-cxx-to-c  P3PmsgVect::AssertValid    # UNTRIAGED (method, MsgVect.h:111)
-cxx-to-c  P3PmsgVect::Connect    # UNTRIAGED (method, MsgVect.h:67)
-cxx-to-c  P3PmsgVect::operator=    # UNTRIAGED (operator, MsgVect.h:72)
-cxx-to-c  P3PmsgVect::operatorbool    # UNTRIAGED (operator, MsgVect.h:84)
-cxx-to-c  P3PmsgVect::operatorP3PmsgData&    # UNTRIAGED (operator, MsgVect.h:82)
-cxx-to-c  P3PmsgVect::P3PmsgVect    # UNTRIAGED (ctor, MsgVect.h:50)
-cxx-to-c  P3PmsgVect::Print    # UNTRIAGED (method, MsgVect.h:115)
-cxx-to-c  P3PmsgVect::r_data    # UNTRIAGED (method, MsgVect.h:120)
-cxx-to-c  P3PmsgVect::r_item    # UNTRIAGED (method, MsgVect.h:128)
-cxx-to-c  P3PmsgVect::r_list    # UNTRIAGED (method, MsgVect.h:130)
-cxx-to-c  P3PmsgVect::r_name    # UNTRIAGED (method, MsgVect.h:124)
-cxx-to-c  P3PmsgVect::r_vect    # UNTRIAGED (method, MsgVect.h:132)
-cxx-to-c  P3PmsgVect::VerifyContainment    # UNTRIAGED (method, MsgVect.h:113)
 
 # ---------------------------------------------------------------------------------
 #  TRIAGED -- decided, with the reason the header asks for.
@@ -384,15 +224,29 @@ cxx-to-c  P3PmsgField::GetP2PmsgHandle    # returns P2PmsgHANDLE, the heap handl
 #  and the constants are the arena's on-disk semantics, which is the commitment
 #  the block-geometry reason above declines for the same reason.
 #
-#  SetAccess is here and its two SetPermissions counterparts are still UNTRIAGED
-#  above. That is not a distinction: SetAccess surfaced with this batch and they
-#  did not, and moving lines nobody asked about would move the UNTRIAGED count out
-#  from under the sections that quote it. They are the same argument when somebody
-#  reaches them.
+#  SetAccess was here and its two SetPermissions counterparts were left UNTRIAGED
+#  when this block was written, for a reason with a shelf life: SetAccess surfaced
+#  with that batch and they did not, and moving lines nobody had asked about would
+#  have moved the UNTRIAGED count out from under the sections quoting it. Those
+#  sections are written and the figure is theirs now, so the two lines join the
+#  argument they always belonged to.
+#
+#  The writing half is the worse half, and not only by symmetry. Both setters take
+#  an ADD mask and a REMOVE mask and push them straight into the stored byte --
+#  pDesc->uPermissions &= ~uRemove; |= uAdd (MsgDesc.cpp:763-770, MsgAttr.cpp:711-718)
+#  -- so a C caller who cannot name a bit cannot name it in either argument, and the
+#  failure is silent: the wrong bit does not fail the call, it changes what the
+#  stored object permits. And the setter ALLOCATES. Both call Create() when the
+#  collection does not exist yet, which is a heap mutation, which under rule 2 of
+#  Msgcore_c.h invalidates every live handle the caller is holding -- an
+#  msgcore_desc_set_permissions would be a settings call with the blast radius of a
+#  declare, for a vocabulary the surface cannot publish.
 cxx-to-c  P3PmsgField::GetAccess    # masks a block-header byte whose bit names live in a header the C ABI does not publish
 cxx-to-c  P3PmsgField::SetAccess    # as GetAccess, writing; the same unspellable bits
 cxx-to-c  P3PmsgDesc::GetPermissions    # masks uPermissions, a byte no header in this repository names a single bit of
 cxx-to-c  P3PmsgAttr::GetPermissions    # as P3PmsgDesc::GetPermissions
+cxx-to-c  P3PmsgDesc::SetPermissions    # as GetPermissions, writing add/remove masks of unnamed bits, and it allocates on the way
+cxx-to-c  P3PmsgAttr::SetPermissions    # as P3PmsgDesc::SetPermissions
 #
 #  THE DIRTY FLAG BELONGS TO THE C++ OBJECT, NOT TO THE ITEM. P3PmsgField::IsDirty
 #  is m_bFieldDirty || P3PmsgData::IsDirty() || P3PmsgName::IsDirty()
@@ -407,8 +261,17 @@ cxx-to-c  P3PmsgAttr::GetPermissions    # as P3PmsgDesc::GetPermissions
 #  The question that survives handles being minted and destroyed is the store's,
 #  and the surface carries it: msgcore_mgr_is_dirty and msgcore_mgr_set_dirty,
 #  which is what a caller deciding whether to msgcore_mgr_save actually needs.
+#
+#  P3PmsgList::IsDirty (MsgList.cpp:713-719) is m_bListDirty || P3PmsgField::IsDirty(),
+#  the same shape one class over, and it was UNTRIAGED when this block was written
+#  only because the old matcher scored it against msgcore_list_get_count through the
+#  'is' root and the tightened one surfaced the field's and the vect's first. It is
+#  the same decision and it joins them here. P3PmsgBSTR::IsDirty is NOT the same
+#  question -- it asks P2PmsgHeap_IsDirty of the image's own heap handle
+#  (P2PmsgBSTR.cpp:457-463) -- and is covered with the rest of that class below.
 cxx-to-c  P3PmsgField::IsDirty    # a flag on the C++ wrapper, not on the item; msgcore_mgr_is_dirty outlives a handle
 cxx-to-c  P3PmsgVect::IsDirty    # as P3PmsgField::IsDirty, plus m_bVectDirty
+cxx-to-c  P3PmsgList::IsDirty    # as P3PmsgField::IsDirty, plus m_bListDirty
 #
 #  THE PARENT POINTER IS SOMETHING THE FLAT CALLER ALREADY HAS. GetField returns
 #  P3PmsgField* -- the owning field of the collection (MsgDesc.h:211, MsgAttr.h:182).
@@ -442,14 +305,16 @@ cxx-to-c  P3PmsgAttr::Select    # as P3PmsgDesc::Select
 cxx-to-c  P3PmsgDesc::SelectObject    # returns P3PmsgObject, a class the config keeps off the surface by design
 cxx-to-c  P3PmsgAttr::SelectObject    # as P3PmsgDesc::SelectObject
 #
-#  IsName IS DECLARED AND NEVER DEFINED. MsgVect.h:145 declares it beside IsData,
-#  IsField, IsList and IsVect, and MsgVect.cpp defines those four and not this one
-#  -- the whole repository contains no P3PmsgVect::IsName body. Its four siblings
-#  bind exactly, to msgcore_vect_is_data, _is_field, _is_list and _is_vect. This
-#  one cannot be bound because there is nothing to bind to: a wrapper calling it
-#  would not link. That is a defect in MsgVect.cpp rather than a decision about the
-#  C API, and it is recorded here as the former.
-cxx-to-c  P3PmsgVect::IsName    # declared at MsgVect.h:145 and defined nowhere; a binding would not link
+#  IsName WAS DECLARED AND NEVER DEFINED, AND THE DECLARATION IS GONE. MsgVect.h
+#  declared it beside IsData, IsField, IsList and IsVect while MsgVect.cpp defined
+#  those four and not this one; the whole repository contained no P3PmsgVect::IsName
+#  body, and nothing called it, which is the only reason the DLL ever linked. The
+#  four siblings bind exactly, to msgcore_vect_is_data, _is_field, _is_list and
+#  _is_vect. Removing a declaration that has never had a working caller cannot break
+#  a consumer that compiles today -- one that wrote the call already met LNK2019 --
+#  so it was deleted rather than defined, and the member is no longer scanned. This
+#  block is kept as the record of why there is no line, because the next reader to
+#  notice the gap in the family will otherwise ask the same question again.
 #
 #  A PATH IS A MANAGER'S QUESTION. GetPath returns a CString built by walking from
 #  this field up to the root, and CString is an MFC type the flat surface does not
@@ -459,15 +324,22 @@ cxx-to-c  P3PmsgVect::IsName    # declared at MsgVect.h:145 and defined nowhere;
 #  manager it does not carry.
 cxx-to-c  P3PmsgField::GetPath    # returns CString; msgcore_field_get_p2pos + msgcore_mgr_p2pos2path is the flat spelling
 #
-#  GetP2Pos IS BOUND AND THE MATCHER CANNOT SEE IT. msgcore_field_get_p2pos is the
-#  binding, quoted by rule 2 itself at Msgcore_c.h:108-109 and again at :531 as the
-#  durable alternative to a live handle. It does not match because ConvertTo-Snake
-#  splits GetP2Pos into get_p2_pos while the surface spells get_p2pos, and no
-#  sequence of general rules turns one into the other without inventing a
-#  dictionary. This is the extractor, not the design -- the third of the three ways
-#  out the check prints -- and the line exists so that the next reader is not told a
-#  bound member is unbound.
-cxx-to-c  P3PmsgField::GetP2Pos    # bound as msgcore_field_get_p2pos; the snake-caser spells it get_p2_pos and cannot match
+#  GetP2Pos HAD A LINE HERE AND NO LONGER NEEDS ONE. It read "bound as
+#  msgcore_field_get_p2pos; the snake-caser spells it get_p2_pos and cannot match",
+#  and it said, in as many words, that no sequence of general rules turns one into
+#  the other without inventing a dictionary. That was wrong, and cheaply so. There
+#  is a rule: a word boundary is a CASE change, and a digit belongs to the word it
+#  sits in, so GetP2Pos is get_p2pos the same way P2Pos2Field is p2pos2field. The
+#  old first rule ended a word at a digit. ConvertTo-Snake is fixed, the measurement
+#  is in check_api_drift.ps1 beside it -- 44 of 288 members change spelling, three
+#  gain an exact binding, none loses one -- and three lines left this file:
+#  P3PmsgField::GetP2Pos from here, and P2PmsgMgr::P2Pos2Field and ::P2Pos2Path out
+#  of the UNTRIAGED backlog, where they had been banked as work outstanding since
+#  the day the check was seeded. They were bound the whole time.
+#
+#  That is the shape worth keeping: a matcher's false NEGATIVE reads exactly like an
+#  honest gap, and it inflates the backlog rather than the bound count, which is the
+#  flattering direction and therefore the one nobody audits.
 #
 #  PageRegistration IS BOUND UNDER A DIFFERENT NAME, TWICE. The two overloads
 #  (P2PmsgMgr.h:211-215) install the page-in/page-out pair and the populate
@@ -547,5 +419,498 @@ cxx-to-c  P2PmsgMgr::IsAttributed    # as IsField; msgcore_field_is_attributed a
 #  So: not carried, today, by this file. The lines below record that, not a refusal
 #  in principle. Adding msgcore_field_is_sole remains a live option and the argument
 #  for it is above, in full, on purpose.
-cxx-to-c  P3PmsgField::IsSole    # no msgcore_field_is_sole exists; carrying one is an ABI addition and a version bump, and is the owner's call
-cxx-to-c  P3PmsgField::IsInline    # as IsSole, and weaker: its FALSE guarantees nothing and it describes storage placement
+#
+#  AND IT WAS TAKEN. IsSole no longer has a line here, because msgcore_field_is_sole
+#  is on the supported surface: Msgcore_c.h:296-345, with fifty lines of contract
+#  saying what the case AGAINST demanded it say -- TRUE is a guarantee, FALSE is
+#  "unknown" and not evidence of a second holder -- and a version bump to 3.1.0
+#  beside it. The check reported the line redundant on the run after it landed and
+#  the line is gone. Writing the case FOR down in full is what made that a decision
+#  somebody could take rather than a thing a matcher had silently scored green since
+#  the day it was seeded, which is the whole argument of this file in one member.
+#
+#  IsInline keeps its line and keeps it for the reason the paragraph above gives:
+#  there is no msgcore_field_is_inline, its FALSE is explicitly not a guarantee
+#  (section 24), and it describes where storage sits rather than what a caller may
+#  do. The two were never the same strength and only one of them was worth exporting.
+cxx-to-c  P3PmsgField::IsInline    # no msgcore_field_is_inline; its FALSE guarantees nothing and it describes storage placement, not permission
+#
+# ===================================================================================
+#  THE BACKLOG -- the 159 lines -Seed banked on day one, argued.
+#
+#  Everything above this point was written about a member somebody had already
+#  looked at. The block that used to stand at the TOP of this file was the opposite:
+#  159 lines saying only that nobody had, carried through eleven sections of
+#  stack_paths.md as the largest single thing outstanding. It is gone from the file
+#  because it is decided below, and two of its lines left for a better reason than a
+#  decision -- the matcher learned to read them and they had been bound all along.
+#
+#  The arguments are the product, not the lines. Fifteen of them cover the rest,
+#  which is the same point section 34 made with four Drops and section 37 made with
+#  four groups over thirty-five members: a backlog needing one argument per line is
+#  a backlog nobody has understood yet. Where a member IS carried under a name the
+#  matcher cannot follow, the line says so and cites the wrapper source, because the
+#  one thing worse than an unexplained gap is a claimed gap that is not there.
+# ===================================================================================
+#
+#  1. A CONSTRUCTOR IS A NAME C CANNOT SPELL, AND A DESTRUCTOR IS ONE CALL PER
+#  FAMILY. C has neither overloading nor destructors, so the surface spells
+#  construction as a named factory per shape and destruction as exactly one function
+#  per family: msgcore_mgr_create / _create_nn / _open_file, msgcore_field_create /
+#  _clone / _child, and a _from_field for attr, desc, list, vect, stck and recurs
+#  (curs takes three: _from_field, _from_attr, _from_desc). Those ARE the
+#  constructors. msgcore_field_destroy is literally the destructor -- it deletes the
+#  wrapper (Msgcore_c.cpp:369-376) -- and the only reason the check does not report
+#  it is that the C++ name snake-cases to ~p3pmsg_field.
+#
+#  What the surface declines is not construction but most of the argument lists. The
+#  check asks about each distinct NAME once, so P3PmsgField's seven constructors
+#  arrive as one line and that line has to answer for the hardest of them: two are
+#  carried (the empty one as msgcore_field_create, name+data as a declare), the copy
+#  is carried as msgcore_field_clone -- "heap-allocated copies the caller must
+#  destroy", Msgcore_c.h:180-186 -- and the remaining four take P2PmsgFieldHdl,
+#  P2PmsgHANDLE + VBLaddr + VBLsize, P3PmsgData& or P3PmsgObject&: every one a type
+#  this file has already refused, in the GetP2PmsgFieldHdl block and the GetHeadPos
+#  block above. The collections repeat the pattern exactly, and P3PmsgBSTR's nine
+#  are a case of their own, argued at the end.
+cxx-to-c  P2PmsgMgr::P2PmsgMgr    # four ctors; msgcore_mgr_create / _create_nn / _open_file are three of them, the copy takes a P2PmsgMgr&
+cxx-to-c  P2PmsgMgr::~P2PmsgMgr    # run by msgcore_mgr_destroy, which deletes the wrapper
+cxx-to-c  P3PmsgField::P3PmsgField    # seven ctors; _create / _clone / a declare carry three, the rest take P2PmsgHANDLE, VBLaddr or an off-surface class
+cxx-to-c  P3PmsgField::~P3PmsgField    # run by msgcore_field_destroy (Msgcore_c.cpp:369-376)
+cxx-to-c  P3PmsgList::P3PmsgList    # seven ctors; msgcore_list_from_field is the one that needs no refused type
+cxx-to-c  P3PmsgList::~P3PmsgList    # run by msgcore_list_destroy
+cxx-to-c  P3PmsgVect::P3PmsgVect    # as P3PmsgList::P3PmsgList; msgcore_vect_from_field, and the sized forms take a P3PmsgData&
+cxx-to-c  P3PmsgVect::~P3PmsgVect    # run by msgcore_vect_destroy
+cxx-to-c  P3PmsgAttr::P3PmsgAttr    # four ctors; msgcore_attr_from_field is the one, the others take P3PmsgField* or P3PmsgObject&
+cxx-to-c  P3PmsgAttr::~P3PmsgAttr    # run by msgcore_attr_destroy
+cxx-to-c  P3PmsgDesc::P3PmsgDesc    # as P3PmsgAttr::P3PmsgAttr; msgcore_desc_from_field
+cxx-to-c  P3PmsgDesc::~P3PmsgDesc    # run by msgcore_desc_destroy
+cxx-to-c  P3PmsgCurs::P3PmsgCurs    # five ctors, which the surface spells as three: msgcore_curs_from_field / _from_attr / _from_desc
+cxx-to-c  P3PmsgCurs::~P3PmsgCurs    # run by msgcore_curs_destroy
+cxx-to-c  P2PmsgRecurs::P2PmsgRecurs    # three ctors; msgcore_recurs_from_field and _from_attr are two, the third is the copy
+cxx-to-c  P2PmsgRecurs::~P2PmsgRecurs    # run by msgcore_recurs_destroy
+cxx-to-c  MsgStck::MsgStck    # four ctors; msgcore_stck_create and _from_field are two, the others take P3PmsgField* or P3PmsgObject&
+cxx-to-c  MsgStck::~MsgStck    # run by msgcore_stck_destroy
+cxx-to-c  P3PmsgBSTR::P3PmsgBSTR    # nine ctors, every one taking VBListIOmage, P2PmsgHANDLE or P3PmsgData&; see the P3PmsgBSTR block below
+cxx-to-c  P3PmsgBSTR::~P3PmsgBSTR    # as P3PmsgBSTR::P3PmsgBSTR; the surface spells no msgcore_bstrio_ function at all
+#
+#  2. ASSERTVALID THROWS, AND NOTHING THROWN CROSSES THIS BOUNDARY.
+#  P3PmsgField::AssertValid (P2Pmsg.cpp:4119-4133) runs VerifyContainment and, when
+#  it fails, EVERR -> Message("Failed Containment") -> Throw(). That is the one
+#  behaviour a flat entry point may not have: Msgcore_c.cpp catches 111 times, and
+#  every wrapper that can reach C++ converts a throw into a return code or a NULL
+#  handle. An msgcore_field_assert_valid would either swallow the diagnosis, leaving
+#  a bool that says less than the assertion did, or let an exception cross an extern
+#  "C" frame.
+#
+#  The surface already asks the question the safe way. msgcore_mgr_is_valid binds
+#  P2PmsgMgr::IsValid exactly -- same question, int instead of a throw -- and
+#  section 35 is the section about what happens when an assertion fires inside a
+#  gate that was supposed to be watching for it.
+#
+#  VerifyContainment is the predicate underneath AssertValid and it takes a raw
+#  blob pointer and a VBLsize, asking whether a span lies inside this object's
+#  VBLock. Both halves are refused elsewhere in this file: a caller-side pointer
+#  into the arena, and the arena's own size type. Print is the odd one, because its
+#  signature (FILE*, int, int) is C-compatible and its argument has to be about
+#  something else: it dumps the block layout section 36 and section 40 read with
+#  their own tooling, in a format nothing versions, and the flat ABI has no
+#  diagnostic-output group for it to belong to. Adding one would make a debug
+#  format a supported one.
+cxx-to-c  P2PmsgMgr::AssertValid    # throws on failure; msgcore_mgr_is_valid is the same question with a return value
+cxx-to-c  P3PmsgField::AssertValid    # throws on failure (P2Pmsg.cpp:4119-4125); an exception cannot cross extern "C"
+cxx-to-c  P3PmsgList::AssertValid    # as P3PmsgField::AssertValid
+cxx-to-c  P3PmsgVect::AssertValid    # as P3PmsgField::AssertValid
+cxx-to-c  P3PmsgAttr::AssertValid    # as P3PmsgField::AssertValid
+cxx-to-c  P3PmsgDesc::AssertValid    # as P3PmsgField::AssertValid
+cxx-to-c  P3PmsgCurs::AssertValid    # as P3PmsgField::AssertValid
+cxx-to-c  P2PmsgRecurs::AssertValid    # as P3PmsgField::AssertValid
+cxx-to-c  MsgStck::AssertValid    # as P3PmsgField::AssertValid
+cxx-to-c  P3PmsgBSTR::AssertValid    # as P3PmsgField::AssertValid
+cxx-to-c  P3PmsgField::VerifyContainment    # takes a raw blob pointer and a VBLsize; it is AssertValid's predicate, and both types are refused above
+cxx-to-c  P3PmsgList::VerifyContainment    # as P3PmsgField::VerifyContainment
+cxx-to-c  P3PmsgVect::VerifyContainment    # as P3PmsgField::VerifyContainment
+cxx-to-c  P3PmsgAttr::VerifyContainment    # as P3PmsgField::VerifyContainment
+cxx-to-c  P3PmsgDesc::VerifyContainment    # as P3PmsgField::VerifyContainment
+cxx-to-c  P2PmsgMgr::Print    # dumps block layout to a FILE*; a debug format, and exporting it would make it a supported one
+cxx-to-c  P3PmsgField::Print    # as P2PmsgMgr::Print
+cxx-to-c  P3PmsgList::Print    # as P2PmsgMgr::Print
+cxx-to-c  P3PmsgVect::Print    # as P2PmsgMgr::Print
+cxx-to-c  P3PmsgAttr::Print    # as P2PmsgMgr::Print
+cxx-to-c  P3PmsgDesc::Print    # as P2PmsgMgr::Print
+cxx-to-c  MsgStck::Print    # as P2PmsgMgr::Print
+cxx-to-c  P3PmsgBSTR::Print    # as P2PmsgMgr::Print
+#
+#  3. ASSIGNMENT IS FIVE DIFFERENT CALLS WEARING ONE SPELLING. operator= collapses
+#  to one NAME upstream and the check asks about it once, but P3PmsgField declares
+#  five of them (P2Pmsg.h:748-756) and each is a different question on the flat
+#  side. From a P3PmsgField it is the deep copy, which IS carried, as
+#  msgcore_field_clone. From a P3PmsgData it is a data write -- msgcore_field_set_int,
+#  _set_wstr, _set_double, _set_bool, _set_int64, one per type because C has no
+#  P3PmsgData. From a P3PmsgName it is a rename, msgcore_field_rename_child. From a
+#  P2PmsgFieldHdl it adopts three raw UINT_PTRs, refused above. From a P3PmsgObject
+#  it takes a class the config keeps off the surface by design.
+#
+#  So the capability is on the surface four times over and the OPERATOR is not,
+#  which is the outcome the identity-operator block above reached by a different
+#  route: the surface spells questions as verbs. The collections repeat the shape
+#  with their own container types; P2PmsgMgr's assigns a whole store, which on the
+#  flat side is msgcore_mgr_save followed by msgcore_mgr_open_file.
+cxx-to-c  P3PmsgField::operator=    # five overloads; the copy is msgcore_field_clone, the data write is the _set_* family, the rename is _rename_child
+cxx-to-c  P3PmsgList::operator=    # as P3PmsgField::operator=; the data arm is msgcore_list_set_*_at
+cxx-to-c  P3PmsgVect::operator=    # as P3PmsgField::operator=; the data arm is msgcore_vect_set_*
+cxx-to-c  P3PmsgAttr::operator=    # as P3PmsgField::operator=; the other arm takes P3PmsgObject, which has no C projection
+cxx-to-c  P3PmsgDesc::operator=    # as P3PmsgAttr::operator=
+cxx-to-c  P3PmsgCurs::operator=    # re-seats a cursor on another item; the flat cursor is re-seated by destroying it and calling msgcore_curs_from_field again
+cxx-to-c  P2PmsgRecurs::operator=    # as P3PmsgCurs::operator=, for the recursive walker
+cxx-to-c  MsgStck::operator=    # copies a stack wrapper; the flat one is minted by msgcore_stck_from_field and released by _destroy
+cxx-to-c  P2PmsgMgr::operator=    # assigns a whole store; the flat spelling is msgcore_mgr_save then msgcore_mgr_open_file
+cxx-to-c  P3PmsgBSTR::operator=    # see the P3PmsgBSTR block below; the class has no family on the surface
+#
+#  4. `if ( oField )` IS msgcore_field_is_void, NEGATED. P3PmsgField::operator bool
+#  is exactly !IsVoid() (P2Pmsg.cpp:3928-3931), and the comment above it says the
+#  spelling was deliberately narrowed to that one question so that `if ( oField )`
+#  means the same thing on the field, the list and the vect. Section 20 is the
+#  section about the four answers this used to have. msgcore_field_is_void carries
+#  it, and a C caller has the second half free: the handle is NULL or it is not.
+#
+#  The list's and the vect's are the same !IsVoid() one class over (MsgList.cpp:383),
+#  and a flat caller reaches it on the field it must already be holding -- a list
+#  handle can only have come from msgcore_list_from_field. Two calls, which is the
+#  shape the whole handle group is written in.
+cxx-to-c  P3PmsgField::operatorbool    # !IsVoid(); msgcore_field_is_void carries it, plus the handle's own NULL
+cxx-to-c  P3PmsgList::operatorbool    # as P3PmsgField::operatorbool, asked of the field the list handle came from
+cxx-to-c  P3PmsgVect::operatorbool    # as P3PmsgList::operatorbool
+cxx-to-c  P3PmsgAttr::operatorbool    # as P3PmsgList::operatorbool; msgcore_attr_is_empty is the neighbouring question the surface does carry
+cxx-to-c  P3PmsgDesc::operatorbool    # as P3PmsgAttr::operatorbool; msgcore_desc_is_empty
+#
+#  5. operator[] THROWS WHEN THE NAME IS NOT THERE, AND THE SURFACE RETURNS NULL.
+#  P3PmsgAttr::operator[] goes to the collection's cached cursor and, if Goto fails,
+#  EVERR -> Message("Item [%s] does not exist") -> Throw() (MsgAttr.cpp:214-224);
+#  P3PmsgField::operator[] is r_Desc()[lpszName] (P2Pmsg.cpp:3910-3913) and inherits
+#  the same behaviour one level down. The flat surface answers the identical
+#  question in two calls that cannot throw: msgcore_attr_exists / msgcore_desc_exists
+#  for the test, msgcore_attr_select_item / msgcore_desc_select_item / msgcore_field_child
+#  for the fetch, each returning NULL rather than raising. That is not a narrower
+#  capability; it is the same one with the error path an ABI can carry.
+cxx-to-c  P3PmsgField::operator[]    # r_Desc()[name], which throws on a miss; msgcore_field_child and _desc_select_item return NULL instead
+cxx-to-c  P3PmsgAttr::operator[]    # throws on a miss (MsgAttr.cpp:219); msgcore_attr_exists + _select_item is the flat spelling
+cxx-to-c  P3PmsgDesc::operator[]    # as P3PmsgAttr::operator[]
+#
+#  6. THE SURFACE BUILDS IN PLACE AND NEVER ADOPTS A CALLER-BUILT OBJECT.
+#  operator+= and PushBack are one member with two spellings -- P3PmsgAttr's three
+#  += overloads are each a one-line call to PushBack (MsgAttr.cpp:196-212) -- and
+#  what they do is graft an existing C++ object into a collection. There is no flat
+#  counterpart because every flat construction call is BY NAME AND VALUE:
+#  msgcore_attr_declare_int, _declare_wstr, _declare_list, _declare_vect and their
+#  desc twins make the child inside the collection and hand back a handle to it.
+#
+#  The one thing the surface does graft is a node that is already in the tree, by
+#  name, between two live handles: msgcore_field_move_child(hSrc, hDst, lpszName),
+#  "rename(2) across directories" (Msgcore_c.h:593-596). The distinction is exactly
+#  the one rule 2's exemption note draws (Msgcore_c.h:112-116): a handle a C caller
+#  is holding may be a DETACHED deep copy whose block is not in the heap at all, so
+#  an msgcore_attr_push_back would have to copy that block into the arena -- which
+#  is the value copy sections 23 and 27 are about, and it would have to decide
+#  there what those sections show the C++ side decides badly.
+#
+#  P3PmsgList::operator+= is the one arm with a flat name: += a P3PmsgData is
+#  msgcore_list_add_tail_int / _double / _wstr / _bool / _int64, spelled per type
+#  because C has no P3PmsgData. Its other arm concatenates a whole list and has
+#  none, for the reason above.
+cxx-to-c  P3PmsgAttr::PushBack    # grafts a caller-built object; the surface declares by name and value (msgcore_attr_declare_*)
+cxx-to-c  P3PmsgDesc::PushBack    # as P3PmsgAttr::PushBack
+cxx-to-c  P3PmsgAttr::operator+=    # three overloads, each a call to PushBack (MsgAttr.cpp:196-212)
+cxx-to-c  P3PmsgDesc::operator+=    # as P3PmsgAttr::operator+=
+cxx-to-c  P3PmsgField::operator+=    # appends a list, vect or field object; the surface spells it msgcore_field_declare_list / _declare_vect
+cxx-to-c  P3PmsgList::operator+=    # the data arm IS carried, as msgcore_list_add_tail_*; the list-concatenation arm adopts an object and is not
+#
+#  7. A CONVERSION OPERATOR RETURNS A CLASS, AND THE FLAT SIDE RETURNS A HANDLE.
+#  P3PmsgCurs has five (MsgCurs.h:121-129) and they are how C++ reads the element
+#  under a cursor. The flat cursor does it with one function and a type test:
+#  msgcore_curs_is_item / _is_list / _is_vect, then msgcore_curs_get_field.
+#
+#  And one of these five IS the binding, from the inside. msgcore_curs_get_field is
+#  implemented as *pResult = (P3PmsgField&)(*toCurs(hCurs)) (Msgcore_c.cpp:1141-1145)
+#  -- that cast IS operator P3PmsgField&, and the assignment beside it is the
+#  operator= two blocks up. The flat surface reaches both on every call; what it
+#  does not do is hand out the reference, because the three remaining conversions
+#  yield P3PmsgName&, P3PmsgData& and P3PmsgList& / P3PmsgVect&, and the first two
+#  are classes api-drift.config.psd1 keeps out of TypeMap on purpose. The same
+#  precedent as msgcore_stck_pop reaching Drop from the inside, in section 34.
+cxx-to-c  P3PmsgCurs::operatorP3PmsgField&    # reached from the inside by msgcore_curs_get_field (Msgcore_c.cpp:1143); the surface returns a handle, not a reference
+cxx-to-c  P3PmsgCurs::operatorP3PmsgList&    # as operatorP3PmsgField&; msgcore_curs_is_list then _get_field then msgcore_list_from_field
+cxx-to-c  P3PmsgCurs::operatorP3PmsgVect&    # as operatorP3PmsgList&, for a vect
+cxx-to-c  P3PmsgCurs::operatorP3PmsgName&    # returns P3PmsgName&, a class with no family in the config by design
+cxx-to-c  P3PmsgCurs::operatorP3PmsgData&    # returns P3PmsgData&, a class with no family in the config by design
+cxx-to-c  P3PmsgField::operatorP3PmsgData&    # as P3PmsgCurs::operatorP3PmsgData&; the values are read by msgcore_field_get_int / _get_wstr / ...
+cxx-to-c  P3PmsgList::operatorP3PmsgData&    # as P3PmsgField::operatorP3PmsgData&; msgcore_list_get_*_at reads the element
+cxx-to-c  P3PmsgVect::operatorP3PmsgData&    # as P3PmsgField::operatorP3PmsgData&; msgcore_vect_get_* reads the element
+#
+#  8. THE STEP OPERATORS ARE CARRIED AS VERBS, AND ONE OF THEM IS NOT CARRIED AT
+#  ALL. Msgcore_c.h documents msgcore_recurs_next as "Advance (operator++)" in as
+#  many words (Msgcore_c.h:942-944), and msgcore_curs_next sits under the heading
+#  "Advance / rewind" beside msgcore_curs_seek, which binds P3PmsgCurs::Seek
+#  exactly. So the forward step is on the surface twice; only the spelling is
+#  different, and it has to be, because ++ is not a name in C.
+#
+#  operator-- has no counterpart: there is no msgcore_curs_prev. A flat caller steps
+#  back with msgcore_curs_goto_index(msgcore_curs_item_index(c) - 1), which is what
+#  Seek() does one step further -- Seek is Goto(0) (MsgCurs.cpp:324-328) -- and the
+#  absolute index is the position the flat cursor is willing to talk about, for the
+#  reason the GetHeadPos block gives about VBLaddr. It is O(n) per step where the
+#  C++ operator is O(1), and Msgcore_c.h:716-720 says that plainly about the list's
+#  indexed access. That cost is the reason to reconsider it, and it is recorded
+#  here rather than argued away.
+cxx-to-c  P3PmsgCurs::operator++    # carried as msgcore_curs_next; ++ is not a name C can export
+cxx-to-c  P2PmsgRecurs::operator++    # carried as msgcore_recurs_next, which Msgcore_c.h:942 names "(operator++)"
+cxx-to-c  P3PmsgCurs::operator--    # no msgcore_curs_prev; the flat step back is goto_index(item_index-1), which is O(n)
+#
+#  9. r_<thing> IS CARRIED AS get_<thing>, AND THE RENAME IS NOT A RULE.
+#  The library's convention is that r_x() exposes a reference to x. The flat
+#  surface's convention is get_x(), returning a handle the caller owns. For fourteen
+#  members those are the same function, and the wrapper source says so line by line:
+#
+#      MsgStck::r_item   -> msgcore_stck_get_item      (Msgcore_c.cpp:2142)
+#      MsgStck::r_list   -> msgcore_stck_get_list      (Msgcore_c.cpp:2150)
+#      MsgStck::r_vect   -> msgcore_stck_get_vect      (Msgcore_c.cpp:2158)
+#      MsgStck::r_name   -> msgcore_stck_get_name      (Msgcore_c.cpp:2120)
+#      P2PmsgRecurs::r_item / r_list / r_vect / c_wstr -> msgcore_recurs_get_item /
+#                                    _get_list / _get_vect / _get_name  (2263-2283, 2252)
+#      P3PmsgCurs::c_wstr -> msgcore_curs_get_name     (Msgcore_c.cpp:1152)
+#      P3PmsgVect::r_item / r_list / r_vect / r_name / r_data -> msgcore_vect_get_item /
+#                                    _get_list / _get_vect / _get_name / _get_int
+#                                    and the rest of the typed family  (806, 1986, 1996, 1932, 783)
+#
+#  A RULE MAPPING r_ TO get_ WAS TRIED AND REJECTED ON MEASUREMENT, which is worth
+#  recording because the same session fixed ConvertTo-Snake by finding a rule. This
+#  one binds nine members correctly and three WRONGLY: msgcore_curs_get_name is
+#  P3PmsgCurs::c_wstr's (1152) and msgcore_recurs_get_name is P2PmsgRecurs::c_wstr's
+#  (2252), so a rule handing them to r_name -- which returns P3PmsgName& and is not
+#  carried -- would manufacture exactly the kind of false positive section 37
+#  removed twenty-eight of; msgcore_field_get_name is c_name's (Msgcore_c.cpp:510)
+#  and would be taken from it the same way. Three false bindings to save nine lines
+#  is the wrong trade, and the nine lines can say which function they mean.
+cxx-to-c  MsgStck::r_item    # bound as msgcore_stck_get_item (Msgcore_c.cpp:2142); r_ is the surface's get_
+cxx-to-c  MsgStck::r_list    # bound as msgcore_stck_get_list (Msgcore_c.cpp:2150)
+cxx-to-c  MsgStck::r_vect    # bound as msgcore_stck_get_vect (Msgcore_c.cpp:2158)
+cxx-to-c  MsgStck::r_name    # bound as msgcore_stck_get_name, which returns r_name().c_name() (Msgcore_c.cpp:2120)
+cxx-to-c  P2PmsgRecurs::r_item    # bound as msgcore_recurs_get_item (Msgcore_c.cpp:2263)
+cxx-to-c  P2PmsgRecurs::r_list    # bound as msgcore_recurs_get_list (Msgcore_c.cpp:2273)
+cxx-to-c  P2PmsgRecurs::r_vect    # bound as msgcore_recurs_get_vect (Msgcore_c.cpp:2283)
+cxx-to-c  P2PmsgRecurs::c_wstr    # bound as msgcore_recurs_get_name (Msgcore_c.cpp:2252)
+cxx-to-c  P3PmsgCurs::c_wstr    # bound as msgcore_curs_get_name (Msgcore_c.cpp:1152)
+cxx-to-c  P3PmsgVect::r_item    # bound as msgcore_vect_get_item (Msgcore_c.cpp:806)
+cxx-to-c  P3PmsgVect::r_list    # bound as msgcore_vect_get_list (Msgcore_c.cpp:1986)
+cxx-to-c  P3PmsgVect::r_vect    # bound as msgcore_vect_get_vect (Msgcore_c.cpp:1996)
+cxx-to-c  P3PmsgVect::r_name    # bound as msgcore_vect_get_name (Msgcore_c.cpp:1932)
+cxx-to-c  P3PmsgVect::r_data    # bound as the typed element getters: msgcore_vect_get_int is r_data(nElem).c_int() (Msgcore_c.cpp:783)
+#
+#  10. THE OTHER r_ MEMBERS HAND OUT A C++ SUB-OBJECT, WHICH IS THE ONE THING A
+#  HANDLE CANNOT BE. Three distinct cases, none of them "internal".
+#
+#  First, the inheritance seam. P3PmsgField::r_data is `return (P3PmsgData&)*this`
+#  (P2Pmsg.cpp:3936-3940): the field IS its data and its name by derivation, and
+#  r_data / r_name expose the base sub-objects. The flat surface reads through the
+#  field handle itself, with no intermediate object -- msgcore_field_get_int is
+#  c_int() (Msgcore_c.cpp:538) and msgcore_field_get_name is c_name() (:510) -- and
+#  P3PmsgData, P3PmsgName, P3PmsgItem and P3PmsgObject are the four classes
+#  api-drift.config.psd1 keeps out of TypeMap on purpose.
+#
+#  Second, the collection's OWN cursor. r_Curs returns the P3PmsgCurs a collection
+#  caches and reuses (m_pCurs, allocated on first use at MsgAttr.cpp:216-217), which
+#  is the object section 31 is about. The flat surface never lends it: every
+#  msgcore_curs_from_attr / _from_desc / _from_field mints a fresh cursor the caller
+#  owns and destroys, precisely so that one caller's walk cannot move another's
+#  position. Handing out the cached one would make two flat callers share a cursor
+#  through handles neither of them can see the other holding.
+#
+#  Third, the two-call shape. P3PmsgCurs::r_attr is m_pP3PmsgFoN->r_Attr()
+#  (MsgCurs.cpp:615-621) -- the attributes of the element under the cursor -- and
+#  the flat route is msgcore_curs_get_field then msgcore_attr_from_field. Same for
+#  r_desc, r_list, r_vect and r_item, and for P3PmsgField::r_Stck, which is
+#  msgcore_stck_from_field. That is not a workaround; it is the same "obtain, use,
+#  discard" the handle group states as its rule.
+cxx-to-c  P3PmsgField::r_data    # returns (P3PmsgData&)*this (P2Pmsg.cpp:3939); the surface reads through the handle, msgcore_field_get_int is c_int()
+cxx-to-c  P3PmsgField::r_name    # the P3PmsgName base sub-object; msgcore_field_get_name is c_name() (Msgcore_c.cpp:510)
+cxx-to-c  P3PmsgField::r_Object    # returns P3PmsgObject&, a class the config keeps off the surface by design
+cxx-to-c  P3PmsgAttr::r_Object    # as P3PmsgField::r_Object
+cxx-to-c  P3PmsgDesc::r_Object    # as P3PmsgField::r_Object
+cxx-to-c  P3PmsgCurs::r_Object    # as P3PmsgField::r_Object
+cxx-to-c  MsgStck::r_data    # returns P3PmsgData&; the flat read is msgcore_stck_get_item then a typed field getter
+cxx-to-c  P2PmsgRecurs::r_data    # as MsgStck::r_data, through msgcore_recurs_get_item
+cxx-to-c  P2PmsgRecurs::r_name    # returns P3PmsgName&; the text is msgcore_recurs_get_name, which is c_wstr's binding
+cxx-to-c  P3PmsgCurs::r_data    # as MsgStck::r_data, through msgcore_curs_get_field
+cxx-to-c  P3PmsgCurs::r_name    # as P2PmsgRecurs::r_name; msgcore_curs_get_name is c_wstr's
+cxx-to-c  P3PmsgCurs::r_item    # returns P3PmsgItem&; msgcore_curs_get_field hands back an owned handle instead
+cxx-to-c  P3PmsgCurs::r_list    # msgcore_curs_is_list + _get_field + msgcore_list_from_field
+cxx-to-c  P3PmsgCurs::r_vect    # as P3PmsgCurs::r_list, for a vect
+cxx-to-c  P3PmsgCurs::r_attr    # the element's attributes (MsgCurs.cpp:621); flat, that is _get_field then msgcore_attr_from_field
+cxx-to-c  P3PmsgCurs::r_desc    # as P3PmsgCurs::r_attr, with msgcore_desc_from_field
+cxx-to-c  P2PmsgRecurs::r_attr    # as P3PmsgCurs::r_attr; it delegates to the walker's own cursor (MsgCurs.cpp:864-868)
+cxx-to-c  P3PmsgField::r_Attr    # carried as msgcore_attr_from_field(hField, bCreate); AttrCMD_Create IS that flag
+cxx-to-c  P3PmsgField::r_Desc    # carried as msgcore_desc_from_field; the wrapper calls r_Desc(AttrCMD_Create) to serve it (Msgcore_c.cpp:1576)
+cxx-to-c  P3PmsgField::r_Stck    # carried as msgcore_stck_from_field, which mints an owned stack rather than lending the field's cached one
+cxx-to-c  P3PmsgAttr::r_Curs    # lends the collection's cached cursor (MsgAttr.cpp:216); msgcore_curs_from_attr mints a caller-owned one instead
+cxx-to-c  P3PmsgDesc::r_Curs    # as P3PmsgAttr::r_Curs, with msgcore_curs_from_desc
+#
+#  11. A FLAT HANDLE HAS NO DISCONNECTED STATE TO MOVE TO -- EXCEPT ON THE ONE
+#  FAMILY WHERE IT DOES, WHICH IS HOW THIS ARGUMENT CHECKS ITSELF. Connect and
+#  Nullify are the C++ wrapper's two-state life: Nullify drops the parent pointer
+#  and deletes the cached cursor (MsgAttr.cpp:109-116), Connect is Nullify followed
+#  by re-pointing (:117-121). On the flat side a collection handle comes into
+#  existence connected -- msgcore_attr_from_field is the only way to get one, and
+#  Msgcore_c.h:378 describes it in exactly these words, "Connect to the attribute
+#  collection of hField (Create=true allocates if absent)" -- and leaves existence
+#  through _destroy. There is no third state for a connect call to reach.
+#
+#  MsgStck is the exception and it proves the rule rather than breaking it:
+#  msgcore_stck_create makes an UNCONNECTED stack, so the family needs both
+#  msgcore_stck_connect and msgcore_stck_nullify, and MsgStck::Connect and ::Nullify
+#  bind exactly and appear nowhere in this file. P2PmsgMgr::Nullify is the same and
+#  binds msgcore_mgr_nullify.
+#
+#  P3PmsgField, P3PmsgList and P3PmsgVect refuse for a second reason on top of the
+#  first: their Connect takes (P2PmsgHANDLE, VBLaddr, VBLsize), which is the heap
+#  handle and the raw arena offset this file has already refused twice.
+cxx-to-c  P3PmsgField::Connect    # takes P2PmsgHANDLE + VBLaddr + VBLsize; and a flat handle is minted connected by msgcore_field_child / _p2pos2field
+cxx-to-c  P3PmsgList::Connect    # as P3PmsgField::Connect; msgcore_list_from_field mints a connected handle
+cxx-to-c  P3PmsgVect::Connect    # as P3PmsgField::Connect; msgcore_vect_from_field
+cxx-to-c  P3PmsgAttr::Connect    # msgcore_attr_from_field IS the connect (Msgcore_c.h:378); there is no unconnected flat attr handle to re-point
+cxx-to-c  P3PmsgDesc::Connect    # as P3PmsgAttr::Connect, with msgcore_desc_from_field
+cxx-to-c  P3PmsgField::Nullify    # the wrapper's disconnected state, which a flat handle never has; _destroy is the only exit
+cxx-to-c  P3PmsgAttr::Nullify    # as P3PmsgField::Nullify; compare msgcore_stck_nullify, which exists because msgcore_stck_create makes one unconnected
+cxx-to-c  P3PmsgDesc::Nullify    # as P3PmsgAttr::Nullify
+#
+#  12. Create IS AN ARGUMENT, NOT A FUNCTION. P3PmsgAttr::Create allocates the
+#  attribute VBLock in the owning field when there is not one yet (MsgAttr.cpp:236-248).
+#  The flat surface carries it as the second parameter of the call that would have
+#  needed it: msgcore_attr_from_field(hField, bCreate) calls pAttr->Create() when
+#  bCreate is set (Msgcore_c.cpp:825-830), and msgcore_desc_from_field does the same
+#  at :930-935. Exporting a separate msgcore_attr_create would give a caller a way to
+#  allocate -- a rule 2 mutation, invalidating its own live handles -- as a call that
+#  reads like a constructor and is not one.
+cxx-to-c  P3PmsgAttr::Create    # carried as the bCreate argument of msgcore_attr_from_field (Msgcore_c.cpp:830)
+cxx-to-c  P3PmsgDesc::Create    # carried as the bCreate argument of msgcore_desc_from_field (Msgcore_c.cpp:935)
+#
+#  13. THE MANAGER'S ADDRESSING CALLS, AFTER TWO OF THEM TURNED OUT TO BE BOUND.
+#  P2Pos2Field and P2Pos2Path were in the backlog until the snake-caser was fixed;
+#  they are msgcore_mgr_p2pos2field and msgcore_mgr_p2pos2path and they always were.
+#  The three that remain are the three whose RETURN TYPE the surface does not have.
+#  P2Pos2Attr returns a P3PmsgAttr, which flat is two calls -- p2pos2field, then
+#  msgcore_attr_from_field -- the shape the IsField block above already argued.
+#  P2Pos2Object and Path2Object return P3PmsgObject, one of the four classes the
+#  config keeps off TypeMap by design, and Path2Object additionally resolves the
+#  path grammar, which is the RootPath2Object argument two blocks up: the flat
+#  surface descends a named step at a time and spells neither '@' nor '^'.
+cxx-to-c  P2PmsgMgr::P2Pos2Attr    # returns P3PmsgAttr; flat that is msgcore_mgr_p2pos2field then msgcore_attr_from_field
+cxx-to-c  P2PmsgMgr::P2Pos2Object    # returns P3PmsgObject, a class the config keeps off the surface by design
+cxx-to-c  P2PmsgMgr::Path2Object    # as RootPath2Object: it resolves the path grammar, and returns P3PmsgObject as well
+#
+#  14. THE TRIGGER FAMILY WAS DELIBERATELY RE-KEYED FOR THE FLAT SURFACE, AND THE C
+#  HEADER SAYS SO. Msgcore_c.h:660-663 opens the group with "The legacy trigger
+#  facility posts a Windows message to an HWND when an armed node changes. These
+#  wrappers add the windowless path a FUSE/daemon host needs": one function-pointer
+#  sink per manager, nodes armed by P2Pos. So msgcore_mgr_create_trigger and
+#  _drop_triggers take (mask, p2pos) where the C++ takes (mask, HWND, p2pos), and
+#  they bind CreateTrigger and DropTriggers exactly.
+#
+#  The four here are what is left over from that re-keying. SelectTrigger asks which
+#  mask is registered for a node AND A WINDOW; with no HWND in the flat vocabulary
+#  there is nothing for the second argument to be. TriggerINSERT, TriggerUPDATE and
+#  TriggerDELETE fire a specific type for an object the caller is holding, and the
+#  surface spells all three as ONE function with the type as a mask --
+#  msgcore_mgr_fire_trigger(hMgr, MSGCORE_TRIGGER_INSERT, p2pos) -- which exists
+#  precisely because the C++ form needs a P3PmsgItem in hand that a FUSE writer does
+#  not have (Msgcore_c.h:684-694). The capability is carried three times over; the
+#  three names are not, and cannot be without putting the C++ overload set back.
+cxx-to-c  P2PmsgMgr::SelectTrigger    # keyed on an HWND, which the flat trigger group deliberately dropped (Msgcore_c.h:660-663)
+cxx-to-c  P2PmsgMgr::TriggerINSERT    # carried as msgcore_mgr_fire_trigger with MSGCORE_TRIGGER_INSERT; the flat form is keyed on a P2Pos, not a P3PmsgItem
+cxx-to-c  P2PmsgMgr::TriggerUPDATE    # as TriggerINSERT, with MSGCORE_TRIGGER_UPDATE
+cxx-to-c  P2PmsgMgr::TriggerDELETE    # as TriggerINSERT, with MSGCORE_TRIGGER_DELETE
+#
+#  15. THE MANAGER'S THREE CONSTRUCTION HELPERS, ONE OF WHICH DOES NOTHING AT ALL.
+#  Attacheap allocates the root item's chunk straight from the P2PmsgHeap before the
+#  heap is attached to the manager -- its own comment says exactly that
+#  (P2PmsgMgr.cpp:123-134) -- and its only callers anywhere are P2PmsgMgr's four
+#  constructors (P2PmsgMgr.cpp:39, 48, 57, 67). So the flat surface reaches it on
+#  every msgcore_mgr_create, exactly as section 34 found msgcore_stck_pop reaching
+#  Drop from the inside, and it takes a P3PmsgData& besides.
+#
+#  Factory is the static twin of the filename constructor and returns an owning
+#  P2PmsgMgr*. msgcore_mgr_open_file IS that call (new P2PmsgMgr(lpszFilename),
+#  Msgcore_c.cpp:250-255); a second export would be the same capability under a
+#  second name, and the flat surface has one way to make each thing on purpose.
+#
+#  SharedMode is the interesting one and it is not a decision about the C API at
+#  all. Its body compares its argument to m_dwSharedMode and returns the argument,
+#  assigning nothing (P2PmsgMgr.cpp:519-526). Binding it would export a no-op with a
+#  name that promises file sharing. That is a defect in P2PmsgMgr.cpp recorded as
+#  one, the same way section 37 recorded P3PmsgVect::IsName -- and it is why
+#  Factory's dwSharedMode overload cannot be treated as carrying share modes either.
+cxx-to-c  P2PmsgMgr::Attacheap    # the ctor's heap-attach step, reached from the inside by msgcore_mgr_create; takes a P3PmsgData&
+cxx-to-c  P2PmsgMgr::Factory    # msgcore_mgr_open_file is this call (Msgcore_c.cpp:253); a static returning an owning raw pointer adds nothing
+cxx-to-c  P2PmsgMgr::SharedMode    # assigns nothing and returns its argument (P2PmsgMgr.cpp:519-526); a binding would export a no-op
+#
+#  16. RewindCurs DROPS THE SUB-OBJECTS A FIELD CACHES, AND A FLAT CALLER HAS NONE
+#  OF THEM. Its body deletes m_pP3PmsgAttr, m_pP3PmsgDesc and m_pMsgStck
+#  (P2Pmsg.cpp:3723-3734) -- the three companions a P3PmsgField builds on demand and
+#  keeps, which is section 31's subject. On the flat surface those are never the
+#  field's: msgcore_attr_from_field, msgcore_desc_from_field and
+#  msgcore_stck_from_field each hand the caller its own handle, and the caller drops
+#  it with the matching _destroy when it is done. The flat equivalent of RewindCurs
+#  is already written into every caller's control flow by rule 2.
+cxx-to-c  P3PmsgField::RewindCurs    # deletes the field's cached attr/desc/stck companions (P2Pmsg.cpp:3723); flat callers own those handles themselves
+#
+#  17. P3PmsgBSTR IS A FAMILY THE SURFACE NEVER SPELLED. api-drift.config.psd1 maps
+#  the class to msgcore_bstrio_, and Msgcore_c.h contains not one function with that
+#  prefix -- which is why none of these nineteen is even a REFUSAL in the check's
+#  tally: there is nothing under the root for the fallback to throw out.
+#
+#  The class is the exchange-format wrapper. A P3PmsgBSTR holds a VBListIOmage,
+#  typedef'd P2Piomage (P2PmsgBSTR.h:58-69), which is a #pragma pack(push) struct
+#  with a sync word carrying total size, addressing bits and a layout generation in
+#  named bit ranges -- the wire and on-disk form of a P2Pmsg, and the thing sections
+#  32 and 36 read with a scanner. Every constructor takes VBListIOmage, P2PmsgHANDLE
+#  or P3PmsgData&; PrepareP2Piomage / P2Piomage / P2PiomageSize / ReleaseP2Piomage
+#  hand out and reclaim that struct; VBLockBSTR_vp hands out a void* into it. To
+#  export any of it is to publish the packed layout as a supported ABI, which is the
+#  commitment the block-geometry block above declines for the arena's blocks, and
+#  this is the same arena's transport form.
+#
+#  What the flat surface carries instead is the FILE path: msgcore_mgr_save,
+#  msgcore_mgr_load and msgcore_mgr_open_file move a whole store to and from a named
+#  file, with the format's version discipline kept on this side of the boundary.
+#  THE GAP THAT LEAVES IS REAL AND IS NAMED HERE RATHER THAN GLOSSED: there is no
+#  way for a C caller to serialise a store to a BUFFER it owns -- no
+#  msgcore_mgr_save_to_buffer, no msgcore_mgr_load_from_buffer -- so a host that
+#  wants to put a message on a socket must go through a temporary file. A pair of
+#  buffer calls taking (void*, size_t) would need no P2Piomage in its signature and
+#  would publish no layout. Like msgcore_field_is_sole above, that is an ADDITION to
+#  the supported surface and a version bump, and belongs to whoever owns the
+#  release; it is written down here so the next reader does not have to rediscover
+#  it. Not carried today.
+#
+#  Three of these are declared and never defined -- IsFragmented, SetDefaultSizeof
+#  and VBLockBSTR_vp have no body in any .cpp in the repository, and P2PmsgBSTR.cpp:450-456
+#  says so about IsFragmented in its own words. They are P3PmsgVect::IsName's case
+#  from section 37, three more times: a binding would not link.
+cxx-to-c  P3PmsgBSTR::Init    # takes P2PmsgHANDLE or P3PmsgData&; the surface spells no msgcore_bstrio_ function of any kind
+cxx-to-c  P3PmsgBSTR::InitData    # as Init, with a P3PmsgData&
+cxx-to-c  P3PmsgBSTR::InitItem    # as Init, with a VBLockBSTR type code and a P3PmsgData&
+cxx-to-c  P3PmsgBSTR::PrepareP2Piomage    # hands out the packed VBListIOmage; exporting it publishes the wire layout as ABI
+cxx-to-c  P3PmsgBSTR::P2Piomage    # as PrepareP2Piomage; the flat serialisation is file-based (msgcore_mgr_save / _load)
+cxx-to-c  P3PmsgBSTR::P2PiomageSize    # as P2Piomage; the size of a struct the ABI does not publish
+cxx-to-c  P3PmsgBSTR::ReleaseP2Piomage    # as P2Piomage, releasing
+cxx-to-c  P3PmsgBSTR::Exists    # keyed on a VBLockBSTR_* section code (P2PmsgBSTR.h:36-44), a vocabulary the C header does not publish
+cxx-to-c  P3PmsgBSTR::r_item    # keyed on the same section code, and returns P3PmsgItem&
+cxx-to-c  P3PmsgBSTR::r_datn    # SelectItem(TBSTR_Msg) on the image (P2PmsgBSTR.cpp:430-433); same vocabulary
+cxx-to-c  P3PmsgBSTR::r_name    # returns P3PmsgName&, a class with no family in the config by design
+cxx-to-c  P3PmsgBSTR::r_data    # returns P3PmsgData&, likewise
+cxx-to-c  P3PmsgBSTR::GetP2Pmsgnn    # the image's addressing-width code; the store's counterpart is msgcore_mgr_create_nn's uAddrNN, and there is no flat image
+cxx-to-c  P3PmsgBSTR::SetDefaultP2Pmsgnn    # a static default for the above; process-wide state the flat ABI has no call shape for
+cxx-to-c  P3PmsgBSTR::GetDefaultP2Pmsgnn    # as SetDefaultP2Pmsgnn, reading
+cxx-to-c  P3PmsgBSTR::IsDirty    # asks P2PmsgHeap_IsDirty of the image's heap handle (P2PmsgBSTR.cpp:457-463); msgcore_mgr_is_dirty is the store's version
+cxx-to-c  P3PmsgBSTR::IsFragmented    # declared at P2PmsgBSTR.h:208 and defined nowhere (see P2PmsgBSTR.cpp:450-456); a binding would not link
+cxx-to-c  P3PmsgBSTR::SetDefaultSizeof    # declared at P2PmsgBSTR.h:206 and defined nowhere; as IsFragmented
+cxx-to-c  P3PmsgBSTR::VBLockBSTR_vp    # declared at P2PmsgBSTR.h:202 and defined nowhere; and it returns a void* into the packed image

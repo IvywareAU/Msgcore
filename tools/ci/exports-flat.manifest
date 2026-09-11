@@ -125,6 +125,7 @@ msgcore_field_is_desc
 msgcore_field_is_descendant
 msgcore_field_is_list
 msgcore_field_is_null
+msgcore_field_is_sole
 msgcore_field_is_stacked
 msgcore_field_is_vect
 msgcore_field_is_void

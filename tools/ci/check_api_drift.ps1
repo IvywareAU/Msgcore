@@ -74,6 +74,16 @@
     116 to 81. The split is still printed on every run, because a fallback match
     is still weaker evidence than an exact one even when it is right.
 
+    THE EXACT TEST HAS ITS OWN FAILURE MODE, and it is quieter than the
+    fallback's, because a name that does not match reads exactly like a member
+    nobody bound. ConvertTo-Snake below used to break a word at a digit, which
+    spelled GetP2Pos as get_p2_pos against a surface that spells get_p2pos, and
+    cost three real bindings -- two of them banked in the backlog as though
+    nobody had ever looked. The rule is written out where it is fixed. What it
+    is worth recording here is the shape: a matcher's false NEGATIVES inflate
+    the backlog and look like honest work outstanding, which is the more
+    flattering of the two errors and therefore the one to go looking for.
+
     WHAT IT CANNOT DO. It compares NAMES. It cannot see that a binding's
     behaviour drifted -- msgcore_mgr_load answering differently after 0278981 is
     invisible here, because the signature never moved. Only a test catches that,
@@ -259,8 +269,25 @@ function Get-IdlInterfaces([string[]]$files) {
 
 # ---------------------------------------------------------------- naming ----
 
+# A C++ member name in the surface's spelling. The word boundary is a CASE
+# change and only a case change. A DIGIT BELONGS TO THE WORD IT SITS IN: the
+# first rule used to be (?<=[a-z0-9])(?=[A-Z]) and ended a word at a digit, so
+# GetP2Pos came out get_p2_pos where Msgcore_c.h spells get_p2pos, and
+# P2Pos2Field came out p2_pos2_field where the surface spells p2pos2field.
+#
+# Narrowing the class to [a-z] costs nothing, because a digit followed by a
+# capital inside one of these names is never a word break -- P2Pos, P2Pmsgnn,
+# P3PmsgBSTR, VBLockBSTR are each one word with a generation number in the
+# middle of it, which is the naming convention of the whole library. A digit at
+# the END of a word (Int64, TBSTR_Msg) was never touched by either rule and is
+# not touched now. Measured over all 288 scanned members: 44 change spelling,
+# three of them gain an EXACT binding -- P3PmsgField::GetP2Pos,
+# P2PmsgMgr::P2Pos2Field and P2PmsgMgr::P2Pos2Path -- and not one loses a
+# binding it had. Two of those three were sitting in the UNTRIAGED backlog and
+# the third had an allowlist line that this file's own header would have called
+# a tooling limit; all three are gone from api-drift.allow now.
 function ConvertTo-Snake([string]$n) {
-    $s = [regex]::Replace($n, '(?<=[a-z0-9])(?=[A-Z])', '_')
+    $s = [regex]::Replace($n, '(?<=[a-z])(?=[A-Z])', '_')
     $s = [regex]::Replace($s, '(?<=[A-Z])(?=[A-Z][a-z])', '_')
     return $s.ToLowerInvariant()
 }
@@ -521,9 +548,17 @@ if ($Seed -and $unbound.Count -gt 0) {
 
 Write-Host ("Scanned {0} public members over {1} pair(s); {2} bound, {3} allowlisted." -f
             $scanned, @($cfg.Pairs).Count, $boundCnt, $allowed.Count)
+# Printed on EVERY run, INCLUDING when it is zero. The count sat at 159 for eleven
+# sections of the register and only ever moved because it was in front of somebody;
+# a line that disappears when the backlog empties is a line that cannot show the
+# backlog coming back, and -Seed can put a hundred and fifty of them in the file
+# with one switch. Zero is the hard-won figure here, not the absence of a figure.
 if ($untriaged -gt 0) {
     Write-Host ("  {0} of the allowlist entries are UNTRIAGED -- banked, not decided." -f $untriaged)
     if ($env:GITHUB_ACTIONS) { Write-Host "::notice file=$allowFile::$untriaged UNTRIAGED api-drift entries" }
+}
+else {
+    Write-Host '  0 UNTRIAGED -- every allowlist entry carries a reason.'
 }
 # A number nobody prints is a number nobody reads, which is why UNTRIAGED is printed
 # above. BOUND had the same problem: a match through the prefix fallback is weaker

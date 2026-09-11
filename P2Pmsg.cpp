@@ -2920,7 +2920,23 @@ P3PmsgObject::RehomeInlineItem ( )
     m_aVBLock     = aVBLock;
     m_xVBLock     = 0;                   // Life cycle managed by the heap now
     m_nVBLockSize = nVBLockSize;
-    ASSERT(P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock));
+    //  ITEM 19, and the one of the eight that needed an argument before it
+    //  could be made. This was ASSERT(P2PmsgHeap_AssertValidAlloc(...)), and it
+    //  was left in when the other seven were decided because AssertValidAlloc
+    //  is not a predicate: its SYS arm sets VBLock_Linked on the block it is
+    //  judging. Under an ASSERT that is not a lost CHECK, it is a lost WRITE --
+    //  Debug leaves the bit set and Release does not, on a block VBLock_Init
+    //  stamps without it -- so promoting the call as it stood would have
+    //  started running a repair in Release rather than merely started checking
+    //  in Release. P2PmsgHeap_IsValidAlloc is the same question with no write
+    //  on any path (MsgVBHeap.h), which is what makes the refusal below safe to
+    //  run in both builds and what makes both builds leave the same bytes here.
+    if ( !P2PmsgHeap_IsValidAlloc ( m_hVBList, m_aVBLock ) )
+      EVERR->MODULE
+           ->AFP(m_aVBLock)
+           ->Message(L"Rehomed block at 0x%I64x is not a valid heap allocation"
+                    , (UINT64)m_aVBLock )
+           ->Throw();
     return aVBLock;
 }
 //
@@ -2955,7 +2971,19 @@ P2PmsgObject_CopyHeapVBLock ( P2PmsgHANDLE hVBList, VBLaddr aVBLock )
                                                 , nVBLockSize - nSizeofHdr );
     memcpy ( P2PmsgHeap_Addr2Phys ( hVBList, aCopy )
            , P2PmsgHeap_Addr2Phys ( hVBList, aVBLock ), nVBLockSize );
-    ASSERT(P2PmsgHeap_AssertValidAlloc(hVBList,aCopy));
+    //  The twin of the promotion in RehomeInlineItem above, and the sharper of
+    //  the two: hVBList here may be a heap opened from an IMAGE, so the block
+    //  this copy was sized from is attacker-shaped. The BSTRio arm's repair is
+    //  already refused inside P2PmsgHeap_UntrustedGate, but nothing guarantees
+    //  a gate is open at this point, and a validator that writes to the bytes
+    //  it was asked to judge is not the thing to build a refusal on. The pure
+    //  form writes nothing on either arm.
+    if ( !P2PmsgHeap_IsValidAlloc ( hVBList, aCopy ) )
+      EVERR->MODULE
+           ->AFP(aCopy)
+           ->Message(L"Duplicated block at 0x%I64x is not a valid heap allocation"
+                    , (UINT64)aCopy )
+           ->Throw();
     return aCopy;
 }
 //
