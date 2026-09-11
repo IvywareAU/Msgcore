@@ -2916,6 +2916,200 @@ static void Test_ConstFieldName()
 }
 
 // ---------------------------------------------------------------------------
+// A field can say whether a write through it reaches anyone else
+// ---------------------------------------------------------------------------
+
+//  A floating item whose payload will not fit the inline block.  128 wide
+//  characters is enough: AllocVBLock gives it a private SYS heap for the data
+//  and leaves the item block inline, so the object carries a heap AND
+//  addresses itself.  That is the state §22 is about.
+//  Filled IN PLACE: returning one by value would copy it, and a copy of a
+//  field is a fresh inline item with no heap -- which is the opposite of what
+//  these cases need.
+static void GrowFloater ( P3PmsgField& oField, int nValue )
+{
+    CString sBig ( L'x', 1024 );
+    oField.r_data() = P3PmsgData((LPCWSTR)(LPCTSTR)sBig);
+    oField.r_data() = P3PmsgData((int)nValue);
+}
+
+//  Built here, handed back as the documented handle, read by the caller after
+//  this frame is gone.
+static P3PmsgObject HandleFromDeadFrame ( )
+{
+    CString sBig ( L'x', 1024 );
+    P3PmsgField oField ( L"DEAD", P3PmsgData((LPCWSTR)(LPCTSTR)sBig) );
+    oField.r_data() = P3PmsgData((int)4242);
+    return oField.r_Object();
+}
+
+//  Overwrite whatever the frame above left behind.
+static void ClobberFrame ( int nDepth )
+{
+    volatile TCHAR sz[512];
+    for ( int i = 0; i < 512; i++ ) sz[i] = (TCHAR)0xCDCD;
+    if ( nDepth > 0 ) ClobberFrame ( nDepth - 1 );
+}
+
+static void Test_HandleOrCopy()
+{
+    //  THE DEFECT.  RehomeInlineItem declined on "there is already a heap",
+    //  which is not the question -- the question is whether the BLOCK is
+    //  inline.  On a grown floater the two disagreed, so nothing was rehomed
+    //  and the copy took m_aVBLock verbatim: the source object's own address.
+    TF_CASE("a handle on a grown floater names the item, not the source")
+    {
+        P3PmsgField  oSrc(L"AAA");
+        GrowFloater(oSrc, 7);
+        P3PmsgObject oHeld = oSrc.r_Object();
+
+        //  The one that used to fail: the copy addressed oSrc's inline array.
+        TF_CHECK(oHeld.m_aVBLock != (VBLaddr)&oSrc.r_Object().m_oVBLock[0]);
+        TF_CHECK(oHeld.m_aVBLock != 0);
+        TF_CHECK(oHeld.m_hVBList == oSrc.r_Object().m_hVBList);
+
+        //  And it is the item, so a write through it is seen by the source.
+        P3PmsgField oHnd(oHeld);
+        oHnd.r_data().c_int(77);
+        TF_CHECK_EQ(oSrc.r_data().c_int(), 77);
+        TF_CHECK(oHnd == oSrc);
+    }
+
+    //  The same block through assignment, which is Nullify + Connect and
+    //  carried the identical guard.
+    TF_CASE("assignment of a grown floater names the item too")
+    {
+        P3PmsgField  oSrc(L"BBB");
+        GrowFloater(oSrc, 8);
+        P3PmsgObject oHeld;
+        oHeld = oSrc.r_Object();
+
+        TF_CHECK(oHeld.m_aVBLock != (VBLaddr)&oSrc.r_Object().m_oVBLock[0]);
+        TF_CHECK(oHeld.m_hVBList == oSrc.r_Object().m_hVBList);
+
+        P3PmsgField oHnd(oHeld);
+        oHnd.r_data().c_int(88);
+        TF_CHECK_EQ(oSrc.r_data().c_int(), 88);
+    }
+
+    //  What that cost.  The handle outlives the frame it was built in, which
+    //  is what a factory function IS, and used to read whatever had since been
+    //  written over that stack -- when it did not fault outright.
+    TF_CASE("a handle outlives the frame that built it")
+    {
+        P3PmsgObject oHeld = HandleFromDeadFrame();
+        ClobberFrame(40);
+
+        P3PmsgField oField(oHeld);
+        TF_CHECK(oField.r_name().c_wcsicmp(L"DEAD") == 0);
+        TF_CHECK_EQ(oField.r_data().c_int(), 4242);
+    }
+
+    //  THE QUESTION §22 SAID COULD NOT BE ASKED.  A callee holding only a
+    //  reference can tell the item it was handed from a duplicate of one.
+    TF_CASE("a field says whether its item is inside it")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        P3PmsgField oHnd  = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        P3PmsgField oCopy = mgr.r_Desc().SelectItem(L"AAA");
+
+        TF_CHECK(!oHnd.IsInline());        // a name for the tree's item
+        TF_CHECK(oCopy.IsInline());        // an item of its own
+
+        //  and the answer is what a write does.
+        oHnd.r_data().c_int(111);
+        TF_CHECK_EQ(mgr.r_Desc().SelectItem(L"AAA").r_data().c_int(), 111);
+        oCopy.r_data().c_int(222);
+        TF_CHECK_EQ(mgr.r_Desc().SelectItem(L"AAA").r_data().c_int(), 111);
+        TF_CHECK(!(oCopy == oHnd));        // §21 says whose it is
+    }
+
+    //  §19's rule, kept: an item's identity changes when it GROWS out of the
+    //  object, never when somebody asks after it.  AllocVBLock moves the block
+    //  at the instant it makes the heap, which is the last instant nothing can
+    //  be pointing at it.
+    TF_CASE("growing an item moves it; asking after it does not")
+    {
+        P3PmsgField oF(L"CCC", P3PmsgData((int)1));
+        TF_CHECK(oF.IsInline());
+        const P2Pos posInline = oF.GetP2Pos();
+
+        GrowFloater(oF, 7);
+        TF_CHECK(!oF.IsInline());          // it has a heap, and it is on it
+        TF_CHECK(oF.GetP2PmsgHandle() != 0);
+        const P2Pos pos = oF.GetP2Pos();
+        TF_CHECK(!(pos == posInline));     // growing moved it
+
+        P3PmsgObject oSelf = oF.r_Object();
+        TF_CHECK(oF.GetP2Pos() == pos);    // asking did not
+        TF_CHECK(oSelf.GetP2Pos() == pos);
+        TF_CHECK_EQ(oF.r_data().c_int(), 7);
+    }
+
+    //  A void field denotes no item, so the item is not inside it either.
+    TF_CASE("void is not an item anywhere")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        P3PmsgObject oRoot = mgr.r_Object();
+        P3PmsgField  oVoid(P3Pmsg_SelectObject(&oRoot, L"NoSuchItem"));
+
+        TF_CHECK(oVoid.IsVoid());
+        TF_CHECK(!oVoid.IsInline());
+    }
+
+    //  Sharing a small floater is what moves it out of the object, and both
+    //  ends say so from then on.
+    TF_CASE("sharing an item is what makes it shared")
+    {
+        P3PmsgField oFloat(L"EEE", P3PmsgData((int)5));
+        TF_CHECK(oFloat.IsInline());
+
+        P3PmsgField oShare = oFloat.r_Object();
+        TF_CHECK(!oFloat.IsInline());
+        TF_CHECK(!oShare.IsInline());
+        TF_CHECK(oShare == oFloat);
+
+        oShare.r_data().c_int(55);
+        TF_CHECK_EQ(oFloat.r_data().c_int(), 55);
+
+        //  A value copy of it is an item of its own, and taking one changes
+        //  neither of them.
+        P3PmsgField oVal = oFloat;
+        TF_CHECK(oVal.IsInline());
+        TF_CHECK(!oFloat.IsInline());
+        oVal.r_data().c_int(99);
+        TF_CHECK_EQ(oFloat.r_data().c_int(), 55);
+    }
+
+    //  P3PmsgList and P3PmsgVect derive from P3PmsgField, so they inherit it,
+    //  and a message root is reached the same way an item is.
+    TF_CASE("a collection handed in by reference says the same")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        TF_CHECK(!mgr.IsInline());                      // the message itself
+        TF_CHECK(!mgr.r_Desc().r_Object().IsInline());  // its descendants
+
+        P3PmsgList oList;
+        TF_CHECK(oList.IsInline());
+        oList.AddListTail(P3PmsgData((int)1));          // ... which gives it a heap
+        TF_CHECK(!oList.IsInline());
+
+        P3PmsgList oShare;
+        oShare = oList.r_Object();
+        TF_CHECK(!oShare.IsInline());
+        TF_CHECK_EQ((int)oShare.GetCount(), 1);
+    }
+}
+// ---------------------------------------------------------------------------
 // P3Pmsg_SplitRootPath : a bare '@' is a component wherever it stands
 // ---------------------------------------------------------------------------
 static void Test_BareAttrComponent()
@@ -4534,6 +4728,7 @@ void RunMsgcoreSuite()
     Test_VoidPredicates();
     Test_ItemIdentity();
     Test_ConstFieldName();
+    Test_HandleOrCopy();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();

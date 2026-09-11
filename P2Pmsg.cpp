@@ -2468,7 +2468,14 @@ P3PmsgObject::P3PmsgObject ( const P3PmsgObject& rhs )
     //  Casting away const to do it is what Connect already does, one arm down,
     //  and for the same reason: the two handles can only name one block if the
     //  block moves out of the object that built it.
-    if ( rhs.m_hVBList == 0 && rhs.m_nVBLockSize != 0 )
+    //  ON THE STATE OF THE BLOCK, NOT THE STATE OF THE HEAP. The guard was
+    //  `rhs.m_hVBList == 0`, and an object can hold a heap and still address
+    //  its own inline array -- refer RehomeInlineItem. On that state nothing
+    //  was rehomed, the AddRef arm below ran, and m_aVBLock was copied
+    //  verbatim: a pointer into the SOURCE OBJECT. Where the source was a
+    //  local, the copy outlived it and read a dead stack frame. §22.
+    if ( rhs.m_nVBLockSize != 0 &&
+         rhs.m_aVBLock == (VBLaddr)&rhs.m_oVBLock[0] )
       ((P3PmsgObject&)rhs).RehomeInlineItem ( );
 
     m_uVBLock     = rhs.m_uVBLock;
@@ -2478,14 +2485,19 @@ P3PmsgObject::P3PmsgObject ( const P3PmsgObject& rhs )
     m_hVBList     = rhs.m_hVBList;
     if ( m_hVBList )
       P2PmsgHeap_AddRef ( m_hVBList );
-    else if ( rhs.m_nVBLockSize == 0 )
+
+    if ( rhs.m_nVBLockSize == 0 && rhs.m_hVBList == 0 )
     {
       // Void: no heap and no inline block to copy. Stay void.
       m_aVBLock = 0;
       m_xVBLock = 0;
     }
-    else
+    else if ( rhs.m_aVBLock == (VBLaddr)&rhs.m_oVBLock[0] )
     {
+      // Still inline, so RehomeInlineItem declined it: a VALUE block and not
+      // an item. Copy it, and address OUR copy of it -- never the source's,
+      // which is the whole of the defect above. The heap, if there is one,
+      // holds the payload the block points at and has been AddRef'd already.
       m_aVBLock = (VBLaddr)&m_oVBLock[0];
       m_xVBLock = 0;
       memcpy ( m_oVBLock, (void*)&rhs.m_oVBLock[0], sizeof(m_oVBLock) );
@@ -2552,12 +2564,23 @@ P3PmsgObject::Connect ( const P3PmsgObject& oObject )
     //        instead -- the same thing the copy constructor does with one, so
     //        that `oA = oB` and `P3PmsgObject oA = oB` agree. They are
     //        deliberately kept in step; refer the copy constructor's NOTES.
-    if ( oObject.m_hVBList == 0 )
+    //      : ASKED OF THE BLOCK, NOT OF THE HEAP -- the copy constructor's
+    //        correction, and for the identical reason. `oObject.m_hVBList == 0`
+    //        skipped an object that has a heap and an inline block both, and
+    //        the share below then took the source's own address. §22.
+    if ( oObject.m_nVBLockSize != 0 &&
+         oObject.m_aVBLock == (VBLaddr)&oObject.m_oVBLock[0] )
     {
       P3PmsgObject& oObj = (P3PmsgObject&)oObject;
       if ( oObj.RehomeInlineItem ( ) == 0 )
       {
+        // A value block. AddRef before Nullify: the heap it names may be the
+        // one this object is about to let go of.
+        P2PmsgHANDLE hVBList = oObject.m_hVBList;
+        if ( hVBList )
+          P2PmsgHeap_AddRef ( hVBList );
         Nullify ( );
+        m_hVBList     = hVBList;
         m_uVBLock     = oObject.m_uVBLock;
         m_aVBLock     = (VBLaddr)&m_oVBLock[0];
         m_xVBLock     = 0;
@@ -2738,6 +2761,21 @@ P3PmsgObject::AllocVBLock ( UCHAR uVBLockType, VBLsize nVBLockSize, bool /*bZero
       m_hVBList = P2PmsgHeap_CreateSYS ( m_uVBLock
                                   , g_nVBListCreateHeap_SizeMax );
       m_uVBLock = P2PmsgHeap_Addrnn ( m_hVBList );
+
+      //  AND THE ITEM GOES WITH IT.  This is the last instant at which nothing
+      //  can point at an inline block -- the allocation below is the first
+      //  attribute, descendant, push or payload the object has ever had --
+      //  which is the invariant RehomeInlineItem's NOTES rely on, stated
+      //  there and not acted on here.  Leaving the item behind strands it:
+      //  from the next line on the object has a heap AND addresses itself, a
+      //  state every "is it shared" test in this file used to read as SHARED,
+      //  and a copy then took the address of the SOURCE OBJECT.  §22.
+      //
+      //  This runs BEFORE the allocation below, so the block moves while it is
+      //  still true that nothing points at it, and the item's identity changes
+      //  when it GROWS rather than when somebody asks after it -- which is the
+      //  rule §19 set and this keeps.
+      RehomeInlineItem ( );
     }
     return P2PmsgHeap_Alloc ( m_hVBList, uVBLockType, nVBLockSize );
 }
@@ -2766,8 +2804,16 @@ P3PmsgObject::AllocVBLock ( UCHAR uVBLockType, VBLsize nVBLockSize, bool /*bZero
 //       : NOTHING CAN POINT AT THE BLOCK YET. A collection or a push is
 //         allocated through AllocVBLock, which creates the heap when there is
 //         none -- so an item with no heap has no attributes, no descendants
-//         and no stack, and there are no back-pointers to fix up. The m_hVBList
-//         test at the top is that invariant, not an optimisation.
+//         and no stack, and there are no back-pointers to fix up.
+//       : THAT INVARIANT IS A WINDOW, AND IT CLOSES. It was read here as a
+//         standing property of any object without a heap, guarded by an
+//         m_hVBList test at the top of this function; what it actually is is a
+//         property of the moment BEFORE the heap exists. AllocVBLock is where
+//         the heap is created, so AllocVBLock is where the block has to move,
+//         and it now does. An object that reaches this function with a heap
+//         already has therefore been through it once, and the item it carries
+//         is on that heap -- unless the block is not an item at all, which the
+//         test below is for. §22.
 //       : The block is copied whole. P2PmsgHeap_Alloc adds the header size to
 //         the request and VBLock_Init stamps only uVBLockDefs and the size, so
 //         asking for nVBLockSize less the header yields a block of exactly
@@ -2782,16 +2828,25 @@ P3PmsgObject::AllocVBLock ( UCHAR uVBLockType, VBLsize nVBLockSize, bool /*bZero
 VBLaddr
 P3PmsgObject::RehomeInlineItem ( )
 {
-    if ( m_hVBList )
-      return 0;                          // Already on a heap
+    //  WHERE IS THE BLOCK -- not, is there a heap. It used to decline on
+    //  `m_hVBList != 0` and call that "already on a heap", which is a
+    //  different question and gives the wrong answer on the one state where
+    //  the two disagree: an object that has a heap AND still addresses its own
+    //  inline array. A floating item gets there by growing -- AllocVBLock
+    //  creates a SYS heap for a payload the inline block cannot hold, and
+    //  leaves the item block where it is -- and 128 wide characters of data is
+    //  enough to do it. Refer stack_paths.md §22 for the measurement.
+    //       : The test that matters was already on the next line, so the guard
+    //         below is not merely wrong, it is redundant when it is right.
     if ( m_nVBLockSize == 0                       ||
          m_aVBLock != (VBLaddr)&m_oVBLock[0]         )
-      return 0;                          // Not the inline block
+      return 0;                          // The block is not the inline one
     if ( !VBLock_IsItem ( (VBLock *)&m_oVBLock[0] ) )
       return 0;                          // A value, not an object
 
     const VBLsize nVBLockSize = m_nVBLockSize;
-    m_hVBList = P2PmsgHeap_CreateSYS ( m_uVBLock, g_nVBListCreateHeap_SizeMax );
+    if ( m_hVBList == 0 )
+      m_hVBList = P2PmsgHeap_CreateSYS ( m_uVBLock, g_nVBListCreateHeap_SizeMax );
     m_uVBLock = P2PmsgHeap_Addrnn ( m_hVBList );
 
     const VBLsize nSizeofHdr = P2PmsgHeap_Sizeof_Hdr ( m_hVBList );
@@ -3018,6 +3073,38 @@ P3PmsgObject::IsVoid ( ) const noexcept
 {
     // Added "m_oVBLock==0" [20250218] LJM
     return (m_hVBList==0 && m_aVBLock==0)? true : false;
+}
+
+//
+//  Is the item I denote stored INSIDE me?
+//  NOTES: §22 recorded that a field cannot say whether it is a copy or a
+//         handle. This is the half of that question which has an answer, and
+//         it is the half that bites. TRUE means this object IS the storage:
+//         m_oVBLock holds the block, nothing else in the process can be
+//         looking at it, and a write through this object reaches nobody --
+//         which is exactly the state a caller who meant to write THROUGH has
+//         got wrong. FALSE means the block is on a heap and this object is one
+//         NAME for it, so a copy of this object is a second name for the same
+//         item and sees that write.
+//       : IT IS NOT "is there a heap", which is what every test in this file
+//         used to ask and what GetP2PmsgHandle() still answers. The two
+//         disagreed on one state -- an inline item whose object had been given
+//         a heap -- and on that state the heap question said SHARED about a
+//         block that was nobody's but its own. AllocVBLock now rehomes the
+//         item when it creates that heap, so the state no longer occurs; this
+//         asks the question that was right either way.
+//       : IT DOES NOT SAY WHOSE ITEM IT IS. A value copy that has since grown
+//         lives on a heap too, and answers false here while reaching nothing
+//         the caller holds. For whose, there is a comparand and it is §21's
+//         `==`. What this adds is the answer that needs none.
+//       : A void object answers false -- it denotes no item, so the item is
+//         not inside it either. Ask IsVoid() first, as with every other
+//         question in this family.
+bool
+P3PmsgObject::IsInline ( ) const noexcept
+{
+    return ( m_aVBLock != 0 && m_aVBLock == (VBLaddr)&m_oVBLock[0] )
+             ? true : false;
 }
 bool
 P3PmsgObject::IsData ( ) const
@@ -3929,6 +4016,23 @@ bool
 P3PmsgField::IsVoid ( ) const
 {
     return OBJ__.IsVoid ( );
+}
+
+//
+//  Is this field's item stored inside the field?
+//  NOTES: The object's question, asked of the object -- as IsVoid() is.
+//       : `P3PmsgField oB = oA` copies the ITEM, and oB answers TRUE: a write
+//         to oB is oB's alone. `P3PmsgField oB = oA.r_Object()` names the item
+//         and answers false. Both spellings are deliberate and both are used;
+//         until this existed a callee handed a P3PmsgField& could not tell
+//         which of them it had been given. Refer P3PmsgObject::IsInline for
+//         what that does and does not settle.
+//       : P3PmsgList and P3PmsgVect inherit it, and it is virtual for the same
+//         reason IsVoid() is.
+bool
+P3PmsgField::IsInline ( ) const
+{
+    return OBJ__.IsInline ( );
 }
 bool
 P3PmsgField::IsStacked ( ) const

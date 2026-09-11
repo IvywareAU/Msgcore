@@ -580,6 +580,13 @@ class Msgcore_EXT P3PmsgObject
         IsEmpty ( ) const noexcept { return m_nVBLockSize==0 ? true : false; }
       bool
         IsVoid ( ) const noexcept;
+
+      //  Is the item INSIDE me, or on a heap where others can name it?
+      //  That, and not "is there a heap", is what decides whether a write
+      //  through this object can be seen anywhere else.  Refer the
+      //  implementation for what it does not settle.
+      bool
+        IsInline ( ) const noexcept;
       bool
         IsData ( ) const;
       bool
@@ -810,6 +817,11 @@ class Msgcore_EXT P3PmsgField : public P3PmsgName, public P3PmsgData
         Sizeof ( ) const;
       virtual bool
         IsVoid ( ) const;
+
+      //  Is this field's item stored inside the field?  If it is, a write
+      //  through it reaches nobody.  Refer P3PmsgObject::IsInline.
+      virtual bool
+        IsInline ( ) const;
       virtual bool
         IsDirty ( ) const;
       virtual bool
