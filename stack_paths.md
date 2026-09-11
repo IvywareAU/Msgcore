@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §10 say how to
+> every line of output below was run against this tree; §6, §7 and §11 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -41,6 +41,8 @@ followed nowhere:
 | `MsgStck::Drop`, free order | released the chain deepest-first | the blocks came back only as far as the allocator could coalesce them (§8) |
 | `P2PmsgHeap_Collate*` | merged forwards only | **any ascending run of frees leaked its blocks — no stack needed (§8)** |
 | `P2PmsgHeap_Alloc*` | first-fit, from a LIFO free-list head | **a small request split the biggest free block, and the small ones were never chosen (§8)** |
+| `P3Pmsg_SelectObjectRecurse`, attr and desc arms | answered nothing for `^` | a collection's stack could not be named, though the block can find it (§9) |
+| `P3Pmsg_SelectObjectRecurse`, a collection never created | fell through every arm to the closing `ASSERT(0)` | **two debug assertions for an ordinary miss (§9)** |
 | `P2PmsgMgr::RootPath2Object` | stripped off every component | `^` and `@` were looked up as plain child names |
 | `P3Pmsg_SplitRootPath` | refused a bare `^`, dropped a trailing one | **`.Root.Item^` silently answered with `Item` itself** |
 | `RootPath2Object`, on a miss | assigned a void object into a `P3PmsgItem` | threw `"Invalid overloaded context"` instead of answering |
@@ -48,7 +50,8 @@ followed nowhere:
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
 `8729312` (releasing them in an order the heap can reclaim, §7-§8), `4bb228a` (the heap's
-own half of that, §8) and `dbfa789` (the half the tag could not reach, §8).
+own half of that, §8), `dbfa789` (the half the tag could not reach, §8) and `3f9ecfa`
+(collections, §9).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -612,11 +615,86 @@ because a bound is a **safety** property and an unbounded twin is how a bound ge
 again. A better choice of block is not: a revived copy would merely allocate the way the
 library used to.
 
-## 9. What `^` still does not do
+## 9. Collections — `^` commutes with `@` and `.`
 
-- **Collections.** `aStack` is a `VBLockItem` field; a `VBLockAttr` or `VBLockDesc` block
-  has none. A `^` applied to the attribute or descendant *collection* is a broken path, not
-  an assertion. The attributes and children **in** them are items and do have stacks.
+`aStack` is a `VBLockItem` field. A `VBLockAttr` or a `VBLockDesc` block has none, so a `^`
+applied to the attribute or descendant *collection* used to answer "broken path". That was
+correct, and it was less than the block can say.
+
+A collection block carries **`aParent`**. So the item that owns the collection can be found;
+that item has a stack; and a snapshot holds a copy of the **whole** collection, because
+`Push` copies name, data, attributes and descendants. `Item@^` — the attribute collection as
+it stood at the last push — is therefore the attribute collection *inside* the snapshot,
+which is the object `Item^@` already named.
+
+**`^` commutes with `@` and with `.`**, and for the reason §3 gives about pushed items: a
+snapshot is a whole item, not a fragment of one. That is the rule, and the tests pin it as
+an identity rather than as two separate lookups that happen to agree.
+
+### Nothing was added to any block
+
+`aParent` was already there and already maintained — `P3Pmsg_GetPath` walks it to build a
+path — and `P3PmsgObject::GetParent` already reads it. No field was added to `VBLockAttr` or
+`VBLockDesc`, nothing moved, and no image changed. `MscsUnitTests/golden_ref.p2p` is
+byte-identical.
+
+The alternative was to give the collections an `aStack` of their own, and that would have
+been the expensive answer to a question the blocks could already answer: a new field in two
+block types is an on-disk format change, and every `.p2p` ever written would have shifted.
+
+### Measured
+
+```
+                          before        after
+  @^                      (void)        (attr coll) pos=1173
+  @^Currency              (void)        Currency    pos=1220
+  ^@Currency              Currency      Currency    pos=1220     <- the same object
+  @^Venue                 (void)        (void)                   <- added after the push
+  desc ^Last              (void)        Last        pos=1431
+  Item^.Last              Last          Last        pos=1431     <- the same object
+```
+
+Pushes nest, so the delimiter repeats: `@^` is the collection before the last push, `@^^` the
+one before that. That works because a snapshot's own collections point at the **snapshot**,
+not back at the live item — measured, because if they pointed back the second `^` would loop
+on the first generation instead of descending.
+
+### A collection that was never created was asserting
+
+Found while measuring the above, and it is not about `^`. `r_Attr()` on an item with no
+attributes hands back an object carrying no block. It matches no arm of
+`P3Pmsg_SelectObjectRecurse`, so it fell through to the `ASSERT(0)` that closes the
+function — by way of `IsRoot()` on the way past, which asserts a **second** time on a
+SYS-heap object, because `P2PmsgHeap_IsRoot` has no arm for one. Two debug assertions for
+`Item@Tag` asked of a bare item, which is ordinary use. The value returned was always right.
+
+`IsVoid()` is not the test that catches it: that wants `m_hVBList` **and** `m_aVBLock` both
+zero, and an empty collection keeps the handle of the heap it would have been allocated
+from. The address alone is the condition, and `GetVBLocknn()` reads it without dereferencing
+anything — which matters here, because there is nothing to dereference.
+
+### Two things this arm is not
+
+`Item@Attr^` is a different path and always worked: the attribute **item** has a stack of
+its own, and the field arm follows it. Only a `^` applied to the collection *itself* comes
+through the new code.
+
+And `P3PmsgDesc::SelectObject` is not a path lookup, despite the name — it is a cursor
+`Goto` by plain name and never parses a path at all. (It is also defined twice, identically,
+in `MsgDesc.cpp` and `P2Pmsg.cpp`.) The descendant arm is reached by handing the collection
+to `P3Pmsg_SelectObject` directly, which is how `Test_CollectionStack` reaches it.
+
+## 10. What `^` still does not do
+
+- **Root paths carrying `@^`.** `.Store.BHP@^Currency` answers **BHP** — the item the path
+  started from, not the attribute and not void. `P3Pmsg_SplitRootPath` builds each component
+  from its delimiter up to the next one, and `^` *is* a delimiter, so `@^Currency` yields a
+  component that is the single character `@`; the length test rejects it and the split
+  returns FALSE — which `P2PmsgMgr::RootPath2Object` never looks at. The walk then runs over
+  whatever components were collected before the refusal and answers the parent. The
+  object-path spelling, `oField.SelectObject(L"@^Currency")`, is the one that works (§9), and
+  `Test_CollectionStack` pins the wrong answer rather than pretending otherwise. This is the
+  same family as the two bullets below and is the obvious next thing to pick up.
 - **Paths the library generates.** `P3Pmsg_GetPath` never emits `^`, so no path produced by
   Msgcore itself gains a component. It does emit a trailing `@` for an attribute path, and
   the splitter still drops that one — deliberately, so the `GetPath` → `RootPath2Object`
@@ -628,7 +706,7 @@ library used to.
   reach than it was, because §6 is what made such a component resolve in the first place.
   `Test_StackContainers` asks a descendant container directly for that reason.
 
-## 10. Reproducing this document
+## 11. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
