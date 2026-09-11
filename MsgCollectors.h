@@ -107,13 +107,23 @@ class P2PSafePtr
       SafePtrType&
         operator*()  const { return *m_pSafePtrType; }
 
-      //  IMPLICIT, and measured that way rather than assumed. Deleting it and
-      //  compiling the tree named eight call sites that hand a safe pointer
-      //  straight to a function taking a raw one -- PostP2PeerMsg(spMsg),
-      //  RemoveP2PmsgPump(spPump) and their kind -- so this conversion is the
-      //  idiom the library is written in and not an accident. Const because
-      //  reading the pointer out does not change who holds it.
-        operator SafePtrType*() const { return m_pSafePtrType; }
+      //  The raw pointer, WITHOUT giving up ownership -- which Dereference()
+      //  below does and this does not. Say it by name.
+      SafePtrType*
+        p_SafePtr () const { return m_pSafePtrType; }
+
+      //  EXPLICIT, and it took the nine call sites below being written out to
+      //  make it so. Implicit, it was the idiom the library is written in: nine
+      //  places hand a safe pointer straight to a function taking a raw one and
+      //  the compiler obliged. It also obliged `delete sp` and `sp[0]`, because
+      //  a conversion that hands out the raw pointer hands out everything a raw
+      //  pointer can do -- and deleting through it frees the payload under a
+      //  holder that still counts one, whose own destructor is then the second
+      //  free. Nobody had written either; that is not the same as nobody being
+      //  able to. The nine sites now say p_SafePtr() and mean it.
+      //  NOTES: STILL CONST. One of the nine reads through a const reference,
+      //         and an accessor that is not const would have broken it.
+        explicit operator SafePtrType*() const { return m_pSafePtrType; }
 
       //  EXPLICIT, because the two conversions together answered questions
       //  nobody asked and refused the one this class is for. `int n = sp`

@@ -544,6 +544,13 @@ class Msgcore_EXT P3PmsgObject
       //  copying the chain is not copying the value.  Refer the implementation.
       void
         PrivatiseInlineChain ( );
+
+      //  Give back what this object's inline VALUE block points at.  The other
+      //  half of PrivatiseInlineChain: that one allocates the copy's payload
+      //  block on the heap the two objects SHARE, and a shared heap does not go
+      //  away when the copy does.  Refer the implementation.
+      void
+        ReleaseInlineChain ( );
       VBLaddr
         Free ( VBLaddr aVBLockAddr );
       void*

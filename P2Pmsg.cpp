@@ -2513,12 +2513,14 @@ P3PmsgObject::P3PmsgObject ( const P3PmsgObject& rhs )
 }
 P3PmsgObject::~P3PmsgObject ( )
 {
+    ReleaseInlineChain ( );            // ... before the heap it is on is closed
     if ( m_hVBList )
       P2PmsgHeap_Close ( m_hVBList );
 }
 void
 P3PmsgObject::Nullify ( )
 {
+    ReleaseInlineChain ( );            // ... before the heap it is on is closed
     if ( m_hVBList )
       P2PmsgHeap_Close ( m_hVBList );
     m_hVBList     = 0;
@@ -2599,6 +2601,13 @@ P3PmsgObject::Connect ( const P3PmsgObject& oObject )
       }
     }
 
+    //  This object is about to stop naming whatever it names, so give back an
+    //  inline chain first -- while m_hVBList is still the heap the chain is on.
+    //  The VALUE arm above reaches this through Nullify(); the share arm below
+    //  overwrites m_aVBLock outright and would otherwise leave the block on a
+    //  heap that outlives the change.
+    ReleaseInlineChain ( );
+
     P2PmsgHANDLE hVBListClose = m_hVBList;
     m_hVBList = oObject.m_hVBList;
     if ( m_hVBList )
@@ -2616,6 +2625,7 @@ if(m_aVBLock&&m_aVBLock!=(VBLaddr)&m_oVBLock)ASSERT(m_hVBList);//TODO:LJM debugg
 void
 P3PmsgObject::Connecta ( P2PmsgHANDLE hVBList, VBLaddr aVBLock, VBLsize nVBLockSize )
 {
+    ReleaseInlineChain ( );            // Before m_aVBLock stops naming it
     m_xVBLock     = 0;                 // Flags life cycle managed internally
     m_aVBLock     = aVBLock;
     m_nVBLockSize = nVBLockSize;
@@ -2971,6 +2981,75 @@ P3PmsgObject::PrivatiseInlineChain ( )
       }
     }
 }
+//
+//  Gives back what this object's inline VALUE block points at
+//  NOTES: THE OTHER HALF OF PrivatiseInlineChain, and it was missing. That one
+//         gives a copy its own payload block ON THE HEAP THE TWO OBJECTS SHARE,
+//         which is right -- the AddRef has settled the heap's lifetime. But a
+//         shared heap does not go away when the copy does, and ~P3PmsgObject
+//         closes the heap and frees nothing, so the block stayed allocated on a
+//         heap that was still open. Copying a grown value in a loop therefore
+//         allocated once per iteration and gave nothing back: measured at 4841
+//         copies before the heap refused at its ceiling.
+//       : ONLY AN INLINE BLOCK, and only its chain. The block itself lives in
+//         this object and is not the heap's to take. An item on a heap belongs
+//         to the message and is nobody's to free here, which is what the
+//         address test excludes; an externally managed block is excluded by
+//         m_xVBLock, the same guard Free() keeps.
+//       : SAFE TO CALL TWICE. Every walk starts from a chain pointer and stops
+//         on a zero one, and the owner's pointer is cleared before returning,
+//         so a Nullify() followed by the destructor frees each block once.
+//       : The chain is one link long in practice and this does not assume it.
+//         P2PmsgObject_NewVBLockData and P3PmsgName_ResizeName both REPLACE the
+//         chained block rather than appending to it, so growth cannot lengthen
+//         a chain; a longer one can only arrive already built, in an image. The
+//         loops here tolerate that for the same reason the ones in
+//         NewVBLockData do.
+void
+P3PmsgObject::ReleaseInlineChain ( )
+{
+    if ( m_hVBList == 0                           ||
+         m_xVBLock != 0                           ||
+         m_aVBLock != (VBLaddr)&m_oVBLock[0]         )
+      return;                          // Not ours to give back
+
+    if ( VBLock_IsData ( (VBLock *)&m_oVBLock[0] ) )
+    {
+      VBLockData *pData = VBLock_pData ( (VBLock *)&m_oVBLock[0] );
+      VBLaddr     aNext = VBLockData_IsChained ( pData )
+                            ? VBLockData_GetChain2Next ( m_uVBLock, pData ) : 0;
+      if ( aNext )
+        VBLockData_SetChain2Next ( m_uVBLock, pData, 0 );
+      while ( aNext )
+      {
+        VBLockData   *pNext  = VBLock_pData ( (VBLock *)Msg2Phys ( aNext ) );
+        const VBLaddr aAfter = VBLockData_IsChained ( pNext )
+                                 ? VBLockData_GetChain2Next ( m_uVBLock, pNext )
+                                 : 0;
+        Free ( aNext );
+        aNext = aAfter;
+      }
+      return;
+    }
+
+    if ( VBLock_IsName ( (VBLock *)&m_oVBLock[0] ) )
+    {
+      VBLockName *pName = VBLock_pName ( (VBLock *)&m_oVBLock[0] );
+      VBLaddr     aNext = VBLockName_IsChained ( pName )
+                            ? VBLockName_GetChain2Next ( m_uVBLock, pName ) : 0;
+      if ( aNext )
+        VBLockName_SetChain2Next ( m_uVBLock, pName, 0 );
+      while ( aNext )
+      {
+        VBLockName   *pNext  = VBLock_pName ( (VBLock *)Msg2Phys ( aNext ) );
+        const VBLaddr aAfter = VBLockName_IsChained ( pNext )
+                                 ? VBLockName_GetChain2Next ( m_uVBLock, pNext )
+                                 : 0;
+        Free ( aNext );
+        aNext = aAfter;
+      }
+    }
+}
 VBLaddr
 P3PmsgObject::Free ( VBLaddr aVBLockAddr )
 {
@@ -3239,6 +3318,11 @@ P3PmsgObject::IsInline ( ) const noexcept
 //         heap holds a reference to it (Connecta AddRefs, and the copy
 //         constructor and Connect do too), so a count of one means there is no
 //         second object to be looking.
+//       : ASK THE FIELD, NOT THIS, WHEN THERE IS A FIELD TO ASK.
+//         P3PmsgField::IsSole overrides rather than forwards: it knows which of
+//         the heap's holders are its own sub-objects and subtracts them, which
+//         is the row below. This one cannot -- an object has no parts -- so
+//         what follows is about THIS answer, and the field's is narrower.
 //       : WHAT FALSE DOES NOT SAY. The count is of holders of the HEAP, not of
 //         names for the BLOCK, so a second holder may be naming something else
 //         entirely -- including one of this object's own sub-objects. A field
@@ -4204,10 +4288,42 @@ P3PmsgField::IsInline ( ) const
 //         does and does not settle, and §21's `==` for whose item it is.
 //       : P3PmsgList and P3PmsgVect inherit it, and it is virtual for the same
 //         reason IsVoid() is.
+//       : IT DOES NOT SIMPLY FORWARD, and that is the point of overriding it.
+//         The object counts holders of the HEAP and cannot tell a stranger from
+//         one of this field's own parts, so a field that had been asked for its
+//         descendants answered FALSE from then on while its item was still
+//         nobody else's -- §24 measured that and left it. A field CAN tell:
+//         m_pP3PmsgAttr and m_pP3PmsgDesc are its own, it made them, and each
+//         holds one reference on the heap while it names it. Subtracting them
+//         is exact rather than approximate.
+//       : UNDERCOUNTING IS SAFE AND OVERCOUNTING IS NOT, which is why nothing
+//         is subtracted on trust. A holder missed leaves the answer FALSE, and
+//         false promises nothing; a holder subtracted that was never mine would
+//         report TRUE with a stranger looking, and true is a guarantee. So only
+//         the two sub-objects this class owns outright are counted, and each
+//         only when its heap is this heap. What is NOT subtracted, and stays a
+//         FALSE this cannot lift: the MsgStck a pushed field keeps -- its stack
+//         fields are protected and there is no accessor to reach them -- and
+//         any cursor a collection's Desc or Attr is holding, for the same
+//         reason. Both are measured and pinned by a case.
 bool
 P3PmsgField::IsSole ( ) const
 {
-    return OBJ__.IsSole ( );
+    if ( OBJ__.m_aVBLock == 0 )
+      return false;                    // Void: no storage to be sole holder of
+    if ( OBJ__.IsInline ( ) )
+      return true;                     // The block is in here, so nowhere else
+
+    const P2PmsgHANDLE hVBList = OBJ__.m_hVBList;
+    int                nMine   = 1;    // This field's own object holds one
+    if ( m_pP3PmsgAttr != nullptr &&
+         m_pP3PmsgAttr -> r_Object ( ).m_hVBList == hVBList )
+      nMine++;
+    if ( m_pP3PmsgDesc != nullptr &&
+         m_pP3PmsgDesc -> r_Object ( ).m_hVBList == hVBList )
+      nMine++;
+
+    return P2PmsgHeap_RefCount ( hVBList ) == nMine;
 }
 bool
 P3PmsgField::IsStacked ( ) const

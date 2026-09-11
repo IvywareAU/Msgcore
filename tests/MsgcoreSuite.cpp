@@ -3244,12 +3244,11 @@ static void Test_SoleStorage()
         TF_CHECK(!oVoid.IsInline());
     }
 
-    //  FALSE IS NOT THE OPPOSITE GUARANTEE, and this is the row that says so.
-    //  The count is of holders of the HEAP; a field that has been asked for
-    //  its descendants keeps a sub-object that holds it, and answers false
-    //  from then on while still being the only name for its own item. Pinned
-    //  so the claim in the NOTES stays true of the code.
-    TF_CASE("false says the question is open, not that anyone is looking")
+    //  THE ROW §24 PINNED, ANSWERED. The count is of holders of the HEAP, so a
+    //  field that had been asked for its descendants kept a sub-object that
+    //  held it and said false from then on. A field can see its own
+    //  sub-objects; P3PmsgField::IsSole subtracts them. §26.
+    TF_CASE("its own descendants do not stop a field being sole")
     {
         P3PmsgField oF(L"EEE", P3PmsgData((int)7));
         GrowPastInline(oF, 7);
@@ -3257,14 +3256,167 @@ static void Test_SoleStorage()
 
         oF.r_Desc(P3PmsgField::AttrCMD_Create)
             += P3PmsgField(L"kid", P3PmsgData((int)1));
-        TF_CHECK(!oF.IsSole());            // a second HOLDER of the heap ...
+        TF_CHECK(oF.IsSole());             // a second holder, and it is MINE
 
-        //  ... which is this object's own, and names a different block. The
-        //  item is still nobody else's, and IsSole cannot say so.
         TF_CHECK_EQ(oF.r_data().c_int(), 7);
         TF_CHECK_EQ((int)oF.r_Desc().GetCount(), 1);
     }
+
+    TF_CASE("nor do its own attributes, nor both together")
+    {
+        P3PmsgField oF(L"FFF", P3PmsgData((int)8));
+        GrowPastInline(oF, 8);
+        oF.r_Attr(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"tag", P3PmsgData((int)2));
+        TF_CHECK(oF.IsSole());
+        oF.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"kid", P3PmsgData((int)3));
+        TF_CHECK(oF.IsSole());             // two of mine, and still mine alone
+        TF_CHECK_EQ(oF.r_data().c_int(), 8);
+    }
+
+    //  SUBTRACTING MY OWN MUST NOT SUBTRACT A STRANGER'S, which is the risk the
+    //  change carries: true is a guarantee, so counting one holder too many
+    //  would be reporting that nobody is looking while somebody is.
+    TF_CASE("a tree item with descendants of its own is still not sole")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        P3PmsgField oItem = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        oItem.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"kid", P3PmsgData((int)1));
+        TF_CHECK(!oItem.IsSole());         // the STORE holds this heap
+
+        //  ... which a write proves, the way it always did.
+        oItem.r_data().c_int(99);
+        TF_CHECK_EQ(mgr.r_Desc().SelectItem(L"AAA").r_data().c_int(), 99);
+    }
+
+    TF_CASE("a shared floater with descendants of its own is still not sole")
+    {
+        P3PmsgField oF(L"GGG");
+        GrowPastInline(oF, 9);
+        oF.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"kid", P3PmsgData((int)1));
+        TF_CHECK(oF.IsSole());
+
+        P3PmsgField oShare = oF.r_Object();
+        TF_CHECK(!oF.IsSole());            // a stranger, not one of mine
+        TF_CHECK(!oShare.IsSole());
+        oShare.r_data().c_int(77);
+        TF_CHECK_EQ(oF.r_data().c_int(), 77);
+    }
+
+    //  WHAT IS STILL OPEN, and it is one thing rather than any sub-object. A
+    //  cursor lives inside the collection that made it and there is no accessor
+    //  to reach it from here, so it is not subtracted -- and not subtracting
+    //  leaves the answer FALSE, which promises nothing. Undercounting is the
+    //  safe direction; this pins which way the remaining gap falls.
+    TF_CASE("a cursor on its own descendants still leaves the question open")
+    {
+        P3PmsgField oF(L"HHH");
+        GrowPastInline(oF, 10);
+        oF.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"k1", P3PmsgData((int)1));
+        oF.r_Desc() += P3PmsgField(L"k2", P3PmsgData((int)2));
+        TF_CHECK(oF.IsSole());
+
+        oF.r_Desc().r_Curs();
+        TF_CHECK(!oF.IsSole());            // open, not wrong
+
+        TF_CHECK_EQ(oF.r_data().c_int(), 10);
+        TF_CHECK_EQ((int)oF.r_Desc().GetCount(), 2);
+    }
 }
+
+// ---------------------------------------------------------------------------
+// P3PmsgObject : a value copy gives its payload back
+// ---------------------------------------------------------------------------
+// §23 gave a value copy its own copy of the chained payload block, allocated on
+// the heap the two objects SHARE -- which is right, the AddRef having settled
+// the heap's lifetime. But a shared heap does not go away when the copy does,
+// and ~P3PmsgObject closed the heap and freed nothing, so the block stayed
+// allocated on a heap that was still open. A loop of copies over a source that
+// outlives them allocated once an iteration and gave nothing back: measured at
+// 4841 copies before the heap refused at its ceiling of 10000000 bytes.
+//
+// The chain is one link long and cannot be longer from this side: both
+// P2PmsgObject_NewVBLockData and P3PmsgName_ResizeName REPLACE the chained
+// block rather than appending to it. §26.
+// ---------------------------------------------------------------------------
+static void Test_ValueCopyReleasesItsPayload()
+{
+    //  The one that used to run out of heap. Well past 4841, and the source
+    //  outlives every copy, which is what makes the block unreclaimable if
+    //  nothing gives it back.
+    TF_CASE("copying a grown value in a loop does not exhaust the heap")
+    {
+        CString sBig(L'z', 1024);
+        P3PmsgData oGrown((LPCWSTR)(LPCTSTR)sBig);
+
+        //  Counted rather than checked: ten thousand TF_CHECKs would say the
+        //  same thing ten thousand times and drown the run.
+        bool bEveryCopyStood = true;
+        for ( int i = 0; i < 10000; i++ )
+        {
+            P3PmsgObject oCopy(*oGrown.p_Object());
+            if ( oCopy.IsVoid() )
+                bEveryCopyStood = false;
+        }
+        TF_CHECK(bEveryCopyStood);
+        TF_CHECK_EQ((int)wcslen(oGrown.c_wstr()), 1024);   // and it is intact
+    }
+
+    //  Assignment takes the same arm and has the same duty.
+    TF_CASE("assigning a grown value in a loop does not exhaust the heap")
+    {
+        CString sBig(L'y', 1024);
+        P3PmsgData oGrown((LPCWSTR)(LPCTSTR)sBig);
+
+        P3PmsgObject oTarget;
+        for ( int i = 0; i < 10000; i++ )
+            oTarget.Connect(*oGrown.p_Object());
+        TF_CHECK(!oTarget.IsVoid());
+        TF_CHECK_EQ((int)wcslen(oGrown.c_wstr()), 1024);
+    }
+
+    //  A value that fits in its block has no payload to give back, and the
+    //  release must not go looking for one.
+    TF_CASE("a value that fits in its block is unaffected")
+    {
+        P3PmsgData oSmall((int)42);
+        bool bEveryCopyStood = true;
+        for ( int i = 0; i < 1000; i++ )
+        {
+            P3PmsgObject oCopy(*oSmall.p_Object());
+            if ( oCopy.IsVoid() )
+                bEveryCopyStood = false;
+        }
+        TF_CHECK(bEveryCopyStood);
+        TF_CHECK_EQ(oSmall.c_int(), 42);
+    }
+
+    //  And the copy still READS what it copied, which is §23's guarantee and
+    //  the thing a release that freed too much would break.
+    TF_CASE("a released copy still gave the right answer while it lived")
+    {
+        CString sBig(L'w', 600);
+        P3PmsgData oGrown((LPCWSTR)(LPCTSTR)sBig);
+        bool bEveryCopyRead = true;
+        for ( int i = 0; i < 100; i++ )
+        {
+            P3PmsgData oCopy(oGrown);
+            if ( wcscmp(oCopy.c_wstr(), oGrown.c_wstr()) != 0 )
+                bEveryCopyRead = false;
+        }
+        TF_CHECK(bEveryCopyRead);
+        TF_CHECK_EQ((int)wcslen(oGrown.c_wstr()), 600);
+    }
+}
+
 
 // ---------------------------------------------------------------------------
 // P3PmsgObject : a value copy copies the VALUE, not the address of one
@@ -4209,6 +4361,46 @@ static void Test_SafePtr_Conversions()
         TF_CHECK(!oHeld.IsEmpty());
     }
 
+    //  THE RAW POINTER, SAID BY NAME. The conversion that used to hand it over
+    //  implicitly handed over everything a raw pointer can do with it, `delete`
+    //  included; it is explicit now and p_SafePtr() is the spelling. It does
+    //  NOT give up ownership, which is the whole difference from Dereference().
+    TF_CASE("p_SafePtr hands over the pointer and keeps the ownership")
+    {
+        SafePtrProbe::nLive = 0;
+        {
+            P2PSafePtr<SafePtrProbe> oPtr(new SafePtrProbe(31));
+            SafePtrProbe            *pRaw = oPtr.p_SafePtr();
+
+            TF_CHECK(pRaw != NULL);
+            TF_CHECK_EQ(pRaw->nValue, 31);
+            TF_CHECK(oPtr == pRaw);              // the same thing, both ways
+            TF_CHECK(!oPtr.IsEmpty());           // ... and still held
+            TF_CHECK_EQ(SafePtrProbe::nLive, 1);
+        }
+        TF_CHECK_EQ(SafePtrProbe::nLive, 0);     // freed once, by the holder
+
+        //  Dereference() is the other one: it hands over the pointer AND the
+        //  duty to free it.
+        SafePtrProbe::nLive = 0;
+        {
+            P2PSafePtr<SafePtrProbe> oPtr(new SafePtrProbe(32));
+            SafePtrProbe            *pRaw = oPtr.Dereference();
+            TF_CHECK(oPtr.IsEmpty());
+            TF_CHECK_EQ(SafePtrProbe::nLive, 1);
+            delete pRaw;
+            TF_CHECK_EQ(SafePtrProbe::nLive, 0);
+        }
+        TF_CHECK_EQ(SafePtrProbe::nLive, 0);
+    }
+
+    TF_CASE("an empty safe pointer hands over nothing")
+    {
+        P2PSafePtr<SafePtrProbe> oEmpty;
+        TF_CHECK(oEmpty.p_SafePtr() == NULL);
+        TF_CHECK(oEmpty == oEmpty.p_SafePtr());
+    }
+
     //  CONTEXTUAL CONVERSIONS SURVIVE EXPLICIT, which is the whole reason for
     //  spelling it explicit rather than deleting it. A const one answers too,
     //  which it could not before.
@@ -4228,7 +4420,8 @@ static void Test_SafePtr_Conversions()
         TF_CHECK_EQ(roHeld->nValue, 5);
         TF_CHECK_EQ((*roHeld).nValue, 5);           // C2678 before
         TF_CHECK(!roHeld.IsEmpty());                // C2662 before
-        SafePtrProbe *pRaw = roHeld;                // C2440 before
+        SafePtrProbe *pRaw = roHeld.p_SafePtr();    // C2440 before §25,
+                                                   // and named since §26
         TF_CHECK_EQ(pRaw->nValue, 5);
     }
 }
@@ -5226,6 +5419,7 @@ void RunMsgcoreSuite()
     Test_HandleOrCopy();
     Test_ValueCopiesItsPayload();
     Test_SoleStorage();
+    Test_ValueCopyReleasesItsPayload();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();
