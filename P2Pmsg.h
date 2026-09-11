@@ -537,6 +537,13 @@ class Msgcore_EXT P3PmsgObject
         AllocVBLock ( UCHAR uVBLockType, VBLsize nItemSize, bool bZero = true );
       VBLaddr
         RehomeInlineItem ( );
+
+      //  Give this object its own copy of whatever its inline VALUE block
+      //  points at.  memcpy duplicates the block; a value that has outgrown
+      //  the block keeps its payload elsewhere and only chains to it, and
+      //  copying the chain is not copying the value.  Refer the implementation.
+      void
+        PrivatiseInlineChain ( );
       VBLaddr
         Free ( VBLaddr aVBLockAddr );
       void*

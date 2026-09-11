@@ -2501,6 +2501,14 @@ P3PmsgObject::P3PmsgObject ( const P3PmsgObject& rhs )
       m_aVBLock = (VBLaddr)&m_oVBLock[0];
       m_xVBLock = 0;
       memcpy ( m_oVBLock, (void*)&rhs.m_oVBLock[0], sizeof(m_oVBLock) );
+
+      //  AND OUR OWN COPY OF WHAT IT POINTS AT. The memcpy above copies the
+      //  block; a value that has outgrown it does not keep its payload IN the
+      //  block, it keeps a chain pointer to a second block on the heap -- so
+      //  the memcpy copies the pointer and both objects name one payload. A
+      //  write through either was then seen by the other, and the first of
+      //  them to retype FREED it under the other. §23.
+      PrivatiseInlineChain ( );
     }
 }
 P3PmsgObject::~P3PmsgObject ( )
@@ -2586,6 +2594,7 @@ P3PmsgObject::Connect ( const P3PmsgObject& oObject )
         m_xVBLock     = 0;
         m_nVBLockSize = oObject.m_nVBLockSize;
         memcpy ( m_oVBLock, (void*)&oObject.m_oVBLock[0], sizeof(m_oVBLock) );
+        PrivatiseInlineChain ( );      // ... and of what it points at. §23.
         return;
       }
     }
@@ -2861,6 +2870,106 @@ P3PmsgObject::RehomeInlineItem ( )
     m_nVBLockSize = nVBLockSize;
     ASSERT(P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock));
     return aVBLock;
+}
+//
+//  Duplicates one block on the heap it is already on
+//  NOTES: Sized from the block's own header, the way RehomeInlineItem sizes
+//         the block it moves and for the same reason: P2PmsgHeap_Alloc adds
+//         the header back and may round the request up, so asking for the
+//         declared size LESS the header yields a block the copy reproduces
+//         exactly -- header, flags and all.
+//       : The allocation invalidates pointers, which is why the source is
+//         resolved a second time after it and only its size is read before.
+static VBLaddr
+P2PmsgObject_CopyHeapVBLock ( P2PmsgHANDLE hVBList, VBLaddr aVBLock )
+{
+    VBLock       *pVBLock    = (VBLock *)P2PmsgHeap_Addr2Phys ( hVBList, aVBLock );
+    const VBLsize nVBLockSize= VBLock_Hdr_u_SizeNN ( pVBLock );
+    const UCHAR   uVBLockType= pVBLock->oHdr.uVBLockDefs & VBLock_TypeMask;
+    const VBLsize nSizeofHdr = P2PmsgHeap_Sizeof_Hdr ( hVBList );
+    ASSERT(nSizeofHdr>0&&nVBLockSize>nSizeofHdr);
+
+    const VBLaddr aCopy      = P2PmsgHeap_Alloc ( hVBList, uVBLockType
+                                                , nVBLockSize - nSizeofHdr );
+    memcpy ( P2PmsgHeap_Addr2Phys ( hVBList, aCopy )
+           , P2PmsgHeap_Addr2Phys ( hVBList, aVBLock ), nVBLockSize );
+    ASSERT(P2PmsgHeap_AssertValidAlloc(hVBList,aCopy));
+    return aCopy;
+}
+//
+//  Gives this object its own copy of what its inline VALUE block points at
+//  NOTES: The copy constructor and Connect duplicate an inline block with a
+//         memcpy and call that a value copy. It is one only while the whole
+//         value fits in the block. It stops being one the moment the value
+//         outgrows it: P2PmsgObject_NewVBLockData and P3PmsgName_ResizeName
+//         both put the payload in a SECOND block on the heap and leave a
+//         CHAIN POINTER behind in the first -- so what the memcpy copies from
+//         that point on is an address, and the two objects name one payload.
+//       : WHICH IS THE SAME MISTAKE §22 FIXED ONE LEVEL UP, and not the same
+//         defect. §22's copy pointed into the SOURCE OBJECT and dangled when
+//         the source died; this points into a HEAP both of them hold open, so
+//         it stays readable. What it does instead is alias: a write through
+//         either is seen by the other, and the first of them to retype hands
+//         the block back to the heap while the other still chains to it --
+//         P2PmsgObject_NewVBLockData walks the chain and Free()s what it
+//         finds. Measured: two standalone values, one payload at one address,
+//         a byte written through one read back through the other.
+//       : ON THE HEAP THEY SHARE, not a new one. The heap handle was AddRef'd
+//         by the caller before this runs, so it outlives either object on its
+//         own; what the two of them must not share is the BLOCK. Allocating
+//         here keeps the payload where every accessor already expects to
+//         resolve it.
+//       : THE CHAIN IS WALKED, not just its first link. Chaining is usually a
+//         single step -- NewVBLockData collapses what it finds before adding
+//         one -- but the readers loop, so this loops.
+//       : Blocks that are not values do not come here. An ITEM is rehomed out
+//         of the object before either caller reaches its value arm (refer
+//         RehomeInlineItem), and an object whose block is already on a heap
+//         shares that block deliberately: that is what a handle IS.
+void
+P3PmsgObject::PrivatiseInlineChain ( )
+{
+    if ( m_hVBList == 0                           ||
+         m_aVBLock != (VBLaddr)&m_oVBLock[0]         )
+      return;                          // Nothing inline, or nowhere to put it
+
+    if ( VBLock_IsData ( (VBLock *)&m_oVBLock[0] ) )
+    {
+      VBLaddr aOwner = 0;              // 0 addresses the inline block itself
+      for ( ;; )
+      {
+        VBLockData *pData = VBLock_pData ( aOwner ? (VBLock *)Msg2Phys ( aOwner )
+                                                  : (VBLock *)&m_oVBLock[0] );
+        if ( !VBLockData_IsChained ( pData ) )
+          return;
+        const VBLaddr aChain2Next = VBLockData_GetChain2Next ( m_uVBLock, pData );
+        const VBLaddr aMine       = P2PmsgObject_CopyHeapVBLock ( m_hVBList
+                                                                , aChain2Next );
+                    pData = VBLock_pData ( aOwner ? (VBLock *)Msg2Phys ( aOwner )
+                                                  : (VBLock *)&m_oVBLock[0] );
+        VBLockData_SetChain2Next ( m_uVBLock, pData, aMine );
+        aOwner = aMine;
+      }
+    }
+
+    if ( VBLock_IsName ( (VBLock *)&m_oVBLock[0] ) )
+    {
+      VBLaddr aOwner = 0;
+      for ( ;; )
+      {
+        VBLockName *pName = VBLock_pName ( aOwner ? (VBLock *)Msg2Phys ( aOwner )
+                                                  : (VBLock *)&m_oVBLock[0] );
+        if ( !VBLockName_IsChained ( pName ) )
+          return;
+        const VBLaddr aChain2Next = VBLockName_GetChain2Next ( m_uVBLock, pName );
+        const VBLaddr aMine       = P2PmsgObject_CopyHeapVBLock ( m_hVBList
+                                                                , aChain2Next );
+                    pName = VBLock_pName ( aOwner ? (VBLock *)Msg2Phys ( aOwner )
+                                                  : (VBLock *)&m_oVBLock[0] );
+        VBLockName_SetChain2Next ( m_uVBLock, pName, aMine );
+        aOwner = aMine;
+      }
+    }
 }
 VBLaddr
 P3PmsgObject::Free ( VBLaddr aVBLockAddr )

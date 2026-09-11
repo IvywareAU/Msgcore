@@ -3110,6 +3110,172 @@ static void Test_HandleOrCopy()
     }
 }
 // ---------------------------------------------------------------------------
+// P3PmsgObject : a value copy copies the VALUE, not the address of one
+// ---------------------------------------------------------------------------
+
+//  WHERE A VALUE KEEPS ITS PAYLOAD IS A FACT ABOUT THE BLOCK, and block
+//  navigation is internal: P2PmsgObject_pData, VBLockData_IsChained and
+//  VBLock_Hdr_u_SizeNN are declared in the library's headers but not marked
+//  Msgcore_EXT, so they link in the static build and not through the import
+//  library. The choice was to export three functions for a test or to ask the
+//  physical question in one of the two configurations; the behavioural cases
+//  below the #endif run in both. §23.
+#ifdef Msgcore_STATIC
+
+//  While the whole value fits in its block the answer is "in the block" and
+//  this returns 0. Once it does not, the payload is a SECOND block on the heap
+//  and the first only chains to it.
+static VBLaddr ChainOfValue ( const P3PmsgObject& oObject )
+{
+    VBLockData *pData = P2PmsgObject_pData ( oObject, false );
+    return VBLockData_IsChained ( pData )
+             ? VBLockData_GetChain2Next ( oObject.m_uVBLock, pData ) : 0;
+}
+
+//  Two payload blocks, compared whole -- header, flags, bytes.
+static bool SamePayloadBytes ( const P3PmsgObject& oA, VBLaddr aA,
+                               const P3PmsgObject& oB, VBLaddr aB )
+{
+    VBLock       *pA = (VBLock *)oA.Msg2Phys ( aA );
+    VBLock       *pB = (VBLock *)oB.Msg2Phys ( aB );
+    const VBLsize nA = VBLock_Hdr_u_SizeNN ( pA );
+    const VBLsize nB = VBLock_Hdr_u_SizeNN ( pB );
+    return nA == nB && memcmp ( pA, pB, (size_t)nA ) == 0;
+}
+
+#endif // Msgcore_STATIC
+
+static void Test_ValueCopiesItsPayload()
+{
+#ifdef Msgcore_STATIC
+    //  §23 recorded this, and §22 is why it is only now the question. Until
+    //  §22 the copy's BLOCK was the source's block, so what the block chained
+    //  to hardly mattered. The copy has a block of its own now. What it
+    //  chained to was still the source's.
+    TF_CASE("a grown value copies its payload, not the address of one")
+    {
+        CString sBig(L'x', 1024);
+        sBig.SetAt(0, L'A');
+
+        P3PmsgData   oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgObject oCopy(*oSrc.p_Object());
+
+        const VBLaddr aSrc  = ChainOfValue(*oSrc.p_Object());
+        const VBLaddr aCopy = ChainOfValue(oCopy);
+
+        TF_CHECK(aSrc != 0);               // it did outgrow the block
+        TF_CHECK(aCopy != 0);
+        TF_CHECK(aCopy != aSrc);           // ... and the copy owns its own
+        TF_CHECK(SamePayloadBytes(*oSrc.p_Object(), aSrc, oCopy, aCopy));
+
+        //  Unshared is only half of it. A copy is worthless unless it is also
+        //  the same value, and the source has to be untouched by having been
+        //  copied at all.
+        TF_CHECK(oSrc.c_wstr()[0] == L'A');
+        TF_CHECK_EQ((int)oSrc.c_size(), 2048);
+    }
+
+    //  Assignment is Nullify + Connect, and carries its own copy of the arm.
+    TF_CASE("assignment gives the copy its own payload too")
+    {
+        CString sBig(L'x', 1024);
+        P3PmsgData   oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgObject oCopy;
+        oCopy = *oSrc.p_Object();
+
+        const VBLaddr aSrc  = ChainOfValue(*oSrc.p_Object());
+        const VBLaddr aCopy = ChainOfValue(oCopy);
+        TF_CHECK(aSrc != 0 && aCopy != 0 && aCopy != aSrc);
+        TF_CHECK(SamePayloadBytes(*oSrc.p_Object(), aSrc, oCopy, aCopy));
+    }
+
+    //  A value that has been retyped and regrown chains once and not twice --
+    //  NewVBLockData collapses what it finds before it adds a link -- but the
+    //  readers walk the chain, so the copy walks it.
+    TF_CASE("a value grown twice copies what it ended up with")
+    {
+        CString sBig(L'x', 1024);
+        CString sBigger(L'y', 4096);
+        sBigger.SetAt(0, L'B');
+
+        P3PmsgData oSrc((LPCWSTR)(LPCTSTR)sBig);
+        oSrc = P3PmsgData((LPCWSTR)(LPCTSTR)sBigger);
+
+        P3PmsgObject  oCopy(*oSrc.p_Object());
+        const VBLaddr aSrc  = ChainOfValue(*oSrc.p_Object());
+        const VBLaddr aCopy = ChainOfValue(oCopy);
+
+        TF_CHECK(aSrc != 0 && aCopy != 0 && aCopy != aSrc);
+        TF_CHECK(SamePayloadBytes(*oSrc.p_Object(), aSrc, oCopy, aCopy));
+        TF_CHECK(oSrc.c_wstr()[0] == L'B');
+        TF_CHECK_EQ((int)oSrc.c_size(), 8192);
+    }
+
+    //  The copy has to survive the source, which is the point of a value copy
+    //  and was the sharper half of the defect: the first of the two to retype
+    //  FREES the payload block, and the other was still chained to it.
+    TF_CASE("the copy keeps its payload after the source is gone")
+    {
+        CString      sBig(L'x', 1024);
+        P3PmsgObject oCopy;
+        VBLaddr      aCopy = 0;
+        {
+            P3PmsgData oSrc((LPCWSTR)(LPCTSTR)sBig);
+            oCopy = *oSrc.p_Object();
+            aCopy = ChainOfValue(oCopy);
+            TF_CHECK(aCopy != 0);
+            TF_CHECK(aCopy != ChainOfValue(*oSrc.p_Object()));
+        }
+        TF_CHECK(ChainOfValue(oCopy) == aCopy);
+        //  0xFF is the chaining flag; a block that still holds a payload is
+        //  not wearing it.
+        TF_CHECK(P2PmsgObject_pData(oCopy, true)->uDataType != 0xFF);
+    }
+
+    //  Nothing is copied that was not there: a value still inside its block
+    //  has no second block to duplicate.
+    TF_CASE("a value that fits in its block has no payload to unshare")
+    {
+        P3PmsgData   oSrc((int)7);
+        P3PmsgObject oCopy(*oSrc.p_Object());
+
+        TF_CHECK(ChainOfValue(*oSrc.p_Object()) == 0);
+        TF_CHECK(ChainOfValue(oCopy) == 0);
+    }
+#endif // Msgcore_STATIC
+
+    //  THE HEAP IS SHARED AND IS MEANT TO BE. It is AddRef'd and outlives
+    //  either object on its own, which is what makes allocating the copy's
+    //  payload on it the right place to put it. The BLOCK is what the two of
+    //  them must not share.
+    TF_CASE("a copied value shares the heap and not the block")
+    {
+        CString sBig(L'x', 1024);
+        P3PmsgData   oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgObject oCopy(*oSrc.p_Object());
+
+        TF_CHECK(oSrc.p_Object()->m_hVBList != 0);
+        TF_CHECK(oCopy.m_hVBList == oSrc.p_Object()->m_hVBList);
+        TF_CHECK(oCopy.IsInline());              // the block itself is ours
+        TF_CHECK(oSrc.p_Object()->IsInline());   // ... and so is the source's
+        TF_CHECK(oSrc.c_wstr()[0] == L'x');
+    }
+
+    //  A small value never grows a heap at all, so there is nothing to share
+    //  and nothing to duplicate.
+    TF_CASE("a value that fits in its block grows no heap to share")
+    {
+        P3PmsgData   oSrc((int)7);
+        P3PmsgObject oCopy(*oSrc.p_Object());
+
+        TF_CHECK(oSrc.p_Object()->m_hVBList == 0);
+        TF_CHECK(oCopy.m_hVBList == 0);
+        TF_CHECK(oCopy.IsInline());
+        TF_CHECK_EQ(oSrc.c_int(), 7);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3Pmsg_SplitRootPath : a bare '@' is a component wherever it stands
 // ---------------------------------------------------------------------------
 static void Test_BareAttrComponent()
@@ -4729,6 +4895,7 @@ void RunMsgcoreSuite()
     Test_ItemIdentity();
     Test_ConstFieldName();
     Test_HandleOrCopy();
+    Test_ValueCopiesItsPayload();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();
