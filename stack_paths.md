@@ -2,8 +2,8 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §9 say how to
-> reproduce them.
+> every line of output below was run against this tree; §6, §7 and §10 say how to
+> reproduce them. §8 records a heap finding that is not about `^` at all.
 
 ## 1. Summary
 
@@ -38,12 +38,14 @@ followed nowhere:
 | `MsgStck::Pop`, any type | dropped the popped item while it still linked the one below | **one pop severed and leaked every generation under the one it restored** |
 | `P3PmsgVect::Drop` | did not exist, so the base class ran | **deleting a vect from a container asserted; no stack needed** |
 | `MsgStck::Drop` | unlinked every generation and freed none | **every pushed block leaked, for every caller** |
+| `MsgStck::Drop`, free order | released the chain deepest-first | the blocks came back only as far as the allocator could coalesce them (§8) |
 | `P2PmsgMgr::RootPath2Object` | stripped off every component | `^` and `@` were looked up as plain child names |
 | `P3Pmsg_SplitRootPath` | refused a bare `^`, dropped a trailing one | **`.Root.Item^` silently answered with `Item` itself** |
 | `RootPath2Object`, on a miss | assigned a void object into a `P3PmsgItem` | threw `"Invalid overloaded context"` instead of answering |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
-vectors in a path, §6), `d2763ce` (pushing them, §7) and `099417d` (releasing them, §7).
+vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
+`8729312` (releasing them in an order the heap can reclaim, §7-§8).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -431,23 +433,19 @@ a raw CRT pointer and Msgcore is not the only thing allocating from it — every
 `P3PmsgDesc` a path selection news up competes for the same block, so reuse there is luck
 rather than evidence.
 
-**Still open, from the same measurement.** For a stack more than one deep the blocks do not
-come back into use, even though all three `OBJ__Free` calls run — verified by
-instrumenting them. The three generations are contiguous 206-byte allocations; the next
-round takes its first block from the *end* of the coalesced span and then allocates fresh
-past it, leaving the rest unused:
+**And the order of the frees turned out to matter.** Releasing the chain by letting
+`Drop()` unwind it — which is what `if (IsStacked()) r_Stck().Drop()` does on its own —
+frees the *deepest* generation first. Generations are pushed at ascending addresses, so
+that is the one order this heap cannot take back, for the reason §8 sets out. `Drop` is
+therefore a loop rather than a recursion: it unlinks each generation before dropping it,
+which fixes the order head-first and stops `Drop()` recursing underneath the loop.
 
 ```
-depth 1:  537  537  537  537            <- steady, the block is reused every round
-depth 2:  743  949 1155 1361            <- +206 a round
-depth 3:  949 1361 1773 2185            <- +412 a round, two generations' worth
-```
+three generations, four rounds of push-push-push-Drop, reading the head generation
 
-That is linear in the rounds and it is a free-list characteristic rather than anything in
-`MsgStck::Drop`, so it is not fixed here and wants its own investigation. The third case in
-`Test_StackDrop` is named for what it actually checks — the chain is emptied and the live
-item survives — and it passes *without* the fix, because unlinking was always the half that
-worked.
+    deepest-first   949 1361 1773 2185     +412 a round, and linear
+    head-first      949  949  949  949
+```
 
 ### Measured
 
@@ -469,12 +467,62 @@ from the commit before the fix they fail, and then the process dies:
                                                           Pop never restored
 ```
 
-After the fix: **117 cases, 563 checks, PASS** static and **PASS** dll, and
+After the fix: **117 cases, 587 checks, PASS** static and **PASS** dll, and
 `build_run_c4.bat` PASS. Reproduce it the way §6 says, checking out `MsgStck.cpp`,
 `MsgVect.cpp`, `MsgVect.h` and `P2Pmsg.cpp` from `d2763ce~1` — or just `MsgVect.cpp` and
 `MsgVect.h` to isolate the vect `Drop` on its own.
 
-## 8. What `^` still does not do
+## 8. The heap only coalesces forwards
+
+Found while measuring §7, and it is **not** a stack defect — the stack was only the thing
+standing on it. It is recorded here because that is where the evidence is.
+
+Two properties of the IOMAGE/BSTRio allocator combine badly:
+
+- **`P2PmsgHeap_CollateIOMAGE` merges a freed block only with its NEXT physical
+  neighbour.** There is no backward merge, and not by oversight: a `VBHeap` block carries
+  no footer, so a block has no way to find its predecessor. Collation can only ever look
+  forward.
+- **`P2PmsgHeap_AllocIOMAGE` is first-fit from the head of a LIFO free list**, and it
+  collates the head as it passes.
+
+So a run of frees over adjacent blocks reclaims the space only if it runs **high to low**.
+Low to high, every block's next neighbour is still allocated at the moment it is freed, so
+nothing coalesces. The list keeps N separate blocks; the highest one merges with the image
+tail; *that* merged block then sits at the head of the free list and satisfies every later
+request — so the other N−1 are never looked at again. They are on the free list. They are
+simply never reached.
+
+### Measured, with no stack involved
+
+`P3PmsgDesc::Truncate` empties a container by deleting child 0 repeatedly, which is
+ascending order. Five children into a descendant container, `Truncate`, refill, repeat,
+reading the first child's `P2Pos`:
+
+```
+round   0     1     2     3     4
+kid0  331  1155  1979  2803  3627        <- +824 a round
+```
+
+That is ordinary use of the object model, and it drifts. §7's stack case is the same
+mechanism reached by a different route.
+
+### What fixing it would cost
+
+Not attempted here, because both candidates reach past this document's subject:
+
+- **A boundary tag** — a footer carrying the block size, so a freed block can find and
+  merge with its predecessor. This is the real fix and it is a change to the **on-disk
+  image format**: `VBHeap` blocks are what an IOMAGE file is made of, and `LINKAGE.md`'s
+  rule about offsets minted against one copy of a heap applies to every image already
+  written.
+- **A closer-fit search** — keep walking when the head is much larger than the request, so
+  the small blocks get taken. Cheaper, and no format change, but it moves every allocation
+  the library makes and `MscsUnitTests/golden_ref.p2p` pins that layout.
+
+Either wants its own change, its own measurements and its own golden-image decision.
+
+## 9. What `^` still does not do
 
 - **Collections.** `aStack` is a `VBLockItem` field; a `VBLockAttr` or `VBLockDesc` block
   has none. A `^` applied to the attribute or descendant *collection* is a broken path, not
@@ -490,7 +538,7 @@ After the fix: **117 cases, 563 checks, PASS** static and **PASS** dll, and
   reach than it was, because §6 is what made such a component resolve in the first place.
   `Test_StackContainers` asks a descendant container directly for that reason.
 
-## 9. Reproducing this document
+## 10. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
