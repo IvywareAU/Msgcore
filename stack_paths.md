@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §12 say how to
+> every line of output below was run against this tree; §6, §7 and §13 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -48,12 +48,14 @@ followed nowhere:
 | `P3Pmsg_SplitRootPath` | a component boundary, even where no name preceded it | `@^Tag` was a nameless `@`, and the whole path came back FALSE (§10) |
 | `RootPath2Object`, on a refused split | walked the components collected before the refusal | **a malformed path answered with an object, not an error (§10)** |
 | `RootPath2Object`, on a miss | assigned a void object into a `P3PmsgItem` | threw `"Invalid overloaded context"` instead of answering |
+| `MsgStck::Push` | left a snapshot's `aParent` zero | **`P3Pmsg_GetPath` named every snapshot `.BHP`, which resolves to the root (§11)** |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
 `8729312` (releasing them in an order the heap can reclaim, §7-§8), `4bb228a` (the heap's
 own half of that, §8), `dbfa789` (the half the tag could not reach, §8), `3f9ecfa`
-(collections, §9) and `95f039c` (root paths carrying both, §10).
+(collections, §9), `95f039c` (root paths carrying both, §10) and `24c6a59` (the paths
+the library itself writes, §11).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -741,14 +743,79 @@ to the object they name, before and after.
 A trailing `@` is still dropped rather than refused — `.Root.Item@` is `Item`, as it always
 was. A `@` at the end of a path introduces a name that is not there, which is the same shape
 as the trailing `.` the splitter has always let through; it is deliberately outside this
-change, and §11 records it.
+change, and §12 records it.
 
-## 11. What `^` still does not do
+## 11. The paths the library writes
 
-- **Paths the library generates.** `P3Pmsg_GetPath` never emits `^`, so no path produced by
-  Msgcore itself gains a component. It does emit a trailing `@` for an attribute path, and
-  the splitter still drops that one — deliberately, so the `GetPath` → `RootPath2Object`
-  round-trip is unchanged.
+`P3Pmsg_GetPath` builds a path by walking `aParent`. `MsgStck::Push` left a snapshot's
+`aParent` zero, and a zero parent is what GetPath reads as a **floating item** — so every
+snapshot of `BHP` answered `.BHP`, wherever `BHP` actually lived, and every *generation*
+answered the same `.BHP`.
+
+That is worse than a path that fails to resolve. `.BHP` parses as the root name `BHP` with
+no components at all, so `RootPath2Object` walks nothing and hands back **the root**. A path
+the library generated for one object, naming another.
+
+### Where the owner had to come from
+
+Nothing in a snapshot's block could be walked to reach the owner. `aStack` runs
+owner → newest → older, and a snapshot carries no back-link along it; the chain can only be
+followed downwards, which is why `Pop` and `Drop` work and `GetPath` could not.
+
+So Push records the owner in `aParent` — the **owner**, not the generation above it. The
+older generations already point at the owner and go on pointing at it, so a push is one
+line and `Pop` and `Drop` have nothing to maintain: the block they unlink is one they free.
+GetPath counts the generation by walking the owner's chain, and the walk doubles as the
+proof that the block is on it.
+
+### Measured
+
+```
+              before                       after
+  ^           .BHP          -> the root    .Store.BHP^           -> itself
+  ^^          .BHP          -> the root    .Store.BHP^^          -> itself
+  ^@Currency  .BHP@Currency -> (void)      .Store.BHP^@Currency  -> itself
+  ^.Last      .BHP.Last     -> throws      .Store.BHP^.Last      -> itself
+```
+
+Only the snapshot's own arm was ever wrong. Everything *inside* a snapshot already recursed
+correctly and simply inherited the bad string from the bottom, so the one fix names the
+whole subtree. And these resolve because §10 taught the splitter to carry a `^`; before
+that they would have been honest paths that still went nowhere.
+
+### The field was on loan
+
+`aParent` on an item means "the collection I am linked into", and the three `Drop`
+implementations read it to decide which collection to unlink themselves from — anything else
+is `ASSERT(0)`. Push is borrowing the field for a block that is in no collection at all, and
+the loan holds only while the block is on the stack.
+
+So `MsgStck` returns it where the block leaves the chain: `MsgStck__Unlink` for a pop, and
+the walk in `MsgStck::Drop`. Left for the free to trip over, it asserted **22 times across
+10 cases** — every push/pop and every drop in the suite. `Drop` itself is untouched.
+
+`P3Pmsg_GetStckDepth` is exported rather than static because "is this block a snapshot of
+that item" is a question nothing else in the image can answer.
+
+### What images say
+
+`MscsUnitTests/golden_ref.p2p` is byte-identical: the golden workload pushes nothing, so no
+stack block reaches it. An image written before this carries a zero parent on its stack
+blocks and still comes out of the floating-item arm, exactly as it did.
+
+## 12. What `^` still does not do
+
+- **`P3Pmsg_GetPath` on an attribute COLLECTION.** The `P3PmsgAttr` overload — the one that
+  ends a path in a bare `@` — has no caller anywhere in the library, and it crashes.
+  `P2PmsgAttr_GetVBLockParentnn` takes `GetField()->r_Object()`, which is the owning
+  **item's** block, and reads it through `VBLock_pAttr`: it picks `VBLockAttr` fields out of
+  a `VBLockItem`, so the parent comes back as whatever bytes lie at that offset and
+  `Msg2Phys` of it runs off the arena. A `P3PmsgAttr` obtained the ordinary way,
+  `oItem.r_Attr()`, segfaults. Handed the right parent it would still be wrong — the parent
+  of a collection is an **item**, and the overload has no arm for one, so it would fall to
+  its own `ASSERT(0)` and emit a lone `@`. Two defects in an uncalled function, and what a
+  correct answer even looks like is a design question: the splitter drops a trailing `@`, so
+  a collection's path cannot round-trip whatever it says. §11 left it alone deliberately.
 - **`RootPath2Object` on a non-field hit, part way along.** It walks the path in a
   `P3PmsgItem`, and `P3PmsgField::operator=(const P3PmsgObject&)` throws `"Invalid
   overloaded context"` for anything that is not a field. §10 handles the case that has an
@@ -759,7 +826,7 @@ change, and §11 records it.
   component resolve in the first place. `Test_StackContainers` asks a descendant container
   directly for that reason.
 
-## 12. Reproducing this document
+## 13. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
