@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §14 say how to
+> every line of output below was run against this tree; §6, §7 and §15 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -53,13 +53,16 @@ followed nowhere:
 | `P3Pmsg_GetPath`, the `P3PmsgAttr` overload | arms on block types that are never an item | fell to its own `ASSERT(0)` and emitted a lone `@` (§12) |
 | `P3Pmsg_SelectObjectRecurse`, field arm | recursed into the collection with an empty path | a bare `@` answered nothing, so no path could name a collection (§12) |
 | `P3Pmsg_SplitRootPath` | dropped a trailing `@` | **`.Root.Item@` answered `Item`, not its attributes (§12)** |
+| `RootPath2Object`, the walk itself | carried a `P3PmsgItem`, which only holds a field | **a list or a vector before the last component threw (§13)** |
+| `RootPath2Object`, a miss under one | never reached the name test | an ordinary miss came back as `"Invalid overloaded context"` (§13) |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
 `8729312` (releasing them in an order the heap can reclaim, §7-§8), `4bb228a` (the heap's
 own half of that, §8), `dbfa789` (the half the tag could not reach, §8), `3f9ecfa`
 (collections, §9), `95f039c` (root paths carrying both, §10), `24c6a59` (the paths
-the library itself writes, §11) and `d31f2c4` (the collection's own path, §12).
+the library itself writes, §11), `d31f2c4` (the collection's own path, §12) and
+`8218904` (stepping off a container, §13).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -721,7 +724,8 @@ A last component that resolves to a **collection** is handed back rather than as
 the `P3PmsgItem` the walk carries — `P3PmsgField::operator=` throws for a non-field, and
 there is nothing to assign for when there is nothing left to walk. That is what
 `.Store.BHP@^` needs, and the object-path spelling has always returned it. A non-field
-reached *before* the last component still throws; the walk has no way to step off one.
+reached *before* the last component still threw, and §13 is where that ends: the walk stops
+carrying a `P3PmsgItem` at all, and this special case goes with it.
 
 ### Measured
 
@@ -874,7 +878,76 @@ an ordinary miss rather than the item or an assertion.
 A trailing `.` is still dropped: `.Root.Item.` is `Item`. `.` is also the root delimiter,
 and `.Root.` has meant the root since long before any of this.
 
-## 13. What `^` still does not do
+## 13. A root path could not step off a container
+
+`.Store.Numbers.Leaf`, where `Numbers` is a list, threw `"Invalid overloaded context"`. So
+did `.Store.Numbers@Unit`, `.Store.Payload.Note` for a vector, and `.Store.BHP@^.Currency`
+for a collection. The object-path spellings of the first three have answered since §6 taught
+the selector about containers, and the fourth names the object `.Store.BHP^@Currency`
+already answered with — the same two steps the other way round (§9). Only the root-path
+walk could not carry them.
+
+`P2PmsgMgr::RootPath2Object` held the walk in a `P3PmsgItem`, so the assignment that carries
+it forward is `P3PmsgField::operator=(const P3PmsgObject&)` — and that refuses anything which
+is not a field. A list and a vector **are** items; they are not fields. `VBLockItem_IsField`
+is false for both, because the item type lives in the `ut` union and `VBLock_Item` is the
+block type they all share (§6). So the walk could land on a container and could not leave it.
+
+### The miss that was reported as the wrong error
+
+`.Store.Numbers.Nobody` threw the same event. That is not a refusal of an odd path — it is
+an ordinary miss, and the walk never got as far as asking about `Nobody`: it died on
+`Numbers` one component earlier, before the name test the descendant arm runs. A caller
+distinguishing "no such object" from "malformed" by catching the message got neither.
+
+### The variable, not the walk
+
+Every step of the walk is `P3Pmsg_SelectObject`, which is a free function over
+`P3PmsgObject` with an arm for each kind there is — an item, a list, a vector, an attribute
+collection, a descendant collection. Nothing about the walk needed a field. Only the
+variable did.
+
+Holding a `P3PmsgObject` is the whole fix, and it subsumes the special case §10 had to add:
+a non-field that *ends* the path no longer needs its own return, because it is handed back
+by the same statement that hands back a field.
+
+`P3PmsgItem::Exists` is itself `!P3Pmsg_SelectObject(...).IsVoid()` (`P2Pmsg.cpp`), so the
+walk was running the whole lookup twice for every component of every path — once to ask
+whether it would work and once to do it. It now selects once, and looks a second time only
+where the populate callback has just run and might have made the answer exist.
+
+### Measured
+
+```
+                            before                          after
+  .Store.Numbers            (list) pos=845                  (list) pos=845
+  .Store.Numbers@Unit       THREW 'Invalid overloaded ...'  Unit pos=1069   ← == Numbers@Unit
+  .Store.Numbers.Leaf       THREW 'Invalid overloaded ...'  Leaf pos=1280   ← == Numbers.Leaf
+  .Store.Numbers@           THREW 'Invalid overloaded ...'  (attr coll) pos=1022
+  .Store.Payload.Note       THREW 'Invalid overloaded ...'  Note pos=2043   ← == Payload.Note
+  .Store.BHP@^.Currency     THREW 'Invalid overloaded ...'  Currency pos=2746
+  .Store.BHP^@Currency      Currency pos=2746               Currency pos=2746
+  .Store.Numbers.Nobody     THREW 'Invalid overloaded ...'  THREW 'Path to object does not exist'
+  .Store.Numbers@None       THREW 'Invalid overloaded ...'  (void)
+```
+
+The miss rules are the ones already on record, and the walk reaches them now instead of
+dying one component early: the component's own **delimiter** decides, as it always has, not
+what is being searched. A descendant component that finds nothing gets the populate callback
+and then `"Path to object does not exist"`; an `@` or a `^` that finds nothing is an empty
+answer, because an item that was never pushed has no snapshot. `.Store.BHP@^.Venue` throws
+rather than answering void for that reason — `Venue` was added after the push, so it is
+not in the snapshot's collection, and the component asking for it is spelled with a `.`.
+
+### What did not change here
+
+A bare `@` is a component only at the **end** of a path. The clause §12 added is the one
+after the loop; inside it, a component one character long is still refused, so
+`.Store.BHP@.Currency` is malformed where `.Store.BHP@^.Currency` resolves. It is a
+redundant spelling — `@Currency` is the one everything writes — and making it legal is a
+change to the splitter, not to the walk.
+
+## 14. What `^` still does not do
 
 - **A descendant collection has no path.** There is no `P3PmsgDesc` overload of
   `P3Pmsg_GetPath`, and no spelling for one: a trailing `.` is dropped, and it cannot stop
@@ -883,17 +956,12 @@ and `.Root.` has meant the root since long before any of this.
   path and `.` is not. `Item@^` reaches a pushed attribute collection; the descendant one is
   reachable only by handing the collection to `P3Pmsg_SelectObject` directly, as
   `Test_CollectionStack` does.
-- **`RootPath2Object` on a non-field hit, part way along.** It walks the path in a
-  `P3PmsgItem`, and `P3PmsgField::operator=(const P3PmsgObject&)` throws `"Invalid
-  overloaded context"` for anything that is not a field. §10 handles the case that has an
-  answer — a non-field as the **last** component, which needs no assignment — but a list or
-  a collection reached with components still to walk throws as it always did. The walk would
-  have to carry a `P3PmsgObject` to do better, and every step of it would have to stop
-  assuming it is standing on an item. It predates all of this, and §6 is what made such a
-  component resolve in the first place. `Test_StackContainers` asks a descendant container
-  directly for that reason.
+- **A root path cannot spell a bare `@` part way along.** `.Root.Item@.Tag` is malformed,
+  because the splitter refuses a one-character component anywhere but at the end (§13).
+  `@Tag` is the spelling everything writes and `@^.Tag` resolves, so nothing is unreachable
+  by it; the asymmetry is the splitter's, and fixing it is the splitter's change to make.
 
-## 14. Reproducing this document
+## 15. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
