@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-12. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §25 say how to
+> every line of output below was run against this tree; §6, §7 and §26 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -87,6 +87,7 @@ followed nowhere:
 | `P3PmsgObject`'s copy constructor, and `Connect` | shared when there was a heap | **a copy took an address INSIDE the source object, and outlived it (§22)** |
 | `AllocVBLock`, making an object its first heap | left the item block behind | **the state that made all three wrong, created once and never closed (§22)** |
 | The value arm of that same copy constructor, and of `Connect` | "copy the block" — the block, not the value | **two standalone values named ONE payload, and the first to retype freed it (§23)** |
+| `P3PmsgField::IsInline`, read as "is it shared" | where the BLOCK is | **a grown duplicate answered false while reaching nobody — false was never a guarantee (§24)** |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
@@ -98,7 +99,7 @@ the library itself writes, §11), `d31f2c4` (the collection's own path, §12) an
 `2a03161` (the descendant collection, and the rule stated once, §15) and `0888659`
 (one arm per block kind, §16) and `c0409cb` (a bare `.` wherever it stands, §17) and `2de26ac`
 (the root marker only where a path is rooted, §18) and `48ff002` (a floating item is one
-object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21) and `da22f93` (where the block is, not whether there is a heap, §22) and `f77bb97` (copying the value and not the address of one, §23).
+object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21) and `da22f93` (where the block is, not whether there is a heap, §22) and `f77bb97` (copying the value and not the address of one, §23) and `a42f207` (the guarantee asked of the storage, §24).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -1879,13 +1880,119 @@ headers but not marked `Msgcore_EXT`. Those five build in the static configurati
 which is the whole of the 199/194 difference above. The alternative was to export three
 functions for a test.
 
-## 24. What is left
+## 24. `IsInline`'s TRUE was a guarantee and its FALSE was not
 
-- **`IsInline` says where an item is, not whose it is.** §22's table above has the one row
-  where that matters: a duplicate that has since grown answers `false` and still reaches
-  nothing the caller holds. `true` is a guarantee and `false` is not, and the comparand
-  that closes it is §21's `==`. A type that carried the distinction in its own right would
-  be a different library.
+§22 gave a field a question it could answer alone — is the item inside me — and recorded
+what that question does not settle. One row:
+
+```
+  a grown copy of a tree item      IsInline=false   seen by the store no
+```
+
+A duplicate that has since GROWN is on a heap, so `IsInline` answers false; and it is on a
+heap of its very own that nothing else holds, so a write through it reaches nobody.
+`IsInline`'s false said only *the block is not in here*. It was never a guarantee that
+anyone was looking, and that row is where the difference bites.
+
+### The same guarantee, asked of the storage
+
+`IsSole` asks after the STORAGE rather than the block. There are two ways to be the sole
+holder of storage, and they are the two ways to own it:
+
+- **The block is INSIDE this object.** Nothing else in the process can address it — §22
+  rehomes an item before it is ever shared, and §23 duplicates a value's payload, so an
+  inline block is reachable only through the object carrying it. This arm is `IsInline`,
+  unchanged and still exactly right about what it claims.
+- **The block is on a heap this object is the only holder of.** Every object that names a
+  heap holds a reference to it — `Connecta` AddRefs, and so do the copy constructor and
+  `Connect` — so a count of one means there is no second object to be looking.
+  `P2PmsgHeap_RefCount` reads the count `AddRef` raises and `Close` lowers.
+
+### The measurement
+
+Every shape a field can have, against a named witness. The truth column is what a write
+actually reached, never an inference from the predicate being tested:
+
+```
+  a handle on a tree item          inline=false refs=6   sole=false | seen by the store    YES  agree
+  a value copy of a tree item      inline=true  refs=0   sole=true  | seen by the store    no   agree
+  the collection's own cursor      inline=false refs=5   sole=false | seen by the store    YES  agree
+  a plain floating item            inline=true  refs=0   sole=true  | seen by its source   no   agree
+  a grown floating item            inline=false refs=2   sole=false | seen by its source   YES  agree
+  a shared floating item           inline=false refs=2   sole=false | seen by its partner  YES  agree
+  a copy of a grown floater        inline=true  refs=0   sole=true  | seen by its source   no   agree
+  a grown copy of a tree item      inline=false refs=1   sole=true  | seen by the store    no   agree
+
+  agree=8 differ=0 asserts=0
+```
+
+The last row is §22's, and it is the one that changed.
+
+A guarantee is only worth the row that breaks it, so the shapes below were chosen to break
+the TRUE rather than to confirm it:
+
+```
+  a nested tree item                     refs=9  sole=false seen by a sibling handle YES  agree
+  a list and a second name for it        refs=2  sole=false
+  a write through the second name        seen by the first YES
+  a grown floater alone                  refs=1  sole=true
+  ... while a handle is held on it       refs=2  sole=false
+  ... once the handle is gone            refs=1  sole=true  reads 44
+  a grown duplicate                      refs=1  sole=true
+  ... once a second name is taken on it  refs=2  sole=false seen by the duplicate YES  agree
+  ... and the store is still not it      refs=2  sole=false seen by the store    no   open (false, unseen)
+
+  agree=2 open=1 GUARANTEE-BROKEN=0 asserts=0
+```
+
+Note the middle three. Sole stops the instant a second name exists and comes back when
+that name goes away, and the write the second name made is still there — the count is of
+holders, and holders come and go. The last row is `open (false, unseen)`, and it is what
+the next heading is about: false is not wrong there, it is silent.
+
+### What FALSE still does not say
+
+It is not the opposite guarantee, and the NOTES carry the row that proves it. The count is
+of holders of the HEAP, not of names for a BLOCK, so a second holder may be naming
+something else entirely — including one of this object's own sub-objects:
+
+```
+  a grown floater, no descendants yet    refs=1  sole=true
+  ... once it has been given one         refs=2  sole=false
+```
+
+A field that has been asked for its descendants keeps a `P3PmsgDesc` that holds the heap,
+and answers false from then on while still being the only name for its own item.
+Narrowing that needs a count per BLOCK, which the image does not carry. That row is pinned
+by a case, so the claim in the NOTES stays true of the code.
+
+So there are three questions now and each has its own answer. Where is the item —
+`IsInline`. Can anyone else see a write — `IsSole`, with a guarantee on true. Whose item
+is it — §21's `==`, exact in both directions, and the only one of the three that needs
+something to compare against.
+
+### The teeth
+
+Different in kind from §22's and §23's, and worth saying plainly. Against the unfixed
+library the suite does not compile — `IsSole` is what it is asking for. With the 22
+`IsSole` checks lifted out, it passes **207 cases and 1167 checks**: nothing in the library
+behaves differently. This section adds a question and changes no behaviour, and that is the
+whole of its risk.
+
+Nine solutions in both configurations: **0 errors**. The suite 207 cases static and 202
+through the DLL; `MscsUnitTests` 125; C4; the golden image byte-identical at 4104 bytes;
+§17's agreement sweep 29 agree 0 differ; §18, §19, §22 and §23 unchanged; Chartboard 0 errors
+and its four drivers 17, 13, 24 and 15 checks, none failing.
+
+## 25. What is left
+
+- **`IsSole`'s FALSE is still not a guarantee, and now it is measured rather than
+  assumed.** §24 pins the row: a field that has been asked for its descendants keeps a
+  sub-object holding the heap, so the count is two and the answer is false while the item
+  is still nobody else's. What would close it is a reference count per BLOCK rather than
+  per heap, which the image does not carry and which is a different library. The three
+  questions a caller can ask — where, whether, whose — each have an answer; only *whether*
+  has one that is certain in a single direction.
 
 - **A value copy walks the chain; a value copy of a value copy walks it again.** §23
   duplicates every chained block at every copy, which is what a value copy means and also
@@ -1902,10 +2009,10 @@ functions for a test.
   Msgcore object, so it is recorded here and left alone.
 
 Nothing else from this investigation is outstanding. That is not a claim that the grammar
-is without defect — only that every case these twenty-three sections measured has an answer,
+is without defect — only that every case these twenty-four sections measured has an answer,
 and that the answer is pinned by a test.
 
-## 25. Reproducing this document
+## 26. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
