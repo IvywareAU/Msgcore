@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-12. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §30 say how to
+> every line of output below was run against this tree; §6, §7 and §32 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -94,6 +94,8 @@ followed nowhere:
 | `P3PmsgField::IsSole` | forwarded to the object, which counts holders of the HEAP | **a field's OWN descendants made it answer "somebody else is looking" (§26)** |
 | `~P3PmsgObject`, after §23 | closed the heap and freed nothing | **every value copy kept a block on the shared heap — 4841 copies exhausted it (§27)** |
 | `P2PSafePtr::operator SafePtrType*()` | an IMPLICIT conversion | **`delete sp` and `sp[0]` compiled, and freed the payload under a live holder (§28)** |
+| `P3PmsgField::IsSole`, after §26 | subtracted the two sub-objects a field owns, and stopped there | **a collection that had been WALKED answered "somebody else is looking" (§29)** |
+| `VBLockData_Sizeof_uv` | no arm for the chained type byte, so it fell to `ASSERT(0)` | **sizing any link but the last asserted, and a Debug build halts there (§30)** |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
@@ -105,7 +107,7 @@ the library itself writes, §11), `d31f2c4` (the collection's own path, §12) an
 `2a03161` (the descendant collection, and the rule stated once, §15) and `0888659`
 (one arm per block kind, §16) and `c0409cb` (a bare `.` wherever it stands, §17) and `2de26ac`
 (the root marker only where a path is rooted, §18) and `48ff002` (a floating item is one
-object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21) and `da22f93` (where the block is, not whether there is a heap, §22) and `f77bb97` (copying the value and not the address of one, §23) and `a42f207` (the guarantee asked of the storage, §24) and `09adc6c` (the safe pointer's own conversions, §25) and `eca8cd1` with `2109c8a` in TargetCore (the three entries What-is-left was carrying, §26-§28).
+object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21) and `da22f93` (where the block is, not whether there is a heap, §22) and `f77bb97` (copying the value and not the address of one, §23) and `a42f207` (the guarantee asked of the storage, §24) and `09adc6c` (the safe pointer's own conversions, §25) and `eca8cd1` with `2109c8a` in TargetCore (the three entries What-is-left was carrying, §26-§28) and `f600c52` (the cursor, and a chain of three, §29-§30).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -2488,28 +2490,339 @@ through the DLL, both PASS; `MscsUnitTests` 125; C4; the golden image byte-ident
 unchanged; Chartboard 0 errors and its four drivers 17, 13, 24 and 15 checks, none
 failing.
 
-## 29. What is left
+## 29. The cursor `IsSole` could not discount
 
-- **A cursor is the last holder `IsSole` cannot discount.** §26 subtracts the two
-  sub-objects a field owns outright; a `P3PmsgCurs` lives inside the `P3PmsgDesc` or
-  `P3PmsgAttr` that made it and there is no accessor to reach it from the field, so a
-  collection that has been walked answers FALSE from then on. That is the safe direction
-  — false promises nothing, and subtracting a holder that was not mine would break the
-  guarantee on true — and it is pinned by a case rather than assumed. Closing it means
-  either an accessor on both collection classes or the per-block count §26 argues against.
+§26 gave `P3PmsgField::IsSole` an override, because the object's version counts holders
+of the HEAP and cannot tell a stranger from one of this field's own parts. It subtracted
+`m_pP3PmsgAttr` and `m_pP3PmsgDesc` and stopped there, and that left a row: a cursor
+lives one level further in, inside the collection that made it, and a cursor holds the
+heap. So a collection that had been WALKED went back to answering "somebody else is
+looking" while its item was still nobody else's.
 
-- **A longer chain can only arrive in an image, and nothing here has ever seen one.** §27
-  measures every in-process path as producing exactly one link, because growth replaces
-  the chained block rather than appending to it, and a payload past 65535 bytes is refused
-  rather than split. The walk loops in `PrivatiseInlineChain`, `ReleaseInlineChain` and
-  `P2PmsgObject_NewVBLockData` all tolerate a longer one because a legacy image could
-  carry it. None of them has been put to one, for want of such an image to put them to.
+**The obvious fix is the wrong one.** The entry said this needed "an accessor on both
+collection classes", and there is no const accessor to add cheaply:
+
+- `m_pCurs` is a protected raw owning pointer on `P3PmsgDesc` (`MsgDesc.h:217`) and on
+  `P3PmsgAttr` (`MsgAttr.h:188`), and it is **not** `mutable`. The two classes share no
+  base; each declares its own.
+- `r_Curs()` is a **creating** accessor -- `if ( m_pCurs == nullptr ) m_pCurs = new
+  P3PmsgCurs ( *this );` (`MsgDesc.cpp:463`, `MsgAttr.cpp:429`) -- and a fresh cursor
+  calls `Goto(0)`, which `Connect`s one of its members and so takes a reference on the
+  heap. A const question about who is holding this heap, answered by taking another
+  reference on it, is its own wrong answer.
+- A cursor is also stateful and SHARED: one per collection, repositioned by every
+  `operator[]`, `Select*`, `Exists` and `Delete`. Handing one out from a const method
+  moves a position another caller is standing on.
+
+**So the cursor is not handed out. The collection is asked what it is holding.** One
+question, asked down the ownership tree, and `IsSole` becomes the comparison it always
+wanted to be:
+
+```cpp
+bool
+P3PmsgField::IsSole ( ) const
+{
+    if ( OBJ__.m_aVBLock == 0 )
+      return false;                    // Void: no storage to be sole holder of
+    if ( OBJ__.IsInline ( ) )
+      return true;                     // The block is in here, so nowhere else
+
+    const P2PmsgHANDLE hVBList = OBJ__.m_hVBList;
+    if ( hVBList == 0 )
+      return false;                    // A block on no heap is nobody's to count
+
+    return P2PmsgHeap_RefCount ( hVBList ) == HeapHolders ( hVBList );
+}
+```
+
+`HeapHolders` rests on one rule, and the rule is the heap's own rather than a
+convention: **every path that gives a `P3PmsgObject` a non-zero `m_hVBList` AddRefs it.**
+They are the copy constructor (`P2Pmsg.cpp:2485`), `Connect` (`:2612`), `Connecta`
+(`:2636`) and the two `CreateSYS` sites (`:2780`, `:2868`), which is every assignment to
+that member in the library -- and `~P3PmsgObject` closes it. So a live object whose handle is this handle IS one
+reference, and this counts references rather than estimating them:
+
+```cpp
+int
+P3PmsgField::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 )
+      return 0;
+
+    int nHolders = OBJ__.m_hVBList == hVBList ? 1 : 0;
+    if ( m_pP3PmsgAttr != nullptr )
+      nHolders += m_pP3PmsgAttr -> HeapHolders ( hVBList );
+    if ( m_pP3PmsgDesc != nullptr )
+      nHolders += m_pP3PmsgDesc -> HeapHolders ( hVBList );
+    if ( m_pMsgStck != nullptr )
+      nHolders += m_pMsgStck    -> HeapHolders ( hVBList );
+    return nHolders;
+}
+```
+
+with `P3PmsgDesc` and `P3PmsgAttr` adding their own object and their cursor, `MsgStck`
+adding the three stacked objects `r_item`/`r_list`/`r_vect` create, and `P3PmsgCurs`
+adding its `m_pItemParent` and all three of its by-value members.
+
+**What is followed is what is owned, and nothing else.** A collection's
+`m_pP3PmsgField`, a stack's `m_pP3PmsgField` and a cursor's `m_pP3PmsgAttr` /
+`m_pP3PmsgDesc` all point back UP at the owner. Following one would count this field a
+second time and report TRUE with a stranger looking, which is the only direction that
+breaks anything -- §26's asymmetry, unchanged: a holder missed leaves FALSE and false
+promises nothing; a holder subtracted that was never mine reports a guarantee that is
+not true.
+
+**It is a count and not a flag, and that was not a guess.** `P3PmsgCurs::Goto` connects
+whichever of `m_oP3PmsgField`, `m_oP3PmsgList` and `m_oP3PmsgVect` matches the item it
+landed on (`MsgCurs.cpp:516-531`) and does **not** disconnect the other two. So one
+cursor that has walked past a list and then a field is holding this heap TWICE. A
+subtraction of one per cursor would have undercounted there -- safe, but only by luck,
+and nobody had looked:
+
+```
+-- the rows §29 was carrying --
+  a grown floater with two descendants         refs=2  mine=2  sole=true
+  ... once a cursor has been taken on them     refs=3  mine=3  sole=true
+  ... and it still reads what it held          7 / 2
+  a grown floater with a list and a field      refs=2  mine=2  sole=true
+  ... cursor on the list                       refs=3  mine=3  sole=true
+  ... and then on the field: TWO members live  refs=4  mine=4  sole=true
+  both collections walked, both cursors live   refs=5  mine=5  sole=true
+  a grown floater before a push                refs=1  mine=1  sole=true
+  ... once it has been pushed (push holds nothing) refs=1  mine=1  sole=true
+  ... and once the snapshot has been READ      refs=2  mine=2  sole=true
+  ... and it still reads what it held          5
+
+-- what must not change --
+  a handle on a tree item                      refs=6  mine=1  sole=false seen by the store    YES  agree
+  a tree item, descendants walked              refs=8  mine=3  sole=false seen by the store    YES  agree
+  a shared floater, descendants walked         refs=4  mine=3  sole=false seen by its partner  YES  agree
+  a shared floater, the STRANGER walked        refs=5  mine=2  sole=false seen by its partner  YES  agree
+
+agree=4 open=0 GUARANTEE-BROKEN=0 asserts=0
+```
+
+The `mine=` column is `HeapHolders`, and it tracks `refs=` exactly on every row that is
+sole. The fourth row is the one that settles the design: `refs=4 mine=4`, one field, one
+`P3PmsgDesc`, and one cursor holding two.
+
+**§26's other entry closed on the way past.** That section recorded the `MsgStck` as
+unreachable and measured a push as adding no holder of the heap at all. Both readings
+were right and neither was the whole of it: a push holds nothing, and READING the
+snapshot -- `r_Stck().r_item()` -- news a `P3PmsgField` on this heap that does. The same
+walk reaches it, so it is subtracted for the same reason and by the same rule.
+
+**Undercounting remains, deliberately.** `P3PmsgList` and `P3PmsgVect` cache
+`P3PmsgData` cursors in `m_pP3PmsgData[]`, and a vect carries a `m_pP3PmsgType`; none of
+those is descended into. Whatever they hold leaves the answer FALSE, which is the safe
+side, and §31 records it rather than this claiming to have closed it.
+
+**The exported surface moved, and it had already moved.** These classes are whole-class
+MFC extension exports, so five new public members are five new exports.
+`tools/ci/check_exports.ps1` reported **nineteen** additions and one removal against
+`exports-cxx-x64.manifest`: five are `HeapHolders`, and the other fourteen are §11, §15,
+§20, §21, §22, §23, §24, §26 and §27 arriving at a manifest nobody had re-measured since
+`4d39d0d`. Every one of them is a member those sections meant to add. The manifest is
+re-measured here, which is what `c50df62` did the last time this happened. The **flat C
+ABI manifest is byte-identical** -- 282 symbols, unchanged -- so the supported surface
+did not move and no version bump is due. `tools/ci/api-drift.allow` gains the first five
+TRIAGED lines it has ever had, with the reason the file's own header asks for.
+
+**Teeth.** Restore the pre-§29 library, force a rebuild, and the cases fail rather than
+passing quietly. Five of the six are `oF.IsSole()` reading false where it now reads true;
+the sixth is the one that must NOT move, and it fails on its opening `TF_CHECK` for the
+same reason.
+
+## 30. A chain of three, which only an image could deliver
+
+§27 measured every in-process path as producing exactly ONE link, and that measurement
+stands: `P2PmsgObject_NewVBLockData` and `P3PmsgName_ResizeName` both REPLACE the chained
+block rather than appending to it, and a payload past 65535 bytes is refused rather than
+split. The walks in `PrivatiseInlineChain`, `ReleaseInlineChain`, `NewVBLockData` and
+every reader loop anyway, because an image can carry a longer chain. **Not one of them
+had ever been put to one**, and the entry said so: "for want of such an image to put them
+to."
+
+**The image is the arena, which is what makes the want answerable.** `P2PmsgMgr::Save`
+takes `P2PmsgHeap_pImage` and `P2PmsgHeap_Sizeof` and writes the heap whole with a single
+`WriteFile` (`P2PmsgMgr.cpp:431-478`); `Load` reads it back whole and casts it
+(`P2PmsgMgr.cpp:210-262`). A `VBLaddr` is a plain offset resolved as `base + aVBLaddr`
+(`MsgVBHeap.cpp:4096`), relocated by nothing on load and validated for LENGTH by nothing
+anywhere. So a chain pointer round-trips untouched, and the state an image delivers is
+exactly the state the heap's own allocator builds:
+
+```cpp
+//  Appends one link, exactly as an image would carry one: duplicate the block
+//  holding the payload, then make the old one a pure link to the duplicate.
+//  P2PmsgObject_CopyHeapVBLock's arithmetic -- ask Alloc for the declared size
+//  LESS the header, because Alloc adds the header back.
+static bool Lengthen29(P3PmsgObject& oObject)
+{
+    const VBLaddr aTail = ChainTail29(oObject);
+    if (aTail == 0)
+        return false;
+
+    const P2PmsgHANDLE hVBList = oObject.m_hVBList;
+    VBLock       *pTail = (VBLock *)oObject.Msg2Phys(aTail);
+    const VBLsize nSize = VBLock_Hdr_u_SizeNN(pTail);
+    const UCHAR   uType = pTail->oHdr.uVBLockDefs & VBLock_TypeMask;
+    const VBLsize nHdr  = P2PmsgHeap_Sizeof_Hdr(hVBList);
+
+    const VBLaddr aNew  = P2PmsgHeap_Alloc(hVBList, uType, nSize - nHdr);
+    memcpy(P2PmsgHeap_Addr2Phys(hVBList, aNew),
+           P2PmsgHeap_Addr2Phys(hVBList, aTail), nSize);
+
+    pTail = (VBLock *)oObject.Msg2Phys(aTail);   // Alloc invalidates pointers
+    VBLockData_SetChain2Next(oObject.m_uVBLock, VBLock_pData(pTail), aNew);
+    return true;
+}
+```
+
+**The three walks the entry named all held.** `PrivatiseInlineChain` gave the copy three
+links of its own -- every one of them, checked address by address down both chains, not
+just the first -- `ReleaseInlineChain` gave all three back five hundred times over, and
+`NewVBLockData` collapsed three to one on a retype. A saved image carried three links and
+read the value back out of them.
+
+**One thing did not hold, and it is a fourth walker the entry did not name.**
+`P3PmsgData::VerifyContainment` sizes every block it steps to, *before* the loop asks
+whether that block is itself a link (`P2Pmsg.cpp:1596`). `VBLockData_Sizeof_uv` has no
+arm for the chained type byte -- `0xFF` is claimed by none of them -- so it falls through
+every one to the `ASSERT(0)` at the bottom:
+
+```
+-- a chain no in-process path can build --
+  a grown value chains exactly one link                  ok
+  a second link can be appended                          ok
+  the chain is now two links                             ok
+  and the value still reads back through it              ok
+  a third link can be appended                           ok
+  the chain is now three links                           ok
+  and the value still reads back through THAT            ok
+    [assert] C:\_Dev\_ClaudeCode\MSCS\Msgcore\P2PmsgVBLock.cpp(1553) : Assertion failed!
+    [assert] C:\_Dev\_ClaudeCode\MSCS\Msgcore\P2PmsgVBLock.cpp(1553) : Assertion failed!
+  VerifyContainment accepts a three-link chain           ok
+  ... and does it without asserting                      ** FAILED **
+```
+
+**Say the size of it accurately.** `VBLockData_Sizeof` floors its result at
+`VBLockData_Sizeof_Min`, the header plus exactly one chain address, so the NUMBER it
+handed back for a link was already right. The defect is the assertion and only the
+assertion, and that is the whole of the claim being made here.
+
+It is not nothing. Under the default report mode a `_CRT_ASSERT` raises the assertion
+dialog and a Debug build stops in it, so a Debug consumer that loads such an image and
+validates it halts on a structure the library then goes on to handle correctly. The
+listing above continues past it only because the probe installs a report hook that counts
+and returns, exactly as `TestFramework` does -- which is why this is measured as a count
+of two rather than seen as a hang. `VBLockData_Sizeof_uv` now knows the chained form,
+which changes no computed size and removes the assertion. The refusal below it still
+stands for a type byte that names nothing at all, which is what it was for.
+
+```
+-- a chain no in-process path can build --
+  a grown value chains exactly one link                  ok
+  a second link can be appended                          ok
+  the chain is now two links                             ok
+  and the value still reads back through it              ok
+  a third link can be appended                           ok
+  the chain is now three links                           ok
+  and the value still reads back through THAT            ok
+  VerifyContainment accepts a three-link chain           ok
+  ... and does it without asserting                      ok
+  AssertValid walks three links without asserting        ok
+  c_size still answers for the payload at the end        ok
+  Sizeof_VBLockData resolves through all three           ok
+
+-- PrivatiseInlineChain, put to three links --
+  source is three links                                  ok
+  copy chain length                                      3
+  the copy carries a chain of the same length            ok
+  and its LAST link is its own, not the source's         ok
+  EVERY link of the copy is its own                      ok
+  and holds the same payload, byte for byte              ok
+
+-- ReleaseInlineChain, put to three links --
+  tail block of copy 1 / copy 500                        2322210936160 / 2322210936160
+  every one of 500 copies was three links                ok
+  and every one gave all three links back                ok
+
+-- NewVBLockData's collapse, put to three links --
+  three links before the retype                          ok
+  chain length after the retype                          1
+  the retype collapsed it back to one link               ok
+  and the new value reads back                           ok
+
+-- and through an image, which is where one would come from --
+  a stored item's value chains one link                  ok
+  three links before the save                            ok
+  saved                                                  ok
+  loaded                                                 ok
+  chain length after the round trip                      3
+  the image carried all three links                      ok
+  and the value reads back out of the image              ok
+
+failures=0 asserts=0
+```
+
+**Teeth.** `VerifyContainment` asserts twice on a three-link chain and `AssertValid`
+reaches it again for two more; `TestFramework`'s assert trap folds each into a failure of
+the case, so the case is the check.
+
+```
+      FAIL [a cursor on its own descendants does not stop it being sole]  oF.IsSole()
+      FAIL [a cursor that has walked two kinds of item holds it twice]  oF.IsSole()
+      FAIL [a cursor that has walked two kinds of item holds it twice]  oF.IsSole()
+      FAIL [an attribute collection's cursor counts the same way]  oF.IsSole()
+      FAIL [a stacked snapshot that has been read does not stop it either]  oF.IsSole()
+      FAIL [a shared floater whose descendants were walked is still not sole]  oF.IsSole()
+      ASSERT [every link of a long chain can be sized and contained]  C:\_Dev\_ClaudeCode\MSCS\Msgcore\P2PmsgVBLock.cpp(1553) : Assertion failed!
+      ASSERT [every link of a long chain can be sized and contained]  C:\_Dev\_ClaudeCode\MSCS\Msgcore\P2PmsgVBLock.cpp(1553) : Assertion failed!
+      ASSERT [every link of a long chain can be sized and contained]  C:\_Dev\_ClaudeCode\MSCS\Msgcore\P2PmsgVBLock.cpp(1553) : Assertion failed!
+      ASSERT [every link of a long chain can be sized and contained]  C:\_Dev\_ClaudeCode\MSCS\Msgcore\P2PmsgVBLock.cpp(1553) : Assertion failed!
+  cases   : 236  (6 with failures)
+  checks  : 1302  (10 failed)
+  result  : FAIL
+```
+
+## 31. What is left
+
+- **`IsSole` still does not descend into a list's or a vect's data cursors.** §29 counts
+  what a field owns -- its attributes, its descendants, its stack, and the cursors those
+  carry -- and stops at `P3PmsgList::m_pP3PmsgData[]`, `P3PmsgVect::m_pP3PmsgData[]` and
+  `P3PmsgVect::m_pP3PmsgType`. Whatever those hold is a holder missed, which leaves the
+  answer FALSE, which promises nothing; the guarantee on TRUE is untouched either way.
+  That is the safe direction by the asymmetry §26 set out, and it is a deliberate stop
+  rather than an oversight: each would have to be shown to hold this heap and to be owned
+  outright before it could be subtracted, and neither has been measured.
+
+- **The three-link chain is built, not found.** §30 establishes that an image CAN carry
+  one -- the arena is written and read whole, and nothing validates chain length -- and
+  builds one with the heap's own allocator to put the walks to it. What it does not have
+  is a legacy image that actually carries one, so "this is what such an image would do"
+  rests on the format argument rather than on a file. Whether any image in hand -- a fuzz
+  seed, a sample workspace -- carries a longer chain has not been measured either way.
+
+- **The Win32 export manifest could not be re-measured.** §29 re-measured
+  `exports-cxx-x64.manifest` against a built DLL. `Msgcore(2026).sln` carries no Win32
+  configuration at all -- `Debug|Win32` is rejected by MSBuild as an invalid solution
+  configuration -- so `exports-cxx-win32.manifest` still describes the surface as it was
+  at `4d39d0d`, and carries the same fourteen pre-§29 omissions the x64 one did. The
+  check compares each platform against its own manifest, so this is recorded rather than
+  discovered next time.
+
+- **`check_api_drift.ps1` still fails, on two members that predate this work.**
+  `P3PmsgVect::Drop` (added by `d2763ce`) and `P3PmsgField::operator!=` (by `4f4c334`)
+  reach no binding and have no allowlist line. 163 of the allowlist's entries are
+  UNTRIAGED -- every one of them except the five §29 added. Deciding whether the flat C
+  surface should carry those two is a question about the C API rather than about `^`, and
+  it is left where it was found.
 
 Nothing else from this investigation is outstanding. That is not a claim that the grammar
-is without defect — only that every case these twenty-eight sections measured has an answer,
+is without defect -- only that every case these thirty sections measured has an answer,
 and that the answer is pinned by a test.
 
-## 30. Reproducing this document
+## 32. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
