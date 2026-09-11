@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §17 say how to
+> every line of output below was run against this tree; §6, §7 and §18 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -61,6 +61,9 @@ followed nowhere:
 | `P2PmsgDesc_GetVBLockParentnn` | read the owning ITEM's block as a `VBLockDesc` | the same defect §12 fixed in the attribute one, left standing (§15) |
 | `P3Pmsg_GetPath` | had no `P3PmsgDesc` overload at all | a descendant collection had no path to emit (§15) |
 | `RootPath2Object`, a bare component that missed | took the descendant delimiter's throw | a collection an item never had was reported two different ways (§15) |
+| `P2PmsgMgr::P2Pos2Path` | `IsField(pos)`, which is `VBLockItem_IsField` | **a list and a vector asserted, though `P3Pmsg_GetPath` builds both (§16)** |
+| `P2PmsgMgr::P2Pos2Path` | no arm for a collection at all | an object had a path the manager could not emit (§16) |
+| `P2PmsgMgr::P2Pos2Path`, anything else | `ASSERT(0)` | a debug assertion for a handle naming nothing (§16) |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
@@ -69,7 +72,8 @@ own half of that, §8), `dbfa789` (the half the tag could not reach, §8), `3f9e
 (collections, §9), `95f039c` (root paths carrying both, §10), `24c6a59` (the paths
 the library itself writes, §11), `d31f2c4` (the collection's own path, §12) and
 `8218904` (stepping off a container, §13), `5d48e5a` (a bare `@` anywhere, §14) and
-`2a03161` (the descendant collection, and the rule stated once, §15).
+`2a03161` (the descendant collection, and the rule stated once, §15) and `0888659`
+(one arm per block kind, §16).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -1099,7 +1103,106 @@ redundant is not malformed.
 What the splitter still refuses is a path that does not begin at a root, and `Store.BHP`
 — §10's other case — is what now pins the verdict being honoured at all.
 
-## 16. What is left
+## 16. A `P2Pos` had one kind of path
+
+`P2PmsgMgr::P2Pos2Path` is how a caller holding a raw handle asks what it is holding —
+the C entry point `msgcore_mgr_p2pos2path` is a thin wrapper over it, and so is every
+consumer that stores a `P2Pos` and wants to print where it points. It read:
+
+```cpp
+if ( IsField(pos) )
+{
+  P3PmsgField oField = P2Pos2Field(pos).r_Object();
+  return P3Pmsg_GetPath ( &oField );
+}
+else ASSERT(0);
+return CString();
+```
+
+`IsField(pos)` is `VBLockItem_IsField`. A list is not a field and a vector is not a
+field; a collection is not an item at all. So of the eleven things a `P2Pos` can name in
+a small store, four answered and seven asserted:
+
+```
+-- items --
+  root                   -> '.Store'                 back=SAME
+  field BHP              -> '.Store.BHP'             back=SAME
+  field Last             -> '.Store.BHP.Last'        back=SAME
+  attr Currency          -> '.Store.BHP@Currency'    back=SAME
+  list Numbers           -> ''                       [ASSERT]
+  vect Vec               -> ''                       [ASSERT]
+-- collections --
+  BHP attr coll          -> ''                       [ASSERT]
+  BHP desc coll          -> ''                       [ASSERT]
+  root desc coll         -> ''                       [ASSERT]
+  list attr coll         -> ''                       [ASSERT]
+-- neither --
+  zero                   -> ''                       [ASSERT]
+asserts=7
+```
+
+Every one of those six objects **has** a path. §6 taught
+`P3Pmsg_GetPath(const P3PmsgField*)` about containers, and `P3PmsgList` and `P3PmsgVect`
+both derive from `P3PmsgField`, so that overload has built a list's path and a vector's
+path all along. §12 gave the attribute collection an overload of its own and §15 gave the
+descendant collection one. Every piece was in place. This was the one caller that could
+reach none of it — an object whose path `P3Pmsg_GetPath` would build and the manager
+would not.
+
+**The kind is already known.** `P2Pos2Object` hands back a `P3PmsgObject`, and a
+`P3PmsgObject` answers `IsField`, `IsList`, `IsVect`, `IsAttr` and `IsDesc`. §13's walk
+carries a `P3PmsgObject` for the same reason: it is the one type here that knows what it
+is standing on.
+
+**The order the questions are asked in is not cosmetic.** `IsAttr` and `IsDesc` read the
+block header, which every block has. `IsField`, `IsList` and `IsVect` go straight to
+`VBLock_pItem` and read a `VBLockItem`'s fields out of whatever block is there — on a
+collection block that is the same `ut` union misread `P2PmsgAttr_GetVBLockParentnn`
+records in §12. Asked collections-first, the question is never put to a block that cannot
+answer it.
+
+**A collection needs its owner before it can have a path.** Neither collection overload
+takes a `P3PmsgObject`. Both reach the owner through the collection's back-pointer to the
+field it hangs off — `GetField()` — and `P3PmsgAttr(const P3PmsgObject&)` sets only
+`m_oObject`, leaving that pointer null. A collection converted straight from an object
+therefore builds a lone `@` or `.` with nothing in front of it, which is a string and not
+a path. So the owner is fetched first: `GetParent()` on a collection block is exactly the
+item the collection hangs off, and `r_Attr()` / `r_Desc()` install the back-pointer the
+overloads want.
+
+**And the `ASSERT(0)` goes.** A `P2Pos` naming a name block, a data block or nothing at
+all is not a caller error worth an assertion — §9's rule is that what a caller spells is
+the caller's business. The empty string says "no path" the way a void `P3PmsgObject` says
+"no object", and the two are already kept apart one level up: `msgcore_mgr_p2pos2path`
+answers `nullptr` only when the call **threw**.
+
+All eleven now answer, and every path handed straight back to `RootPath2Object` lands on
+the `P2Pos` it was built from:
+
+```
+-- items --
+  root                   -> '.Store'                 back=SAME
+  field BHP              -> '.Store.BHP'             back=SAME
+  field Last             -> '.Store.BHP.Last'        back=SAME
+  attr Currency          -> '.Store.BHP@Currency'    back=SAME
+  list Numbers           -> '.Store.Numbers'         back=SAME
+  vect Vec               -> '.Store.Vec'             back=SAME
+-- collections --
+  BHP attr coll          -> '.Store.BHP@'            back=SAME
+  BHP desc coll          -> '.Store.BHP.'            back=SAME
+  root desc coll         -> '.Store.'                back=SAME
+  list attr coll         -> '.Store.Numbers@'        back=SAME
+-- neither --
+  zero                   -> ''                       (no path, no assertion)
+asserts=0
+```
+
+`Test_P2Pos2Path` pins all four groups, and it has teeth: the test framework folds a CRT
+assertion into the running case as a failure, so against the unfixed library all four
+cases fail — 25 checks — and the fourth reports `P2PmsgMgr.cpp(808) : Assertion failed!`
+by name.
+
+## 17. What is left
 
 - **`.^` means two different things, and neither is the one §9 would predict.** In a root
   path `.^` is a component the walk strips to `^`, so `.Store.BHP.^` is the snapshot
@@ -1111,12 +1214,8 @@ What the splitter still refuses is a path that does not begin at a root, and `St
   it, and so does handing the collection to `P3Pmsg_SelectObject` with a `^`, both landing
   on pos=798 in one run. It is only this spelling of it that misses. Predates all of this, and
   no measurement here depends on it.
-- **`P2PmsgMgr::P2Pos2Path` answers for fields only.** It asserts for anything else, so a
-  collection now has a path that `P3Pmsg_GetPath` will build and the manager will not. The
-  three overloads exist; dispatching to them from a `P2Pos` needs the block kind, which
-  `P3PmsgObject` already answers.
 
-## 17. Reproducing this document
+## 18. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
