@@ -1605,8 +1605,9 @@ static void Test_RootPath()
         TF_CHECK(bThrewRootless);
 
         //  A trailing '@' names no attribute and is still dropped rather than
-        //  refused, exactly as it always was -- the GetPath round-trip leans
-        //  on that and is not part of this change.
+        //  refused, exactly as it always was. Deliberately outside this
+        //  change: it is the same shape as the trailing '.' the splitter has
+        //  always let through.
         TF_CHECK(!mgr.RootPath2Object(L".Root.Alpha@").IsVoid());
     }
 }

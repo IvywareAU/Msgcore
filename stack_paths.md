@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §11 say how to
+> every line of output below was run against this tree; §6, §7 and §12 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -45,13 +45,15 @@ followed nowhere:
 | `P3Pmsg_SelectObjectRecurse`, a collection never created | fell through every arm to the closing `ASSERT(0)` | **two debug assertions for an ordinary miss (§9)** |
 | `P2PmsgMgr::RootPath2Object` | stripped off every component | `^` and `@` were looked up as plain child names |
 | `P3Pmsg_SplitRootPath` | refused a bare `^`, dropped a trailing one | **`.Root.Item^` silently answered with `Item` itself** |
+| `P3Pmsg_SplitRootPath` | a component boundary, even where no name preceded it | `@^Tag` was a nameless `@`, and the whole path came back FALSE (§10) |
+| `RootPath2Object`, on a refused split | walked the components collected before the refusal | **a malformed path answered with an object, not an error (§10)** |
 | `RootPath2Object`, on a miss | assigned a void object into a `P3PmsgItem` | threw `"Invalid overloaded context"` instead of answering |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
 `8729312` (releasing them in an order the heap can reclaim, §7-§8), `4bb228a` (the heap's
-own half of that, §8), `dbfa789` (the half the tag could not reach, §8) and `3f9ecfa`
-(collections, §9).
+own half of that, §8), `dbfa789` (the half the tag could not reach, §8), `3f9ecfa`
+(collections, §9) and `95f039c` (root paths carrying both, §10).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -684,29 +686,80 @@ And `P3PmsgDesc::SelectObject` is not a path lookup, despite the name — it is 
 in `MsgDesc.cpp` and `P2Pmsg.cpp`.) The descendant arm is reached by handing the collection
 to `P3Pmsg_SelectObject` directly, which is how `Test_CollectionStack` reaches it.
 
-## 10. What `^` still does not do
+## 10. A root path could not carry `@^`
 
-- **Root paths carrying `@^`.** `.Store.BHP@^Currency` answers **BHP** — the item the path
-  started from, not the attribute and not void. `P3Pmsg_SplitRootPath` builds each component
-  from its delimiter up to the next one, and `^` *is* a delimiter, so `@^Currency` yields a
-  component that is the single character `@`; the length test rejects it and the split
-  returns FALSE — which `P2PmsgMgr::RootPath2Object` never looks at. The walk then runs over
-  whatever components were collected before the refusal and answers the parent. The
-  object-path spelling, `oField.SelectObject(L"@^Currency")`, is the one that works (§9), and
-  `Test_CollectionStack` pins the wrong answer rather than pretending otherwise. This is the
-  same family as the two bullets below and is the obvious next thing to pick up.
+§9 made `Item@^Tag` resolve. `.Store.BHP@^Currency` still answered **BHP** — not the
+attribute, not void, but the item the path started from.
+
+`^` is a delimiter, and it is the only one that introduces no **name** of its own: it names
+the pushed value of whatever stands to its left. `P3Pmsg_SplitRootPath` did not know that,
+and cut a fresh component at every `^`. So `@^Currency` became a component that was the
+single character `@`, carrying no name at all — which the length test refuses, and the
+refusal is for the whole path, not for the component.
+
+`P2PmsgMgr::RootPath2Object` then discarded the `FALSE` and walked whatever components had
+been collected before the splitter gave up. The walk answers the last component it managed,
+so the path came back as the object one step above the refusal. A wrong object, with
+nothing in it to tell it from a right one.
+
+### Both halves
+
+The scan takes a `^` while the component is still nothing but delimiters, and stops at one
+once a name has been read. `@^^Tag` is one component; `@Tag^` is two, because the attribute
+`Tag` has a stack of its own and asking for it is a second step.
+
+The walk honours the verdict. A malformed path throws, which is what a missing descendant
+already did there; void stays reserved for a search that ran and found nothing.
+
+A last component that resolves to a **collection** is handed back rather than assigned into
+the `P3PmsgItem` the walk carries — `P3PmsgField::operator=` throws for a non-field, and
+there is nothing to assign for when there is nothing left to walk. That is what
+`.Store.BHP@^` needs, and the object-path spelling has always returned it. A non-field
+reached *before* the last component still throws; the walk has no way to step off one.
+
+### Measured
+
+```
+                            before        after
+  .Store.BHP@^Currency      BHP           Currency    pos=1970   <- == ^@Currency
+  .Store.BHP@^^Currency     BHP           Currency    pos=1056
+  .Store.BHP.^Last          BHP           Last        pos=2345   <- == ^.Last
+  .Store.BHP@^              BHP           (attr coll) pos=1923   <- == @^
+  .Store..BHP               Store         throws
+  Store.BHP                 Store         throws
+```
+
+Every root path now agrees with its object-path spelling. That is what §9's commuting rule
+claims, and until this it was a claim no root path could make.
+
+The `P3Pmsg_GetPath` → `RootPath2Object` round-trip is untouched: `GetPath` produces
+`.Store.BHP` for the item and `.Store.BHP@Currency` for the attribute, and both resolve back
+to the object they name, before and after.
+
+### What did not change
+
+A trailing `@` is still dropped rather than refused — `.Root.Item@` is `Item`, as it always
+was. A `@` at the end of a path introduces a name that is not there, which is the same shape
+as the trailing `.` the splitter has always let through; it is deliberately outside this
+change, and §11 records it.
+
+## 11. What `^` still does not do
+
 - **Paths the library generates.** `P3Pmsg_GetPath` never emits `^`, so no path produced by
   Msgcore itself gains a component. It does emit a trailing `@` for an attribute path, and
   the splitter still drops that one — deliberately, so the `GetPath` → `RootPath2Object`
   round-trip is unchanged.
-- **`RootPath2Object` on a non-field hit.** It walks the path in a `P3PmsgItem`, and
-  `P3PmsgField::operator=(const P3PmsgObject&)` throws `"Invalid overloaded context"` for
-  anything that is not a field, so a component that resolves to a list throws before it can
-  answer. Unchanged here, and it predates all of this — but note that it is now easier to
-  reach than it was, because §6 is what made such a component resolve in the first place.
-  `Test_StackContainers` asks a descendant container directly for that reason.
+- **`RootPath2Object` on a non-field hit, part way along.** It walks the path in a
+  `P3PmsgItem`, and `P3PmsgField::operator=(const P3PmsgObject&)` throws `"Invalid
+  overloaded context"` for anything that is not a field. §10 handles the case that has an
+  answer — a non-field as the **last** component, which needs no assignment — but a list or
+  a collection reached with components still to walk throws as it always did. The walk would
+  have to carry a `P3PmsgObject` to do better, and every step of it would have to stop
+  assuming it is standing on an item. It predates all of this, and §6 is what made such a
+  component resolve in the first place. `Test_StackContainers` asks a descendant container
+  directly for that reason.
 
-## 11. Reproducing this document
+## 12. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
