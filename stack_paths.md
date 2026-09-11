@@ -40,14 +40,15 @@ followed nowhere:
 | `MsgStck::Drop` | unlinked every generation and freed none | **every pushed block leaked, for every caller** |
 | `MsgStck::Drop`, free order | released the chain deepest-first | the blocks came back only as far as the allocator could coalesce them (§8) |
 | `P2PmsgHeap_Collate*` | merged forwards only | **any ascending run of frees leaked its blocks — no stack needed (§8)** |
+| `P2PmsgHeap_Alloc*` | first-fit, from a LIFO free-list head | **a small request split the biggest free block, and the small ones were never chosen (§8)** |
 | `P2PmsgMgr::RootPath2Object` | stripped off every component | `^` and `@` were looked up as plain child names |
 | `P3Pmsg_SplitRootPath` | refused a bare `^`, dropped a trailing one | **`.Root.Item^` silently answered with `Item` itself** |
 | `RootPath2Object`, on a miss | assigned a void object into a `P3PmsgItem` | threw `"Invalid overloaded context"` instead of answering |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
-`8729312` (releasing them in an order the heap can reclaim, §7-§8) and `4bb228a` (the
-heap's own half of that, §8).
+`8729312` (releasing them in an order the heap can reclaim, §7-§8), `4bb228a` (the heap's
+own half of that, §8) and `dbfa789` (the half the tag could not reach, §8).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -474,11 +475,12 @@ After the fix: **117 cases, 587 checks, PASS** static and **PASS** dll, and
 `MsgVect.cpp`, `MsgVect.h` and `P2Pmsg.cpp` from `d2763ce~1` — or just `MsgVect.cpp` and
 `MsgVect.h` to isolate the vect `Drop` on its own.
 
-## 8. The heap only coalesced forwards
+## 8. The heap only coalesced forwards, and then chose badly
 
 Found while measuring §7, and it is **not** a stack defect — the stack was only the thing
-standing on it. It is recorded here because that is where the evidence is. Fixed by
-`4bb228a`; the two properties below are what it was.
+standing on it. It is recorded here because that is where the evidence is. It turned out
+to be two defects rather than one, fixed by `4bb228a` and `dbfa789`; the two properties
+below are the first of them.
 
 Two properties of the IOMAGE/BSTRio allocator combined badly:
 
@@ -554,13 +556,61 @@ worth its cost.
 Both arms, IOMAGE and BSTRio, take the same change, deliberately: they walk and merge by
 the same rules, and a fix that lands on one and not the other is how the two drift apart.
 
-### The other candidate, not taken
+### The other half: a closer fit
 
-A **closer-fit search** — keep walking when the head of the free list is much larger than
-the request, so the small blocks get taken — would have hidden most of the symptom without
-addressing the cause, and it moves every allocation the library makes, which is the layout
-`golden_ref.p2p` pins. The tag reclaims the space instead of routing around it, and costs
-the golden image nothing.
+The tag repairs adjacency. It cannot repair **choice**, and the allocator was choosing
+badly for a second, independent reason: it was first-fit from the head of a **LIFO** free
+list. A freed block goes to the head, so the head is whichever block was freed last, and
+first-fit took it whatever its size.
+
+Free an 800-byte block and then a 50-byte one, ask for 50, and the 800 is split. The
+50-byte block stays on the list untouched, and the next 800-byte request can no longer be
+served by what is left of the block that used to serve it — so it comes off the end of the
+image instead, and the arena grows with two perfectly good free blocks sitting on the list.
+The tag cannot help: live data sits between those two blocks, so there is nothing to merge.
+
+Measured on exactly that, two fields with a live one between them:
+
+```
+Big = 331, Sml = 1125, both then freed
+
+                        before      after
+    a small request      331         1125     <- splits Big / takes Sml
+    a big request        1517         331     <- fresh ground / takes Big
+```
+
+1517 is the whole cost in one number: a heap holding two free blocks that could use neither
+for what they were made for.
+
+**What this section said before was wrong twice**, and both corrections are the reason the
+work was worth doing. It called a closer fit "hiding most of the symptom without addressing
+the cause" — but the cause it addresses is a different one from the tag's, and nothing else
+addresses it. And it said the search "moves every allocation the library makes, which is
+the layout `golden_ref.p2p` pins" — it moves an allocation only when the free list holds
+more than one block that fits, which a workload that never frees never does. The golden
+workload never frees. `golden_ref.p2p` is **byte-identical**, unchanged, for the same
+reason the tag left it alone.
+
+**The walk is bounded at eight blocks that fit**, and eight is chosen against the list's own
+order rather than as a round number: the list is LIFO, so the blocks nearest the head are
+the most recently freed, which in a container being emptied and refilled — the workload
+that produced the drift above — are exactly the blocks about to be asked for again. A walk
+of the whole list would spend most of its time on the part least likely to help. Blocks too
+small to serve the request do not count against the budget; they were walked past before
+this change and are walked past after it.
+
+**The chosen block is re-checked before it is used**, because the walk collates as it goes
+and a collate absorbs the block that physically *follows* it. The free list is in no address
+order, so a block visited late in the walk can sit immediately before a block chosen early
+in it, and swallow it. An absorbed block has its defs byte zeroed, so the usual predicates
+catch it; the answer is one more pass taking the first fit outright, which cannot go stale
+because nothing is collated between finding that block and allocating it.
+
+`P2PmsgHeap_AllocIOMAGE1` keeps first-fit, and that is the one place the two arms and their
+dead twin part company. F11b's bound had to be carried into that unreferenced function
+because a bound is a **safety** property and an unbounded twin is how a bound gets lost
+again. A better choice of block is not: a revived copy would merely allocate the way the
+library used to.
 
 ## 9. What `^` still does not do
 
@@ -713,5 +763,9 @@ The "before" column was produced by the same source against a `git worktree` of 
 the commit before the first of the two fixes. `P2Pos` values differ run to run — they are
 heap offsets — so read them for equality within one run, never across.
 
-The cases are also pinned as regression tests: `Test_Stack` and `Test_RootPath` in
-`tests/MsgcoreSuite.cpp`, run by `tests\build_run_suite.bat` in both link modes.
+The cases are also pinned as regression tests in `tests/MsgcoreSuite.cpp`, run by
+`tests\build_run_suite.bat` in both link modes: `Test_Stack` and `Test_RootPath` for §2-§5,
+`Test_ListPath` and `Test_StackContainers` for §6-§7, `Test_VectDrop` and `Test_StackDrop`
+for §7, and `Test_HeapCoalesce` and `Test_HeapCloserFit` for §8. Note that
+`build_run_suite.bat` compiles only the test sources — a change to the library itself does
+not reach the suite until `msbuild` has rebuilt it.
