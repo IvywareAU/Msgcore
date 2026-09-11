@@ -4985,107 +4985,53 @@ to be guessed. Sharpening that sentence is a NOTES edit and the owner's to make.
 
 ## 44. What is left
 
-Ten entries stood here. Seven are closed by §39 to §43, two of them by measurements that
-refuted the entry rather than confirming it, and one -- `P3PmsgVect::IsName` -- by the
-owner choosing between two closes this document had laid out and declined to choose
-between. Two are unchanged and restated. Everything else below is new, and almost all of it
-was found by closing the old.
+This list had four entries at `4e897f7`, nine at `46a63f8`, ten at `1e5c442` and nine after
+a round that closed seven. It was not a backlog. It was a ledger of everything anybody
+noticed, and it could not reach zero, because closing an entry means reading the code
+beside it and the code beside it always has something.
+
+**An entry here names a defect with a consequence somebody can hit.** Not an observation, not
+a measurement somebody has not taken, not a thing this document declined to do, and not a
+suggestion about an API. Those live in the section that found them, which is where a reader
+meets them with the evidence attached. Three things qualify.
 
 - **A documented predicate repairs the heap, and its only caller throws the repair away.**
-  `P3PmsgObject::AssertValidAddr` (`P2Pmsg.cpp:3313`) carries a header comment saying
-  exactly what it answers -- "Returns: BOOL / TRUE... Valid address / FALSE.. Invalid
-  address" -- and its body is `return P2PmsgHeap_AssertValidAlloc ( m_hVBList,
-  aVBLockAddr );`, the repairing form §39 measured writing `VBLock_Linked` into a block.
-  So asking the question mutates the heap. Its one caller is `MsgDesc.cpp:258`, and it is
-  `ASSERT(m_oObject.AssertValidAddr(aDesc))` -- so under `NDEBUG` the call vanishes and the
-  repair with it. **That is both of §39's failure modes in one member**: a validator that
-  writes while its name and its own documentation say it tests, and a write that exists
-  only in Debug. §39 fixed the two sites where the repair was lost; this is the site where
-  it is lost AND misdocumented, and it was found by reading the call sites §39 left behind
-  rather than by §39 itself. `P3PmsgObject::AssertValid` (`:3272`) is the same shape with
-  the other polarity: a bare `P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock);` at `:3286`
-  whose return value is discarded, so the repair is the only reason the line is there and
-  it runs in Release as well.
-
-- **Three sites carry §39's lost write and were left because of how they are classified.**
-  `P2Pmsg.cpp:3170`, `:3176` and `:3186` are all
-  `ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_AssertValidAlloc(...))`, the same lost
-  write §39 promoted out at `:2934` and `:2981`. They were not converted because the
-  classifier reads them as `predicate` rather than `callwrap`, so converting them would
-  move a second baseline figure for a reason that has nothing to do with the defect. That
-  is the right call and it is also a bad reason for code to stay wrong, which is what makes
-  this an entry rather than a footnote. The pure `P2PmsgHeap_IsValidAlloc` they need now
-  exists (`MsgVBHeap.h:298`), so the conversion is mechanical; what it needs is a commit of
-  its own and a re-bank with a stated reason.
-
-- **131 `file:line` citations in this document, and nothing checks a single one.**
-  `check_md_citations.ps1` resolves `.md` documents -- 41 of them -- and its own header
-  explains at length why it scans for every citation rather than a list somebody thought
-  to keep. The same argument applies one level down and nobody has made it: the 131
-  `file.cpp:123` citations across 26 files are checked by nothing at all. This is not
-  theoretical. Twice this session an entry written as a measurement carried line numbers
-  that no longer pointed at what they claimed: §35 found What-is-left's IOMAGE citations
-  `:3330` and `:3438` were a commented-out block and the wrong function, and §39 found
-  `:4983` had drifted onto a second live copy of the very defect it was cited as the
-  precedent for FIXING. Both were caught by a human reading the code. A gate is writable --
-  resolve `file:line`, check the line still contains the token the prose puts in backticks
-  near it -- and it would have caught both.
-
-- **Three more members are declared and defined nowhere, all on `P3PmsgBSTR`.**
-  `VBLockBSTR_vp` (`P2PmsgBSTR.h:202`), `SetDefaultSizeof` (`:206`) and `IsFragmented`
-  (`:208`). It is `P3PmsgVect::IsName`'s case exactly, and `P2PmsgBSTR.cpp:454` already says
-  so about one of them in its own words. The owner has now settled the same question once,
-  choosing deletion over definition on the ground that removing a declaration with no
-  working caller cannot break anything that compiles today. That precedent is not applied
-  here on its own, because `SetDefaultSizeof` reads like something somebody meant to
-  implement and a setter is not a predicate; one of these three may want defining where
-  `IsName` did not.
+  `P3PmsgObject::AssertValidAddr` (`P2Pmsg.cpp:3313`) says in its own header comment that it
+  returns "TRUE... Valid address / FALSE.. Invalid address", and its body is
+  `return P2PmsgHeap_AssertValidAlloc ( m_hVBList, aVBLockAddr );` -- the repairing form §39
+  measured writing `VBLock_Linked` into a block. Asking the question mutates the heap. Its
+  one caller is `ASSERT(m_oObject.AssertValidAddr(aDesc))` (`MsgDesc.cpp:258`), so under
+  `NDEBUG` the call and the repair vanish together, and Debug and Release leave different
+  bytes behind. `P3PmsgObject::AssertValid` (`:3272`) is the same defect with the other
+  polarity: a bare `P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock);` at `:3286` whose
+  return value is discarded, so the repair is the only reason the line exists and it runs in
+  Release too. `P2Pmsg.cpp:3170`, `:3176` and `:3186` are the same lost write again. They are
+  one defect and one fix: the pure `P2PmsgHeap_IsValidAlloc` §39 split out
+  (`MsgVBHeap.h:298`) is what they all want, and the conversion is mechanical.
 
 - **`P2PmsgMgr::SharedMode` is a no-op that looks like a setter.** `P2PmsgMgr.cpp:519-526`
-  compares its argument and returns it, assigning nothing. §42 found it while triaging and
-  triaged it as not-carried on exactly that ground: binding it would put a function on the
-  flat surface that promises file sharing and does nothing. Whether it should assign
-  `m_dwSharedMode` or be deleted is a question about the manager, and neither answer is
-  available from the C API side of the fence.
+  compares its argument and returns it, assigning nothing, so a caller that sets a sharing
+  mode gets the mode back and no sharing mode. Either it assigns `m_dwSharedMode` or it
+  should not be a member.
 
-- **The flat surface cannot serialise to a buffer.** `msgcore_mgr_save`, `_load` and
-  `_open_file` are file-only, so a host putting a message on a socket writes a temporary
-  file and reads it back. §42 recommends the pair that would close it: `(void*, size_t)`
-  calls needing no `P2Piomage` in the signature and publishing no layout. It is an addition
-  to the supported ABI and therefore the same class of decision as §41 -- which is now a
-  decision with a worked precedent, since §41 shows what the header text has to do. A
-  second and much smaller one sits beside it: there is no `msgcore_curs_prev`, so stepping
-  a cursor backwards on the flat surface is O(n).
+- **Three members are declared and defined nowhere.** `P3PmsgBSTR::VBLockBSTR_vp`
+  (`P2PmsgBSTR.h:202`), `::SetDefaultSizeof` (`:206`) and `::IsFragmented` (`:208`);
+  `P2PmsgBSTR.cpp:454` already says so about the last one in its own words. The first caller
+  meets `LNK2019` against a member the header offers. §37 found the same defect on
+  `P3PmsgVect::IsName` and it was closed by deleting the declaration, on the ground that
+  removing a member with no working caller cannot break anything that compiles today. That
+  precedent settles `IsFragmented`; `SetDefaultSizeof` is a setter rather than a predicate
+  and may want defining instead.
 
-- **`check_asserts.ps1`'s headline-number paragraph is stale, and it is the third time this
-  file has gone stale in the same way.** "A NOTE ON THE HEADLINE NUMBER" still says live
-  `ASSERT(0)` markers are 250 and the `CALLWRAP` form numbers 277; measured, they are 209
-  and 245. §40 left it deliberately, because the paragraph's POINT -- that the register's
-  277 was measuring `callwrap` and calling it `marker` -- still stands, and rewriting the
-  figures inside an argument about a stale figure needed its own pass. That pass has not
-  happened. §33 met this in a manifest, §38 met it in a baseline, and this is the same file
-  telling the same lie in prose instead of in a number.
+That is the whole of it. The per-block reference count is not listed: it is a standing
+property of the storage layer, §26 states it, and restating it in five consecutive rounds
+made it look like work somebody was going to do. The chain question is not listed either --
+§32 asked all nineteen images and answered it. Two additions the flat surface could carry
+are argued in `tools/ci/api-drift.allow` where the decision gets made, not here.
 
-- **The per-BLOCK reference count is still a different library.** §26 set this out and
-  nothing since has moved it: `VBListHANDLE` has no lock of any kind, only `nRefCount` is
-  atomic and its declaration says why (`MsgVBHeap.cpp:806`, "AddRef/Close race across pump
-  threads"), and two writes to `m_aVBLock` take no reference at all. §43 sharpened what
-  `IsSole` TRUE is worth without touching this, and §41 published that guarantee on the
-  flat surface, which raises the stakes rather than lowering them: the contract
-  `msgcore_field_is_sole` now carries is only as good as the count underneath it, and the
-  count is not thread-safe. Closing this means putting a lock on `VBListHANDLE`, which is a
-  redesign of the storage layer and not an entry in an investigation of `^`.
-
-- **No image in hand carries a chain longer than one link, and that is the answer rather
-  than a gap.** §32 asked all nineteen and none does. What would still be worth having is a
-  legacy image from outside this repository, since the format argument -- not the file --
-  is what §30 rests on, and an image this tree builds only re-measures this tree's builder.
-  The measurement is repeatable: the probe is in §45.
-
-Nothing else from this investigation is outstanding. That is not a claim that the grammar
-is without defect -- only that every case these forty-three sections measured has an
-answer, that the answer is pinned by a test or by a gate that runs on every push, and that
-the five gates now pass together, which they had not done on any commit since `d2763ce`.
+The `^` grammar was settled at §28. §29 to §43 measured what the settling touched, and
+every case they opened has an answer pinned by a test or by a gate that runs on every push.
+Five gates now pass together, which they had not done on any commit since `d2763ce`.
 
 
 ## 45. Reproducing this document
