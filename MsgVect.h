@@ -81,6 +81,8 @@ class Msgcore_EXT P3PmsgVect : public P3PmsgField
 
         operator P3PmsgData& ( );
 
+      //  `if ( oVect )` and nothing else.  Refer P3PmsgObject::operator bool.
+      explicit
         operator bool ( );
 
     // Navigation and 

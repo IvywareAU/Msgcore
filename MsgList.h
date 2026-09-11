@@ -108,6 +108,8 @@ class Msgcore_EXT P3PmsgList : public P3PmsgField
 
         operator P3PmsgData& ( );
 
+      //  `if ( oList )` and nothing else.  Refer P3PmsgObject::operator bool.
+      explicit
         operator bool ( );
 
     // Navigation and 

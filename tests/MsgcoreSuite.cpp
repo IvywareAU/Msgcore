@@ -2764,6 +2764,158 @@ static void Test_VoidPredicates()
 }
 
 // ---------------------------------------------------------------------------
+// "Are these two the same item?" is a question a field can be asked
+// ---------------------------------------------------------------------------
+static void Test_ItemIdentity()
+{
+    //  §20 left it recorded that a P3PmsgField copies as a value and
+    //  r_Object() copies as a handle, and that nothing at the call site says
+    //  which you have. The pair can be asked now, and this is the answer.
+    TF_CASE("a handle is the same item; a value copy is not")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+        mgr.r_Desc() += P3PmsgField(L"BBB", P3PmsgData((int)2));
+
+        P3PmsgField oTree  = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        P3PmsgField oHnd   = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        P3PmsgField oCopy  = mgr.r_Desc().SelectItem(L"AAA");
+        P3PmsgField oOther = mgr.r_Desc().SelectItem(L"BBB").r_Object();
+
+        TF_CHECK(oTree == oTree);
+        TF_CHECK(oTree == oHnd);            // the same item, twice
+        TF_CHECK(!(oTree == oCopy));        // reads the same, IS not the same
+        TF_CHECK(!(oTree == oOther));       // not even the same name
+        TF_CHECK(oTree != oCopy);
+        TF_CHECK(oTree != oOther);
+        TF_CHECK(!(oTree != oHnd));
+    }
+
+    //  The identity test and the write-through agree, which is the only
+    //  reason to have it: whoever == says is the item is the one a write
+    //  reaches.
+    TF_CASE("== agrees with what a write actually reaches")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        P3PmsgField oTree = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        P3PmsgField oHnd  = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        P3PmsgField oCopy = mgr.r_Desc().SelectItem(L"AAA");
+
+        TF_CHECK(oTree == oHnd);
+        oHnd.r_data().c_int(333);
+        TF_CHECK_EQ(mgr.r_Desc().SelectItem(L"AAA").r_data().c_int(), 333);
+
+        TF_CHECK(!(oTree == oCopy));
+        oCopy.r_data().c_int(999);
+        TF_CHECK_EQ(mgr.r_Desc().SelectItem(L"AAA").r_data().c_int(), 333);
+
+        TF_CHECK_EQ((int)(oTree.GetP2Pos() == oHnd.GetP2Pos()), 1);
+        TF_CHECK_EQ((int)(oTree.GetP2Pos() == oCopy.GetP2Pos()), 0);
+    }
+
+    //  An empty floating field is an item too -- §20 -- so it is not equal to
+    //  every other item merely because both of them are something.
+    TF_CASE("two unrelated floating items are not the same item")
+    {
+        P3PmsgField oEmpty;
+        P3PmsgField oFloatA(L"Floater");
+        P3PmsgField oFloatB(L"Floater");
+
+        TF_CHECK(!(oEmpty == oFloatA));
+        TF_CHECK(!(oFloatA == oFloatB));    // same name, two items
+        TF_CHECK(oFloatA == oFloatA);
+        TF_CHECK(oFloatA.r_name().c_wcsicmp(oFloatB.r_name().c_name()) == 0);
+    }
+
+    //  A void field denotes no item, so it is not the same item as anything
+    //  that does -- and two of them are equally nothing.
+    TF_CASE("void is not an item, and all of it is the same nothing")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        P3PmsgObject oRoot  = mgr.r_Object();
+        P3PmsgField  oVoidA ( P3Pmsg_SelectObject(&oRoot, L"NoSuchItem") );
+        P3PmsgField  oVoidB ( P3Pmsg_SelectObject(&oRoot, L"NorThisOne") );
+        P3PmsgField  oTree  = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+
+        TF_CHECK(oVoidA.IsVoid());
+        TF_CHECK(oVoidB.IsVoid());
+        TF_CHECK(oVoidA == oVoidB);
+        TF_CHECK(!(oVoidA == oTree));
+        TF_CHECK(oVoidA != oTree);
+    }
+
+    //  The object answers the same question, because that is where this one
+    //  is asked. P3PmsgObject gained != for the same reason the field did.
+    TF_CASE("the object underneath gives the same answers")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        P3PmsgField oTree = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        P3PmsgField oHnd  = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        P3PmsgField oCopy = mgr.r_Desc().SelectItem(L"AAA");
+
+        TF_CHECK((oTree == oHnd)  == (oTree.r_Object() == oHnd.r_Object()));
+        TF_CHECK((oTree == oCopy) == (oTree.r_Object() == oCopy.r_Object()));
+        TF_CHECK(oTree.r_Object() != oCopy.r_Object());
+        TF_CHECK(!(oTree.r_Object() != oHnd.r_Object()));
+    }
+
+    //  And the comparison this class always meant to offer is still the one a
+    //  string literal selects -- NOT an identity test against a temporary
+    //  field that happens to carry that name.
+    TF_CASE("comparing a field to a name still compares the name")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        P3PmsgField oTree = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        TF_CHECK(oTree == L"AAA");
+        TF_CHECK(oTree == L"aaa");          // the name compare is caseless
+        TF_CHECK(!(oTree == L"BBB"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A const field can be compared to its name
+// ---------------------------------------------------------------------------
+static void Test_ConstFieldName()
+{
+    //  P3PmsgName declares both of its comparisons const; P3PmsgField hides
+    //  them with one that was not, so this did not compile at all -- C2678 --
+    //  while every meaningless comparison between two fields did.
+    TF_CASE("a const field answers to its own name")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        const P3PmsgField oConst = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        TF_CHECK(oConst == L"AAA");
+        TF_CHECK(!(oConst == L"BBB"));
+
+        const P3PmsgField oOther = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        TF_CHECK(oConst == oOther);
+        TF_CHECK(!(oConst != oOther));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3Pmsg_SplitRootPath : a bare '@' is a component wherever it stands
 // ---------------------------------------------------------------------------
 static void Test_BareAttrComponent()
@@ -4380,6 +4532,8 @@ void RunMsgcoreSuite()
     Test_RootedLeadingDot();
     Test_FloatingIdentity();
     Test_VoidPredicates();
+    Test_ItemIdentity();
+    Test_ConstFieldName();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();

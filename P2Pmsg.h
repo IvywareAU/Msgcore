@@ -520,7 +520,14 @@ class Msgcore_EXT P3PmsgObject
         operator = ( const P3PmsgObject& rhs );
       bool
         operator == ( const P3PmsgObject& rhs ) const;
+      bool
+        operator != ( const P3PmsgObject& rhs ) const;
 
+      //  `if ( oObject )` and nothing else.  EXPLICIT because the implicit
+      //  form made `oA == oB` compile as `(int)(bool)oA == (int)(bool)oB` --
+      //  "are we both non-void" wearing the spelling of "are we the same
+      //  item".  Refer P3PmsgField::operator == for the measurement.
+      explicit
         operator bool ( ) const noexcept;
 
     // Memory management
@@ -716,13 +723,28 @@ class Msgcore_EXT P3PmsgField : public P3PmsgName, public P3PmsgData
         operator += ( const P3PmsgVect& rhs );
       P3PmsgField&
         operator += ( const P3PmsgField& rhs );
+      //  Compare by NAME.  const since [2026-09-11]: P3PmsgName declares both
+      //  of its comparisons const, this hides them, and a const field could
+      //  therefore not be compared to a name at all -- C2678, while every
+      //  meaningless comparison below compiled.
       bool
-        operator == ( LPCTNAM lpszName );
+        operator == ( LPCTNAM lpszName ) const;
+
+      //  Compare by IDENTITY -- do these two denote the SAME item?  That is
+      //  P3PmsgObject's question and this asks it of the object.  For the
+      //  value, which is a different question, ask r_data() and r_name().
+      bool
+        operator == ( const P3PmsgField& rhs ) const;
+      bool
+        operator != ( const P3PmsgField& rhs ) const;
+
       virtual P3PmsgField&
         operator [] ( LPCTNAM lpszName );
 
         operator P3PmsgData& ( );
 
+      //  `if ( oField )` and nothing else.  Refer P3PmsgObject::operator bool.
+      explicit
         operator bool ( ) const;
 
     // Chained reference exposures

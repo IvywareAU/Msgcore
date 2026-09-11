@@ -2672,6 +2672,20 @@ P3PmsgObject::operator == ( const P3PmsgObject& rhs ) const
 }
 
 //
+//  Do these two objects denote DIFFERENT items?
+//  NOTES: The negation of the line above, written out because it could be
+//         written before this existed and meant something else. operator bool
+//         was an implicit conversion, so `oA != oB` had a viable built-in
+//         candidate -- (int)(bool)oA != (int)(bool)oB -- and compiled to "is
+//         exactly one of us void", which is an answer to a question nobody
+//         asks. Refer P3PmsgField::operator == .
+bool
+P3PmsgObject::operator != ( const P3PmsgObject& rhs ) const
+{
+    return !( *this == rhs );
+}
+
+//
 //  Does this object denote an item?
 //  NOTES: EXACTLY !IsVoid(), and nothing else. It used to answer "is there a
 //         heap", which is a different question and gave the opposite answer to
@@ -3446,11 +3460,62 @@ P3PmsgField::operator = ( const P3PmsgName& rhs )
    (P3PmsgName&)*this = rhs;
     return *this;
 }
+//
+//  Is this the field called <lpszName>?
+//  NOTES: const since [2026-09-11]. P3PmsgName declares operator == against
+//         both a name and another P3PmsgName, and both are const; this one
+//         hides them and was not, so `oConstField == L"AAA"` -- the ONLY
+//         comparison this class ever meant to offer -- was the one that did
+//         not compile. C2678, and no fall-back, because a string literal does
+//         not convert to int and so the built-in candidates below were not
+//         viable either.
 bool
-P3PmsgField::operator == ( LPCTNAM lpszName )
+P3PmsgField::operator == ( LPCTNAM lpszName ) const
 {
     ASSERT(P3PmsgName::m_pObject==&m_oObject);
     return _tcsicmp(c_name(), lpszName ) ? false : true;
+}
+
+//
+//  Do these two fields denote the SAME item?
+//  NOTES: THIS IS AN IDENTITY TEST, NOT A VALUE TEST. It asks P3PmsgObject,
+//         which compares the heap handle and the block address -- so a handle
+//         and the item it was taken from are equal, and a value copy of that
+//         item is NOT, however identically it reads. That distinction is the
+//         whole of it: `P3PmsgField oB = oA` is a second item and
+//         `P3PmsgField oB = oA.r_Object()` is the first one, and until this
+//         existed the pair could not be asked which they were.
+//       : What `oA == oB` used to do was compile anyway. operator bool was an
+//         implicit conversion, so the built-in operator ==(int,int) was a
+//         viable candidate and the expression meant
+//         `(int)(bool)oA == (int)(bool)oB` -- "are we both non-void". Against
+//         a store holding AAA=1 and BBB=2 that answered true for a handle, for
+//         a value copy, for an unrelated item and for an empty floating one:
+//         four questions, one answer, and only the first of them right.
+//       : It is the CONVERSION that made that legal, so the conversion is now
+//         explicit on this class, on P3PmsgObject, and on the four collections
+//         -- refer the declarations in P2Pmsg.h. `if ( oField )`, `!oField`,
+//         `oA && oB` and static_cast<bool> are contextual and unaffected;
+//         `oA == oB`, `oA < oB`, `int n = oField` and `oField + 1` are not,
+//         and no longer compile. Building every solution in this tree and in
+//         Chartboard with the conversion explicit produced no error at all,
+//         which is the measurement: nothing anywhere was using it.
+//       : For "do these two read the same", which is what P3PmsgData::operator
+//         == answers for a value, compare r_data() and r_name() -- this class
+//         hides both, deliberately, because a field is an item first.
+bool
+P3PmsgField::operator == ( const P3PmsgField& rhs ) const
+{
+    return r_Object ( ) == rhs.r_Object ( );
+}
+
+//
+//  Do these two fields denote DIFFERENT items?
+//  NOTES: Refer P3PmsgField::operator == .
+bool
+P3PmsgField::operator != ( const P3PmsgField& rhs ) const
+{
+    return !( *this == rhs );
 }
 P3PmsgField&
 P3PmsgField::operator [] ( LPCTNAM lpszName )

@@ -105,7 +105,9 @@ class Msgcore_EXT P3PmsgAttr
       virtual P3PmsgItem&
         operator [] ( LPCTNAM lpszName );
 
-      operator bool ( ) const;
+      //  `if ( oAttr )` and nothing else.  Refer P3PmsgObject::operator bool.
+      explicit
+        operator bool ( ) const;
 
     // Chained reference exposures
     public:
