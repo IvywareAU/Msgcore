@@ -924,6 +924,57 @@ static void Test_Stack()
 }
 
 // ---------------------------------------------------------------------------
+// P3PmsgVect::Drop : deleting a vector out of a container
+// ---------------------------------------------------------------------------
+static void Test_VectDrop()
+{
+    //  P3PmsgCurs::Delete has a vect branch -- "r_vect().Truncate(); ...
+    //  r_vect().Drop();" -- and P3PmsgDesc::Truncate runs it over every child.
+    //  P3PmsgVect had no Drop() of its own, so that virtual call landed on
+    //  P3PmsgField::Drop, whose first line is ASSERT(OBJ__IsField()) and is
+    //  false for a vect. Deleting a vector out of a descendant container was
+    //  therefore an assertion in a debug build, and it needed no stack to
+    //  provoke: just a vect in a tree and something that empties the tree.
+    TF_CASE("a vect can be deleted from a descendant container")
+    {
+        P3PmsgVect oVect(3, L"Payload", P3PmsgData((int)0));
+        oVect.r_data(0).c_int(1);
+        oVect.r_data(2).c_int(3);
+
+        P3PmsgItem oHost(L"Host");
+        oHost.r_Desc(P3PmsgField::AttrCMD_Create);
+        oHost.r_Desc() += P3PmsgField(L"Keep");
+        oHost.r_Desc() += oVect;
+        TF_CHECK(oHost.r_Desc().Exists(L"Payload"));
+
+        oHost.r_Desc().r_Curs().Goto(L"Payload");
+        oHost.r_Desc().r_Curs().Delete();
+        TF_CHECK(!oHost.r_Desc().Exists(L"Payload"));
+        TF_CHECK(oHost.r_Desc().Exists(L"Keep"));
+        oHost.AssertValid();
+    }
+
+    TF_CASE("a descendant container holding a vect truncates cleanly")
+    {
+        P3PmsgVect oVect(2, L"Payload", P3PmsgData((int)0));
+        P3PmsgList oList(L"Numbers", P3PmsgData((int)0));
+        oList.AddListTail(P3PmsgData((int)9));
+
+        P3PmsgItem oHost(L"Host");
+        oHost.r_Desc(P3PmsgField::AttrCMD_Create);
+        oHost.r_Desc() += P3PmsgField(L"Plain");
+        oHost.r_Desc() += oList;
+        oHost.r_Desc() += oVect;
+
+        oHost.r_Desc().Truncate();
+        TF_CHECK(!oHost.r_Desc().Exists(L"Payload"));
+        TF_CHECK(!oHost.r_Desc().Exists(L"Numbers"));
+        TF_CHECK(!oHost.r_Desc().Exists(L"Plain"));
+        oHost.AssertValid();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // MsgStck : pushing a list and a vector
 // ---------------------------------------------------------------------------
 static void Test_StackContainers()
@@ -2045,6 +2096,7 @@ void RunMsgcoreSuite()
     Test_VBLockItem_UnknownType();
     Test_Stack();
     Test_StackContainers();
+    Test_VectDrop();
     Test_RootPath();
     Test_ListPath();
     Test_Event();

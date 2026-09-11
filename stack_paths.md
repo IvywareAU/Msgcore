@@ -36,6 +36,7 @@ followed nowhere:
 | `P3Pmsg_SelectObject`, leading component | `IsField()`-only, then asserted and recursed anyway | a rooted path was never checked against the list it started at |
 | `MsgStck::Push` / `Pop`, list and vector | `ASSERT(0)` | **a list could not be pushed at all, so `List^` was always empty** |
 | `MsgStck::Pop`, any type | dropped the popped item while it still linked the one below | **one pop severed and leaked every generation under the one it restored** |
+| `P3PmsgVect::Drop` | did not exist, so the base class ran | **deleting a vect from a container asserted; no stack needed** |
 | `P2PmsgMgr::RootPath2Object` | stripped off every component | `^` and `@` were looked up as plain child names |
 | `P3Pmsg_SplitRootPath` | refused a bare `^`, dropped a trailing one | **`.Root.Item^` silently answered with `Item` itself** |
 | `RootPath2Object`, on a miss | assigned a void object into a `P3PmsgItem` | threw `"Invalid overloaded context"` instead of answering |
@@ -345,12 +346,44 @@ generations the push is re-linking. The field arm had always sidestepped it by h
 
 ### Two things had to come with it
 
-**`P3PmsgVect` had no `Drop()`.** Popping a vector would have reached `P3PmsgField::Drop`,
-which opens `ASSERT(OBJ__IsField())` — false for a vect — and then frees the item block
-with every element block and `aExtra` continuation still allocated. Added, mirroring
-`P3PmsgList::Drop`, with `Truncate()` doing the type-specific part. Nothing had dropped a
-vect before: containers drop their children through the base class, and no vect had ever
-been a stack generation.
+**`P3PmsgVect` had no `Drop()`.** The virtual call landed on `P3PmsgField::Drop`, whose
+first line is `ASSERT(OBJ__IsField())` — false for a vect — and which then frees the item
+block without a `Truncate()`, leaving every element block and `aExtra` continuation
+allocated. Added, mirroring `P3PmsgList::Drop`, with `Truncate()` doing the type-specific
+part.
+
+This one was **not** waiting on the stack, which is what a first draft of this section
+claimed. `P3PmsgCurs::Delete` has had a vect branch all along —
+
+```cpp
+    else if ( IsVect() )                 // MsgCurs.cpp:258
+    {
+      r_vect().Truncate ( );
+      ...
+      r_vect().Drop ( );                 // -> P3PmsgField::Drop, and the ASSERT
+    }
+```
+
+— and `P3PmsgDesc::Truncate` runs it over every child. So deleting a vector out of a
+descendant container, or emptying a container that held one, tripped the assertion in a
+debug build with no stack involved at all. It needed only a vect in a tree and something
+that empties the tree. The `Truncate()` on the line above the `Drop()` is why release
+builds got away with it: the element blocks were already gone by the time the wrong `Drop`
+ran, so the leak needed a `Drop` with no `Truncate` before it — which is exactly what
+`Pop` does.
+
+Two of the three cases that catch it (`Test_VectDrop`) never touch `MsgStck`:
+
+```
+  - a vector's elements survive a push and come back on the pop
+      ASSERT  P2Pmsg.cpp(3442) : Assertion failed!     <- ASSERT(OBJ__IsField())
+  - a vect can be deleted from a descendant container
+      ASSERT  P2Pmsg.cpp(3442) : Assertion failed!
+  - a descendant container holding a vect truncates cleanly
+      ASSERT  P2Pmsg.cpp(3442) : Assertion failed!
+
+  cases   : 114  (3 with failures)
+```
 
 **`Pop` severed what it restored.** This one is older than anything above and applies to a
 plain field. `Pop` dropped the generation it had just restored from, and `Drop()` walks the
@@ -371,8 +404,8 @@ and pop was the only shape anything in the tree had exercised.
 
 ### Measured
 
-`Test_StackContainers` pins six cases. Against the library built from the commit before the
-fix they fail, and then the process dies:
+`Test_StackContainers` pins six cases, `Test_VectDrop` two more. Against the library built
+from the commit before the fix they fail, and then the process dies:
 
 ```
   - a pop leaves the generations below it intact
@@ -389,9 +422,10 @@ fix they fail, and then the process dies:
                                                           Pop never restored
 ```
 
-After the fix: **112 cases, 532 checks, PASS** static and **PASS** dll, and
-`build_run_c4.bat` PASS. Reproduce it the way §6 says, stashing `MsgStck.cpp`,
-`MsgVect.cpp`, `MsgVect.h` and `P2Pmsg.cpp` against `d2763ce~1`.
+After the fix: **114 cases, 538 checks, PASS** static and **PASS** dll, and
+`build_run_c4.bat` PASS. Reproduce it the way §6 says, checking out `MsgStck.cpp`,
+`MsgVect.cpp`, `MsgVect.h` and `P2Pmsg.cpp` from `d2763ce~1` — or just `MsgVect.cpp` and
+`MsgVect.h` to isolate the vect `Drop` on its own.
 
 ## 8. What `^` still does not do
 
