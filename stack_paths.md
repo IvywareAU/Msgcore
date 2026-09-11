@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §13 say how to
+> every line of output below was run against this tree; §6, §7 and §14 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -49,13 +49,17 @@ followed nowhere:
 | `RootPath2Object`, on a refused split | walked the components collected before the refusal | **a malformed path answered with an object, not an error (§10)** |
 | `RootPath2Object`, on a miss | assigned a void object into a `P3PmsgItem` | threw `"Invalid overloaded context"` instead of answering |
 | `MsgStck::Push` | left a snapshot's `aParent` zero | **`P3Pmsg_GetPath` named every snapshot `.BHP`, which resolves to the root (§11)** |
+| `P2PmsgAttr_GetVBLockParentnn` | read the owning ITEM's block as a `VBLockAttr` | **`P3Pmsg_GetPath` on an attribute collection segfaulted (§12)** |
+| `P3Pmsg_GetPath`, the `P3PmsgAttr` overload | arms on block types that are never an item | fell to its own `ASSERT(0)` and emitted a lone `@` (§12) |
+| `P3Pmsg_SelectObjectRecurse`, field arm | recursed into the collection with an empty path | a bare `@` answered nothing, so no path could name a collection (§12) |
+| `P3Pmsg_SplitRootPath` | dropped a trailing `@` | **`.Root.Item@` answered `Item`, not its attributes (§12)** |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
 `8729312` (releasing them in an order the heap can reclaim, §7-§8), `4bb228a` (the heap's
 own half of that, §8), `dbfa789` (the half the tag could not reach, §8), `3f9ecfa`
-(collections, §9), `95f039c` (root paths carrying both, §10) and `24c6a59` (the paths
-the library itself writes, §11).
+(collections, §9), `95f039c` (root paths carrying both, §10), `24c6a59` (the paths
+the library itself writes, §11) and `d31f2c4` (the collection's own path, §12).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -738,12 +742,12 @@ The `P3Pmsg_GetPath` → `RootPath2Object` round-trip is untouched: `GetPath` pr
 `.Store.BHP` for the item and `.Store.BHP@Currency` for the attribute, and both resolve back
 to the object they name, before and after.
 
-### What did not change
+### What did not change here
 
-A trailing `@` is still dropped rather than refused — `.Root.Item@` is `Item`, as it always
-was. A `@` at the end of a path introduces a name that is not there, which is the same shape
-as the trailing `.` the splitter has always let through; it is deliberately outside this
-change, and §12 records it.
+A trailing `@` was still dropped rather than refused — `.Root.Item@` was `Item` — and that
+was deliberately outside this change. §12 came back to it: a `@` at the end of a path
+introduces no name because it needs none, exactly as `^` needs none, and it now names the
+attribute collection. A trailing `.` is still dropped.
 
 ## 11. The paths the library writes
 
@@ -803,19 +807,82 @@ that item" is a question nothing else in the image can answer.
 stack block reaches it. An image written before this carries a zero parent on its stack
 blocks and still comes out of the floating-item arm, exactly as it did.
 
-## 12. What `^` still does not do
+## 12. A collection's own path
 
-- **`P3Pmsg_GetPath` on an attribute COLLECTION.** The `P3PmsgAttr` overload — the one that
-  ends a path in a bare `@` — has no caller anywhere in the library, and it crashes.
-  `P2PmsgAttr_GetVBLockParentnn` takes `GetField()->r_Object()`, which is the owning
-  **item's** block, and reads it through `VBLock_pAttr`: it picks `VBLockAttr` fields out of
-  a `VBLockItem`, so the parent comes back as whatever bytes lie at that offset and
-  `Msg2Phys` of it runs off the arena. A `P3PmsgAttr` obtained the ordinary way,
-  `oItem.r_Attr()`, segfaults. Handed the right parent it would still be wrong — the parent
-  of a collection is an **item**, and the overload has no arm for one, so it would fall to
-  its own `ASSERT(0)` and emit a lone `@`. Two defects in an uncalled function, and what a
-  correct answer even looks like is a design question: the splitter drops a trailing `@`, so
-  a collection's path cannot round-trip whatever it says. §11 left it alone deliberately.
+`P3Pmsg_GetPath` has a second overload, for a `P3PmsgAttr` — the attribute collection
+itself, the object a path names by ending in a bare `@`. Nothing in the library calls it, and it
+segfaulted. Three defects, each hiding the one under it.
+
+### Reading the wrong block
+
+`P2PmsgAttr_GetVBLockParentnn` took `GetField()->r_Object()` and read it through
+`VBLock_pAttr`. But `GetField()` is the **item** the collection hangs off — a `P3PmsgAttr`
+holds a pointer back to its field, which is what the name means — so that picks
+`VBLockAttr`'s fields out of a `VBLockItem`'s `ut` union. The parent came back as whatever bytes lay at
+that offset, and `Msg2Phys` of it ran off the arena.
+
+The collection's own block is the item's `aExtra`. `P3PmsgAttr__GetVBLocknn` already reads
+it, and MsgAttr's own link routines already write it into every child's `aParent`.
+
+### Arms that could not fire
+
+Handed the right parent, the overload was still wrong. A collection's parent is an **item**,
+and every real item is a `VBLock_Item` block — `VBLock_Field` and `VBLock_List` are
+different block *types*, not item types, which is why every other walk in the file spells the test
+`VBLock_IsX(pParent) || VBLockItem_IsX(...)`. Neither arm could ever be true, so the walk
+fell to its own `ASSERT(0)` and emitted a lone `@` with no owner in front of it. Both arms
+also appended a `.` before that `@`, which no spelling of an attribute path has ever
+carried.
+
+One arm replaces the two, and it covers all three item types: a list and a vector carry
+attributes exactly as a field does (§6).
+
+### A string that did not resolve
+
+`@` with nothing after it names the **collection**, the way `^` with nothing after it names
+a snapshot. The selector recursed into the collection with an empty path, looked for a name
+that was not there and answered void; `P3Pmsg_SplitRootPath` then dropped a trailing `@`
+outright, so `.Store.BHP@` came back as the components for `.Store.BHP` and answered `BHP`.
+
+The reason on record for that drop — §10's own closing note — was that `P3Pmsg_GetPath`
+emits a trailing `@` and the round-trip had to survive it. The only overload that emits one is this
+one, which had no caller and crashed before it got there. A path to an *attribute*,
+`@Currency`, carries a name after the delimiter and never came through that clause at all.
+The drop was protecting a round-trip that could not happen, and keeping the component is
+what makes one.
+
+### Measured
+
+```
+                            before              after
+  GetPath(attr coll)        segfault            .Store.BHP@
+  .Store.BHP@               BHP                 (attr coll) pos=423
+  BHP@  (object path)       (void)              (attr coll) pos=423
+  .Store.RIO@   (no attrs)  RIO                 (void)
+  GetPath(snapshot's coll)  segfault            .Store.BHP^@
+```
+
+The last line is the three sections compounding: §11 gave the snapshot a path, §9 gave it
+its own collections, and this gives the collection one — and `.Store.BHP^@` resolves, because
+§10 taught the splitter to carry both delimiters.
+
+An item with no attributes has no collection block at all, and `r_Attr()` hands back an
+object that keeps the heap handle and carries no address — which `IsVoid()` does not catch.
+The selector tests the address, as the collection arms added for §9 do, so `.Store.RIO@` is
+an ordinary miss rather than the item or an assertion.
+
+A trailing `.` is still dropped: `.Root.Item.` is `Item`. `.` is also the root delimiter,
+and `.Root.` has meant the root since long before any of this.
+
+## 13. What `^` still does not do
+
+- **A descendant collection has no path.** There is no `P3PmsgDesc` overload of
+  `P3Pmsg_GetPath`, and no spelling for one: a trailing `.` is dropped, and it cannot stop
+  being dropped, because `.` is the root delimiter too and `.Root.` has always meant the
+  root. The attribute collection got a path (§12) because `@` is unambiguous at the end of a
+  path and `.` is not. `Item@^` reaches a pushed attribute collection; the descendant one is
+  reachable only by handing the collection to `P3Pmsg_SelectObject` directly, as
+  `Test_CollectionStack` does.
 - **`RootPath2Object` on a non-field hit, part way along.** It walks the path in a
   `P3PmsgItem`, and `P3PmsgField::operator=(const P3PmsgObject&)` throws `"Invalid
   overloaded context"` for anything that is not a field. §10 handles the case that has an
@@ -826,7 +893,7 @@ blocks and still comes out of the floating-item arm, exactly as it did.
   component resolve in the first place. `Test_StackContainers` asks a descendant container
   directly for that reason.
 
-## 13. Reproducing this document
+## 14. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
