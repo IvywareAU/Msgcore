@@ -1,8 +1,8 @@
 # The `^` stack path operator
 
-> Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
+> Status: current as of 2026-09-12. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §23 say how to
+> every line of output below was run against this tree; §6, §7 and §24 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -83,6 +83,9 @@ followed nowhere:
 | `P3PmsgField::operator ==` | inherited nothing, so `oA == oB` asked bool | **a value copy, an unrelated item and an empty one all compared EQUAL (§21)** |
 | `P3PmsgField`, `operator !=` | `P3PmsgData`'s, which compares the DATA | **`a == b` and `a != b` were both true, and `!=` FAULTED on a void field (§21)** |
 | `P3PmsgField::operator == ( LPCTNAM )` | not const, hiding `P3PmsgName`'s two | **the only comparison the class meant to offer was the only one refused (§21)** |
+| `RehomeInlineItem`, its first guard | "already on a heap" — the heap, not the block | **an inline item with a heap was never rehomed (§22)** |
+| `P3PmsgObject`'s copy constructor, and `Connect` | shared when there was a heap | **a copy took an address INSIDE the source object, and outlived it (§22)** |
+| `AllocVBLock`, making an object its first heap | left the item block behind | **the state that made all three wrong, created once and never closed (§22)** |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
@@ -94,7 +97,7 @@ the library itself writes, §11), `d31f2c4` (the collection's own path, §12) an
 `2a03161` (the descendant collection, and the rule stated once, §15) and `0888659`
 (one arm per block kind, §16) and `c0409cb` (a bare `.` wherever it stands, §17) and `2de26ac`
 (the root marker only where a path is rooted, §18) and `48ff002` (a floating item is one
-object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21).
+object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21) and `da22f93` (where the block is, not whether there is a heap, §22).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -1638,14 +1641,160 @@ a call. Making it symmetric means either a second implicit conversion or an over
 taking one side as an object and the other as a field, and both of those hide which side
 is being asked. `oObject == oField.r_Object()` does not, so that is the spelling.
 
-## 22. What is left
+## 22. "Is there a heap" was standing in for "where is the block"
 
-- **A field still cannot answer, alone, whether a write through it reaches a message.**
-  It can say whether it denotes anything (§20), and it can say whether it is the same item
-  as one you already hold (§21). Given only a `P3PmsgField&` and nothing to compare it to,
-  the callee still cannot tell a handle from a value copy. That is now a missing
-  comparand rather than a missing question, which is as far as this goes without a type
-  that distinguishes the two — and that would be a different library.
+What was left after §21 was recorded like this: a field cannot say, alone, whether a
+write through it reaches anyone, and closing that needs a comparand. It needs one for
+*whose*. It does not need one for *where* — and the library was already asking *where*, in
+three places, in a spelling that answers something else.
+
+**A `P3PmsgObject` can hold a heap handle and still address its own inline array.** It is
+not an exotic state. A floating item grows into it, and this is where:
+
+```
+      8 wide chars: heap=no  block=INLINE (mine)
+     64 wide chars: heap=no  block=INLINE (mine)
+    128 wide chars: heap=yes block=INLINE (mine)
+   4096 wide chars: heap=yes block=INLINE (mine)
+```
+
+`AllocVBLock` creates a private SYS heap for a payload the inline block cannot hold, and
+leaves the item block where it is. 128 wide characters — a description, a path, a SQL
+fragment — is enough.
+
+**On that state, "is this shareable" answered yes about a block that was nobody's but its
+own.** `RehomeInlineItem` declined on `m_hVBList != 0` and called it "already on a heap";
+the `P3PmsgObject` copy constructor and `Connect` both rehomed only when
+`rhs.m_hVBList == 0`. So nothing moved, the share arm ran, and `m_aVBLock` was copied
+verbatim — **an address inside the source object**:
+
+```
+     floating, untouched    heap=no  aVBLock=INLINE (mine)  size=340
+     floating, grown        heap=yes aVBLock=INLINE (mine)  size=340
+  .. copy the object out -- this is what r_Object() hands a caller
+     the copy addresses the SOURCE's inline array? YES
+  .. source destroyed; the copy is all that is left
+     it still addresses that dead stack frame? YES
+```
+
+`Connect`'s own NOTES describe this exact failure and say it was fixed: *"left m_aVBLock
+pointing into the SOURCE's inline storage … reads correctly and dangles the moment the
+source goes out of scope."* It was fixed for the arm the guard reaches. The guard does not
+reach this one.
+
+**What it cost.** A factory that builds a floating item and hands back `r_Object()` — the
+documented way to return a handle — returns an address in a frame that has already been
+popped:
+
+```
+  handle returned:   block=elsewhere  name=''  reads 4242
+                                                          <-- and then exit 3
+```
+
+The name is already gone. The data survives, because the payload is on the AddRef'd heap
+and only the ITEM block was in the dead frame — and the next read, once that frame is
+written over, faults. Every read that did not fault reported `asserts=0`, because nothing
+in the library was looking.
+
+### The fix is where the state is made, not where it is read
+
+The state is created in exactly one place, and that place is the last instant at which
+`RehomeInlineItem`'s own stated invariant still holds. Its NOTES say it out loud:
+
+> NOTHING CAN POINT AT THE BLOCK YET. A collection or a push is allocated through
+> AllocVBLock, which creates the heap when there is none — so an item with no heap has no
+> attributes, no descendants and no stack, and there are no back-pointers to fix up.
+
+That is true, and it is a **window**, not a standing property. It closes the moment
+`AllocVBLock` makes the heap. So:
+
+- **`AllocVBLock` rehomes the item at the instant it creates the heap**, before the
+  allocation that prompted it. The "a heap and an inline block both" state ceases to
+  exist, and an item's identity changes when it GROWS rather than when somebody asks
+  after it — which is §19's rule. That is the check that decided where this fix goes:
+  correcting only the two copy paths moved an item when somebody asked for it, and
+  §19's `a floating item with descendants keeps one identity` failed. Rehoming at
+  creation keeps it passing.
+- **`RehomeInlineItem` asks where the block is**, which the line beneath the old guard
+  was already doing, and allocates on the heap the object has rather than making a
+  second one.
+- **The copy constructor and `Connect` ask the same question**, and their value-copy arm
+  now runs on "the block is still inline" instead of "there is no heap" — which is what
+  keeps a standalone `P3PmsgData` that has grown from dangling the same way.
+
+### And the question a field can now be asked
+
+`P3PmsgObject::IsInline` and `P3PmsgField::IsInline`. True means **this object IS the
+storage**: a write through it reaches nobody, which is exactly what a caller who meant to
+write THROUGH has got wrong. False means the block is on a heap and this object is one
+name for it. It agrees with what a write actually does on every shape a field can have:
+
+```
+  a handle on a tree item          IsInline=false   seen by the store      YES       agree
+  a value copy of a tree item      IsInline=true    seen by the store      no        agree
+  the collection's own cursor      IsInline=false   seen by the store      YES       agree
+  a plain floating item            IsInline=true    seen by its source     no        agree
+  a grown floating item            IsInline=false   seen by its source     YES       agree
+  a shared floating item           IsInline=false   seen by its partner    YES       agree
+  a copy of a grown floater        IsInline=true    seen by its source     no        agree
+
+  agree=7 differ=0 asserts=0
+```
+
+It is **not** `GetP2PmsgHandle() != 0`, which is the heap question and still answers it.
+Those two disagreed on precisely the state this section opened with, and that disagreement
+was the defect.
+
+### What it does not settle
+
+It says where the item is, not whose it is. A value copy that has since grown has an item
+of its own on a heap of its own, and answers `false` while reaching nothing the caller
+holds:
+
+```
+  a grown copy of a tree item      IsInline=false   seen by the store no
+```
+
+For *whose*, there is a comparand and it is §21's `==`. What `IsInline` adds is the answer
+that needs none — `true` is a guarantee that a write goes nowhere — and §21 already pins
+that `==` and the write-through agree.
+
+### The measurement
+
+Nine solutions in both configurations: **0 errors**. The suite, static and DLL, 192 cases;
+`MscsUnitTests` 125; C4; the golden image byte-identical at 4104 bytes; §17's agreement
+sweep 29 agree 0 differ; §18 and §19 unchanged; Chartboard 0 errors and its four drivers
+17, 13, 24 and 15 checks, none failing.
+
+Against the unfixed library the suite **does not compile** — `IsInline` is what it is
+asking for. With every `IsInline` check lifted out, what is left is behaviour, and it
+bites:
+
+```
+  FAIL [a handle on a grown floater names the item, not the source]
+  FAIL [assignment of a grown floater names the item too]
+  FAIL [growing an item moves it; asking after it does not]
+```
+
+and a fourth case, `a handle outlives the frame that built it`, raises three internal
+assertions — `MsgVBHeap.cpp(1396)`, `P2Pmsg.cpp(2853)`, `P2PmsgVBLock.cpp(647)` — and
+then **hangs the runner**, so the run does not finish at all.
+
+## 23. What is left
+
+- **`IsInline` says where an item is, not whose it is.** §22's table above has the one row
+  where that matters: a duplicate that has since grown answers `false` and still reaches
+  nothing the caller holds. `true` is a guarantee and `false` is not, and the comparand
+  that closes it is §21's `==`. A type that carried the distinction in its own right would
+  be a different library.
+
+- **A `P3PmsgData` that has grown is still copied shallowly.** The copy constructor's
+  value arm duplicates the inline block and AddRefs the heap the block's payload lives
+  on, so two standalone values can name one payload. That is no longer a DANGLE — which
+  is what §22 fixed — but it is not a deep copy either. Nothing in this tree reaches it:
+  `P3PmsgData`'s own copy constructor is a deep one and does not go through
+  `P3PmsgObject`'s, so the arm is only reachable by handing a value's object to
+  `P3PmsgField ( const P3PmsgObject& )` directly. Recorded, not chased.
 
 - **`P2PSafePtr` carries the same shape and was not touched.** It declares
   `operator SafePtrType*()` and `operator bool()` together, so `int n = ptr` compiles
@@ -1655,10 +1804,10 @@ is being asked. `oObject == oField.r_Object()` does not, so that is the spelling
   Msgcore object, so it is recorded here and left alone.
 
 Nothing else from this investigation is outstanding. That is not a claim that the grammar
-is without defect — only that every case these twenty-one sections measured has an answer,
+is without defect — only that every case these twenty-two sections measured has an answer,
 and that the answer is pinned by a test.
 
-## 23. Reproducing this document
+## 24. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
