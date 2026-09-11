@@ -6833,6 +6833,48 @@ P3Pmsg_GetPath ( const P3PmsgAttr *pAttr )
     strPath += T_AttrDelim; //_T("@");
     return strPath;
 }
+VBLaddr
+P2PmsgDesc_GetVBLockParentnn ( const P3PmsgDesc *pDesc );
+VBLock*
+P2PmsgDesc__GetVBLockParent ( const P3PmsgDesc *pDesc );
+
+//
+//  Builds the path of a DESCENDANT collection
+//  NOTES: The mirror of the P3PmsgAttr overload above, and it reads the same
+//         way: a collection's parent is the ITEM it hangs off, and the
+//         component that names it is its delimiter carrying no name.
+//       : §15 is why this can exist at all. A path could not END in a bare
+//         '.' until the splitter stopped dropping one, so until then the
+//         string this returns would not have resolved -- and §12 declined to
+//         emit a path that could not come back, which is the whole reason
+//         this overload was missing rather than merely unwritten.
+CString
+P3Pmsg_GetPath ( const P3PmsgDesc *pDesc )
+{
+    CString strPath;
+
+    // Process parent
+    VBLaddr aParent = P2PmsgDesc_GetVBLockParentnn ( pDesc );
+    if ( aParent )
+    {
+      VBLock *pParent = P2PmsgDesc__GetVBLockParent ( pDesc );
+      if ( pParent && VBLock_IsItem(pParent) )
+      {
+        //  One arm for all three item types, as above: a list and a vector
+        //  carry descendants exactly as a field does (§6).
+        P3PmsgField oOwner( pDesc->GetField()->GetP2PmsgHandle(), aParent, 0 );
+        strPath += P3Pmsg_GetPath ( &oOwner );
+      }
+      else
+      {
+        ASSERT(0);
+      }
+    }
+
+    // Tidy up, and
+    strPath += T_DescDelim; //_T(".");
+    return strPath;
+}
 
 LPCTNAM
 ParseObjectPath ( LPCTNAM lpszObjectPath, LPTNAM lpszObjectname, int nObjectnameChars )
@@ -6925,9 +6967,20 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
     if ( pObject->IsField() || pObject->IsList() || pObject->IsVect() )
     {
       P3PmsgField oField = *pObject;
+      //  '.' with nothing after it names the DESCENDANT collection, exactly as
+      //  '@' with nothing after it names the attribute one below. Both used to
+      //  re-enter with an empty path, look for a name that was not there and
+      //  answer void (§15).
       if ( *lpszObjectPath == T_DescDelim )
       {
-        return P3Pmsg_SelectObjectRecurse ( &oField.r_Object(), ++lpszObjectPath );
+        if ( *++lpszObjectPath == 0 )
+        {
+          P3PmsgObject oDescColl = oField.r_Desc().r_Object();
+          if ( oDescColl.GetVBLocknn() == 0 )
+            return P3PmsgObject();     // No descendants; selection path broken
+          return oDescColl;
+        }
+        return P3Pmsg_SelectObjectRecurse ( &oField.r_Object(), lpszObjectPath );
         //lpszObjectPath = ParseObjectPath ( ++lpszObjectPath, nsObjectname, ARRAYSIZE(nsObjectname) );
         //if ( oField.r_name().c_wcsicmp(nsObjectname) )
         //  return P3PmsgObject();         // Selection path broken
@@ -6998,11 +7051,13 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
     if ( pObject->IsAttr() )
     {
       P3PmsgAttr oAttr = *pObject;
+      //  A COLLECTION HAS NO DESCENDANTS OF ITS OWN, for the same reason the
+      //  '@' arm below says it has no attributes: it is not an item. So
+      //  "Item@." names nothing -- and it is a well-formed question, reachable
+      //  since §15 made a trailing '.' a component, so the answer is the empty
+      //  object rather than a debug-build event.
       if ( *lpszObjectPath == T_DescDelim )
-      {
-        ASSERT(0);
-        return P3PmsgObject();
-      }
+        return P3PmsgObject();         // Selection path broken
       //  A COLLECTION HAS NO ATTRIBUTES OF ITS OWN. It is not an item: a
       //  VBLockAttr carries aParent and its members, and nothing else. So
       //  "Item@@Tag" names nothing -- but it is a well-formed question, and
@@ -7094,11 +7149,12 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
         //  return *pObject;
         //return P3Pmsg_SelectObject ( pObject, lpszObjectPath );
       }
+      //  A COLLECTION HAS NO ATTRIBUTES OF ITS OWN -- the mirror of the '.'
+      //  arm above, and the same reason: it is not an item. "Item.@" is a
+      //  well-formed question, reachable since §15 made a bare '.' a
+      //  component, and the answer is the empty object.
       if ( *lpszObjectPath == T_AttrDelim )
-      {
-        ASSERT(0);
-        return P3PmsgObject();
-      }
+        return P3PmsgObject();         // Selection path broken
       //  As for attributes, and for the same reasons -- read that arm for the
       //  whole of it. A VBLockDesc has no aStack either, and carries the same
       //  aParent, so a descendant collection's '^' is the descendant collection
@@ -7148,7 +7204,13 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
 P3PmsgObject
 P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath )
 {
-    if ( *lpszObjectPath != T_DescDelim )
+    //  A LEADING '.' means "this component names the object you are standing
+    //  on", and the name after it is matched against that object's own. A path
+    //  that is nothing BUT a '.' carries no such name: it is the whole
+    //  instruction, naming the descendant collection (§15). Sent through the
+    //  matching below it was compared against the item's real name, missed,
+    //  and came back void.
+    if ( *lpszObjectPath != T_DescDelim || lpszObjectPath[1] == 0 )
       return P3Pmsg_SelectObjectRecurse ( pObject, lpszObjectPath );
     lpszObjectPath++;
     TNAME nsObjectname[MAX_TNAME_SIZE] = {0};
@@ -7288,21 +7350,26 @@ P3Pmsg_IsPathDelimiter ( LPCWSTR lpszObjectPath )
    return FALSE;
 }
 
-//  The two delimiters that stand as a WHOLE component, carrying no name of
-//  their own because neither needs one: '^' names the pushed value of whatever
-//  is to its left, '@' the attribute COLLECTION. Each of those is an object
-//  with no other spelling, and the collection is the one P3Pmsg_GetPath emits
-//  a path for (§12).
+//  A DELIMITER WITH NO NAME AFTER IT NAMES THE COLLECTION IT INTRODUCES.
+//  That is the whole rule, and every delimiter obeys it: '^' names the pushed
+//  value of whatever is to its left, '@' the attribute collection, '.' -- and
+//  its aliases '\' and '/' -- the descendant one. Each of those is an object
+//  P3Pmsg_GetPath emits a path for and nothing else can spell.
 //
-//  The descendant delimiters always introduce a name, so a component that is
-//  nothing but a '.' -- or a '\' or a '/' -- is an empty name and stays
-//  malformed. ".Root.Item.@Tag" is refused for that reason and ".Root.Item@Tag"
-//  is the spelling; it is only the LONE delimiter that this is about.
+//  It arrived a delimiter at a time: '^' with §10, '@' with §12 and then §14,
+//  '.' with §15. Each step was argued from the one before it, and stating the
+//  rule once is what the last of them is really for.
+//
+//  A component is seeded with the delimiter that introduces it, so a length of
+//  one means exactly "delimiter, no name" -- there is no other way to get here
+//  with a single character.
 static bool
 P3Pmsg__IsBareComponent ( const CString& strItemname )
 {
     return strItemname.GetLength() == 1 &&
-           ( strItemname[0] == T_StckDelim || strItemname[0] == T_AttrDelim );
+           ( strItemname[0] == T_StckDelim || strItemname[0] == T_AttrDelim ||
+             strItemname[0] == T_DescDelim || strItemname[0] == T_BackSlash ||
+             strItemname[0] == T_ForeSlash    );
 }
 
 //
@@ -7363,19 +7430,19 @@ P3Pmsg_SplitRootPath ( LPCWSTR lpszObjectPath, CString& strRootname
         bNamed = bNamed || lpszWorkingPath[0] != T_StckDelim;
         strItemname += *lpszWorkingPath++;
       }
-      //  A component that is nothing but its delimiter carries an empty NAME,
-      //  and for the descendant delimiters that is still malformed. '^' and
-      //  '@' introduce no name at all -- refer P3Pmsg__IsBareComponent -- so
-      //  they are the two that stand as a whole component, and refusing either
-      //  here failed the entire path.
+      //  EVERY lone delimiter is now a component -- refer
+      //  P3Pmsg__IsBareComponent -- so this refusal has nothing left to refuse
+      //  and is gone. A component is seeded with its own delimiter and the
+      //  scan below stops at the next one, so a single character here is
+      //  always a delimiter and always names a collection.
       //
-      //  '@' was let through by the clause AFTER this loop and not by this
-      //  one, so a bare '@' was a component only at the END of a path:
-      //  ".Root.Item@" resolved and ".Root.Item@.Tag" was malformed, though
-      //  ".Root.Item@^.Tag" -- one step longer, through the collection at the
-      //  last push -- resolved. The two clauses now ask the same question.
-      if ( strItemname.GetLength() <= 1 && !P3Pmsg__IsBareComponent(strItemname) )
-        return FALSE;
+      //  What the splitter still refuses is a path that does not begin at a
+      //  root, which is the test at the top of this function and the one §10
+      //  taught RootPath2Object to honour. An empty NAME is no longer an error
+      //  because there is no longer such a thing: ".Root..Alpha" is the root's
+      //  descendant collection and then Alpha, which is Alpha -- a redundant
+      //  spelling, the way ".Root.Item@.Tag" is a redundant spelling of
+      //  "@Tag" (§14), and redundant is not malformed.
 //vvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 if(strItemname.CompareNoCase(L".pya")==0||
    strItemname.CompareNoCase(L".pys")==0||

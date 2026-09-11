@@ -1513,10 +1513,15 @@ static void Test_RootPath()
         TF_CHECK(mgr.RootPath2Object(L".Root.Plain^.Kid").IsVoid());
     }
 
-    //  The splitter's rejection of a nameless component still stands for the
-    //  delimiters that DO introduce a name, and a path with no components at
-    //  all is still the root.
-    TF_CASE("a nameless descendant component is still malformed")
+    //  A path with no components at all is still the root, and a path that
+    //  does not begin at one is still refused -- that is what the splitter's
+    //  verdict has left to say (§15).
+    //
+    //  It used to refuse a nameless component too, which is how ".Root..Alpha"
+    //  and ".Root." were read. Every lone delimiter now names the collection it
+    //  introduces, so neither is nameless: they carry the name of a collection
+    //  rather than of an item.
+    TF_CASE("a path with no components is the root; a rootless one is refused")
     {
         P2PmsgMgr mgr;
         mgr.r_name() = L"Root";
@@ -1524,17 +1529,25 @@ static void Test_RootPath()
 
         CString        strRoot;
         CList<CString> oItems;
-        TF_CHECK(!P3Pmsg_SplitRootPath(L".Root..Alpha", strRoot, oItems));
 
         TF_CHECK(P3Pmsg_SplitRootPath(L".Root", strRoot, oItems));
         TF_CHECK(strRoot == L"Root");
         TF_CHECK(oItems.GetCount() == 0);
 
-        //  A trailing '.' is still dropped, as it always was.
-        TF_CHECK(P3Pmsg_SplitRootPath(L".Root.", strRoot, oItems));
-        TF_CHECK(oItems.GetCount() == 0);
+        TF_CHECK(!P3Pmsg_SplitRootPath(L"Root.Alpha", strRoot, oItems));
 
-        //  A trailing '^' is NOT, and that is the change.
+        //  A trailing '.' is a component now, and it names the descendant
+        //  collection -- so is a doubled one, part way along (§15).
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root.", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 1);
+        if (oItems.GetCount() == 1)
+            TF_CHECK(oItems.GetTail() == L".");
+
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root..Alpha", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 2);
+
+        //  A trailing '^' is not dropped either, and that was the first of
+        //  these to change.
         TF_CHECK(P3Pmsg_SplitRootPath(L".Root.Alpha^", strRoot, oItems));
         TF_CHECK(oItems.GetCount() == 2);
     }
@@ -1591,24 +1604,29 @@ static void Test_RootPath()
         mgr.r_name() = L"Root";
         mgr.r_Desc() += P3PmsgField(L"Alpha");
 
-        //  An empty component. Before: the root, because ".Root..Alpha" gave
-        //  up before collecting anything at all.
-        bool bThrewEmpty = false;
-        try   { mgr.RootPath2Object(L".Root..Alpha"); }
-        catch (P2Pevent* pEVT) { bThrewEmpty = true; pEVT->Cancel(false); }
-        TF_CHECK(bThrewEmpty);
-
-        //  A path that does not begin at a root fails the same first test.
+        //  A path that does not begin at a root. Before: the root itself,
+        //  because the walk ran over whatever components had been collected
+        //  before the splitter gave up -- here, none at all.
         bool bThrewRootless = false;
         try   { mgr.RootPath2Object(L"Root.Alpha"); }
         catch (P2Pevent* pEVT) { bThrewRootless = true; pEVT->Cancel(false); }
         TF_CHECK(bThrewRootless);
 
-        //  A trailing '@' is not malformed -- it names the attribute
-        //  COLLECTION (§12), and Alpha has none, so this is an ordinary miss
-        //  rather than a refusal. A trailing '.' is still dropped.
+        //  ".Root..Alpha" used to join it, as a nameless component. It is a
+        //  redundant spelling now, not a malformed one -- the root's descendant
+        //  collection, and then Alpha (§15) -- and it answers what the direct
+        //  spelling answers.
+        P3PmsgObject oVia    = mgr.RootPath2Object(L".Root..Alpha");
+        P3PmsgObject oDirect = mgr.RootPath2Object(L".Root.Alpha");
+        TF_CHECK(!oVia.IsVoid());
+        if (!oVia.IsVoid() && !oDirect.IsVoid())
+            TF_CHECK(oVia.GetP2Pos() == oDirect.GetP2Pos());
+
+        //  A trailing delimiter names a COLLECTION, and Alpha has neither, so
+        //  both are ordinary misses rather than refusals -- and both report it
+        //  the same way, which is the point (§15).
         TF_CHECK(mgr.RootPath2Object(L".Root.Alpha@").IsVoid());
-        TF_CHECK(!mgr.RootPath2Object(L".Root.Alpha.").IsVoid());
+        TF_CHECK(mgr.RootPath2Object(L".Root.Alpha.").IsVoid());
     }
 }
 
@@ -1916,6 +1934,156 @@ static void Test_AttrCollectionPath()
 }
 
 // ---------------------------------------------------------------------------
+// P3Pmsg_GetPath / SplitRootPath : the descendant collection's own path
+// ---------------------------------------------------------------------------
+static void Test_DescCollectionPath()
+{
+    //  The last collection with no path. §12 gave the attribute one a path and
+    //  argued this one could not have one: a trailing '.' was dropped, and the
+    //  reason given was that '.' is the root delimiter too. It is not, where it
+    //  matters -- the root delimiter is consumed once, at position 0, before
+    //  any component is parsed, and every other '.' is a descendant delimiter.
+    //
+    //  What actually stood in the way was the splitter refusing a component one
+    //  character long. With that gone the rule is the same for all three:
+    //  a delimiter with no name after it names the collection it introduces.
+    TF_CASE("a descendant collection has a path, and it names the owner")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Desc(P3PmsgField::AttrCMD_Create);
+        oInst.r_Desc() += P3PmsgField(L"Last");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+
+        const CString strColl = P3Pmsg_GetPath(&oLive.r_Desc());
+        TF_CHECK(strColl == L".Store.BHP.");
+
+        //  And it resolves, which is what §12 would not emit a path without.
+        P3PmsgObject oBack = mgr.RootPath2Object(strColl);
+        TF_CHECK(!oBack.IsVoid());
+        TF_CHECK(oBack.IsDesc());
+
+        //  The root has one too, and its path is the shortest there is.
+        const CString strRootColl = P3Pmsg_GetPath(&mgr.r_Desc());
+        TF_CHECK(strRootColl == L".Store.");
+        TF_CHECK(mgr.RootPath2Object(strRootColl).IsDesc());
+
+        //  P2PmsgDesc_GetVBLockParentnn carried the defect §12 found in the
+        //  attribute one and fixed only there: it read the owning ITEM's block
+        //  through VBLock_pDesc, picking VBLockDesc's fields out of a
+        //  VBLockItem's ut union. It had no caller, so it had never fired.
+        //  Every check above is one now.
+        TF_CHECK(P3Pmsg_GetPath(&oLive.r_Desc()) == P3Pmsg_GetPath(&oLive) + L".");
+    }
+
+    //  A snapshot carries its own collections (§9) and its own path (§11), so
+    //  the collection inside one gets a path built from both -- and it resolves
+    //  by the same two components.
+    TF_CASE("the descendant collection inside a snapshot names itself")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Desc(P3PmsgField::AttrCMD_Create);
+        oInst.r_Desc() += P3PmsgField(L"Last");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        oLive.r_Stck().Push();
+        oLive.r_Desc() += P3PmsgField(L"Close");        // after the push
+
+        P3PmsgField oSnap = oLive.SelectObject(L"^");
+        TF_CHECK(!oSnap.IsVoid());
+
+        const CString strColl = P3Pmsg_GetPath(&oSnap.r_Desc());
+        TF_CHECK(strColl == L".Store.BHP^.");
+
+        P3PmsgObject oBack = mgr.RootPath2Object(strColl);
+        TF_CHECK(!oBack.IsVoid());
+        TF_CHECK(oBack.IsDesc());
+
+        //  It is the snapshot's collection: Close post-dates the push, so it
+        //  is in the live one and not in this one.
+        TF_CHECK(!mgr.RootPath2Object(L".Store.BHP..Close").IsVoid());
+        bool bThrewClose = false;
+        try   { mgr.RootPath2Object(L".Store.BHP^..Close"); }
+        catch (P2Pevent* pEVT) { bThrewClose = true; pEVT->Cancel(false); }
+        TF_CHECK(bThrewClose);
+        TF_CHECK(!mgr.RootPath2Object(L".Store.BHP^..Last").IsVoid());
+    }
+
+    //  A bare '.' part way along is the collection, and then a name looked up
+    //  inside it -- the same two steps "@." would take through the attribute
+    //  collection, and a redundant spelling of the one-step form.
+    TF_CASE("'..Name' and '.Name' answer the same descendant")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Desc(P3PmsgField::AttrCMD_Create);
+        oInst.r_Desc() += P3PmsgField(L"Last");
+        mgr.r_Desc() += oInst;
+        mgr.r_Desc() += P3PmsgField(L"RIO");            // no descendants at all
+
+        P3PmsgObject oShort = mgr.RootPath2Object(L".Store.BHP.Last");
+        P3PmsgObject oLong  = mgr.RootPath2Object(L".Store.BHP..Last");
+        TF_CHECK(!oShort.IsVoid());
+        TF_CHECK(!oLong.IsVoid());
+        if (!oShort.IsVoid() && !oLong.IsVoid())
+            TF_CHECK(oShort.GetP2Pos() == oLong.GetP2Pos());
+
+        //  A component that carries a NAME and misses still throws, whichever
+        //  route it took -- that is the paging rule, and it is untouched.
+        bool bThrewName = false;
+        try   { mgr.RootPath2Object(L".Store.BHP..Nobody"); }
+        catch (P2Pevent* pEVT) { bThrewName = true; pEVT->Cancel(false); }
+        TF_CHECK(bThrewName);
+
+        //  A component that carries NO name never throws. An item that has
+        //  never had a collection has no block for it, and that is the same
+        //  fact ".Store.RIO@" reports as void (§12) -- reporting it two ways
+        //  would be an accident of the delimiter.
+        TF_CHECK(mgr.RootPath2Object(L".Store.RIO.").IsVoid());
+        TF_CHECK(mgr.RootPath2Object(L".Store.RIO@").IsVoid());
+    }
+
+    //  A collection is not an item: it has neither an attribute collection nor
+    //  a descendant one of its own. All four spellings are well-formed
+    //  questions that name nothing, and each used to ASSERT(0) on the way --
+    //  two of them newly reachable because a bare '.' is a component now.
+    TF_CASE("a collection asked for a collection is a miss, not an assertion")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        oInst.r_Desc(P3PmsgField::AttrCMD_Create);
+        oInst.r_Desc() += P3PmsgField(L"Last");
+        mgr.r_Desc() += oInst;
+
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP@.").IsVoid());
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP.@").IsVoid());
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP..").IsVoid());
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP@@").IsVoid());
+
+        //  The four that DO name something still do.
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP@").IsAttr());
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP.").IsDesc());
+        TF_CHECK(!mgr.RootPath2Object(L".Store.BHP@Currency").IsVoid());
+        TF_CHECK(!mgr.RootPath2Object(L".Store.BHP.Last").IsVoid());
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3Pmsg_SplitRootPath : a bare '@' is a component wherever it stands
 // ---------------------------------------------------------------------------
 static void Test_BareAttrComponent()
@@ -1947,10 +2115,12 @@ static void Test_BareAttrComponent()
         TF_CHECK(P3Pmsg_SplitRootPath(L".Root.Item@", strRoot, oItems));
         TF_CHECK(oItems.GetCount() == 2);
 
-        //  A lone DESCENDANT delimiter is an empty name and stays malformed --
-        //  that is the half of the rule which does not change.
-        TF_CHECK(!P3Pmsg_SplitRootPath(L".Root.Item..Tag", strRoot, oItems));
-        TF_CHECK(!P3Pmsg_SplitRootPath(L".Root.Item.@Tag", strRoot, oItems));
+        //  A lone DESCENDANT delimiter was an empty name and stayed malformed
+        //  until §15 finished the rule; both of these are components now.
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root.Item..Tag", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 3);
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root.Item.@Tag", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 3);
     }
 
     //  And it answers the same object the short spelling does. "@Tag" carries
@@ -1974,10 +2144,12 @@ static void Test_BareAttrComponent()
         if (!oShort.IsVoid() && !oLong.IsVoid())
             TF_CHECK(oShort.GetP2Pos() == oLong.GetP2Pos());
 
-        //  A trailing '.' after the collection is dropped, as every trailing
-        //  '.' is, so this is the collection itself.
-        P3PmsgObject oColl = mgr.RootPath2Object(L".Store.BHP@.");
-        TF_CHECK(oColl.IsAttr());
+        //  A trailing '.' after the collection is a component of its own
+        //  since §15, and it asks the attribute collection for a DESCENDANT
+        //  collection -- which a collection has not got, because it is not an
+        //  item. An ordinary miss, and no assertion.
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP@.").IsVoid());
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP@").IsAttr());
 
         //  The root has a collection of its own, and this is the only root-path
         //  spelling that goes through it.
@@ -3522,6 +3694,7 @@ void RunMsgcoreSuite()
     Test_AttrCollectionPath();
     Test_RootPathContainers();
     Test_BareAttrComponent();
+    Test_DescCollectionPath();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();

@@ -892,9 +892,16 @@ P2PmsgMgr::RootPath2Object ( LPCWSTR lpszObjectPath )
         //  Spelled out rather than asking P3Pmsg_IsPathDelimiter, which
         //  answers TRUE for the terminator as well: an empty component
         //  stepped the pointer PAST its own end.
-        if ( lpszItemName[0] == T_DescDelim ||
-             lpszItemName[0] == T_BackSlash ||
-             lpszItemName[0] == T_ForeSlash    )
+        //
+        //  ONLY WHERE A NAME FOLLOWS IT. A lone '.' names the descendant
+        //  collection (§15), and there the delimiter IS the instruction --
+        //  exactly as it is for '@' and '^', which is why those two were never
+        //  stripped. Stripped anyway, a bare '.' became the empty string, and
+        //  P3Pmsg_SelectObject looked for a descendant with no name.
+        if ( lpszItemName[1] != 0 &&
+             ( lpszItemName[0] == T_DescDelim ||
+               lpszItemName[0] == T_BackSlash ||
+               lpszItemName[0] == T_ForeSlash    ) )
           lpszItemName++;
 
         // Select the current item
@@ -917,10 +924,20 @@ P2PmsgMgr::RootPath2Object ( LPCWSTR lpszObjectPath )
           //  nothing is an ordinary answer: an item that was never pushed has
           //  no snapshot, so the empty object is the answer -- "IsEmpty flags
           //  failed search", as the contract above says.
+          //
+          //  And a component that carries NO NAME never throws, whichever
+          //  delimiter introduced it. The paging callback exists for a named
+          //  child that may not be in memory yet; a bare delimiter asks for
+          //  the COLLECTION it introduces (§15), and an item that has never
+          //  had one has no block for it. That is the same fact ".Root.Item@"
+          //  reports as void (§12), and reporting it two different ways
+          //  depending on which collection was asked for would be nothing but
+          //  an accident of the delimiter.
           wchar_t wTypeDelimiter = strItem[0];
-          if ( wTypeDelimiter != T_DescDelim &&
-               wTypeDelimiter != T_BackSlash &&
-               wTypeDelimiter != T_ForeSlash    )
+          if ( strItem.GetLength() == 1   ||
+               ( wTypeDelimiter != T_DescDelim &&
+                 wTypeDelimiter != T_BackSlash &&
+                 wTypeDelimiter != T_ForeSlash    ) )
             return P3PmsgObject();
 
           //RefreshFolder(oParent);
