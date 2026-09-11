@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-12. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §26 say how to
+> every line of output below was run against this tree; §6, §7 and §27 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -88,6 +88,9 @@ followed nowhere:
 | `AllocVBLock`, making an object its first heap | left the item block behind | **the state that made all three wrong, created once and never closed (§22)** |
 | The value arm of that same copy constructor, and of `Connect` | "copy the block" — the block, not the value | **two standalone values named ONE payload, and the first to retype freed it (§23)** |
 | `P3PmsgField::IsInline`, read as "is it shared" | where the BLOCK is | **a grown duplicate answered false while reaching nobody — false was never a guarantee (§24)** |
+| `P2PSafePtr::operator =`, taking a non-const reference | a temporary fell through to the RAW-POINTER arm | **`sp = MakeSP()` freed the payload and kept addressing it (§25)** |
+| `P2PSafePtr`'s copy paths, on an empty source | a count of zero, migrated and then raised to one | **two asserts and a use-after-free for copying an empty one (§25)** |
+| `P2PSafePtr`, every member but `operator->` | non-const | **a const safe pointer could not be tested, read, compared or assigned from (§25)** |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
@@ -99,7 +102,7 @@ the library itself writes, §11), `d31f2c4` (the collection's own path, §12) an
 `2a03161` (the descendant collection, and the rule stated once, §15) and `0888659`
 (one arm per block kind, §16) and `c0409cb` (a bare `.` wherever it stands, §17) and `2de26ac`
 (the root marker only where a path is rooted, §18) and `48ff002` (a floating item is one
-object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21) and `da22f93` (where the block is, not whether there is a heap, §22) and `f77bb97` (copying the value and not the address of one, §23) and `a42f207` (the guarantee asked of the storage, §24).
+object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21) and `da22f93` (where the block is, not whether there is a heap, §22) and `f77bb97` (copying the value and not the address of one, §23) and `a42f207` (the guarantee asked of the storage, §24) and `09adc6c` (the safe pointer's own conversions, §25).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -1984,7 +1987,215 @@ through the DLL; `MscsUnitTests` 125; C4; the golden image byte-identical at 410
 §17's agreement sweep 29 agree 0 differ; §18, §19, §22 and §23 unchanged; Chartboard 0 errors
 and its four drivers 17, 13, 24 and 15 checks, none failing.
 
-## 25. What is left
+## 25. `P2PSafePtr` had §21's shape, and two lifetimes turned on it
+
+§21 took an implicit `operator bool` off six Msgcore classes and recorded that
+`P2PSafePtr` -- the template in `MsgCollectors.h` that every `...SP` typedef names --
+carries the same pair of conversions, `operator SafePtrType*()` and `operator bool()`
+declared together with no comparison of its own. It was left alone on the grounds that
+what it does with them is REFUSE the comparison rather than answer it wrongly: `sp == sp`
+is C2593, the two conversions being equally good ways to reach a built-in `==`.
+
+That reading was right about the comparison and much too narrow about the rest. Two
+implicit conversions do more than answer comparisons, and a class that copies by reference
+count has lifetimes riding on which overload the compiler picks.
+
+### Every expression, one compile each
+
+Each was put to the compiler on its own, against the same declarations the tree uses:
+
+| expression | before | after |
+|---|---|---|
+| `if ( sp )` | compiles | compiles |
+| `!sp` | compiles | compiles |
+| `spA && spB` | compiles | compiles |
+| `sp ? 1 : 2` | compiles | compiles |
+| `static_cast<bool>(sp)` | compiles | compiles |
+| `if ( constSP )` | **rejected** C2451 | compiles |
+| `bool b = sp` | compiles | compiles |
+| `return sp` | compiles | compiles |
+| `int n = sp` | compiles | **rejected** C2440 |
+| `sp + 1` | compiles | **rejected** C2666 |
+| `spA - spB` | **rejected** C2593 | compiles |
+| `sp[0]` | compiles | compiles |
+| `delete sp` | compiles | compiles |
+| `sp += 1` | **rejected** C2676 | **rejected** C2676 |
+| `spA == spB` | **rejected** C2593 | compiles |
+| `spA != spB` | **rejected** C2593 | compiles |
+| `constSP == spB` | **rejected** C2678 | compiles |
+| `sp == pRaw` | compiles | compiles |
+| `sp == nullptr` | compiles | compiles |
+| `sp == 0` | compiles | **rejected** C2666 |
+| `spA < spB` | **rejected** C2593 | compiles |
+| `constSP->n` | compiles | compiles |
+| `*sp` | compiles | compiles |
+| `*constSP` | **rejected** C2678 | compiles |
+| `constSP.IsEmpty()` | **rejected** C2662 | compiles |
+| `Thing *t = constSP` | **rejected** C2440 | compiles |
+| `Thing *t = sp` | compiles | compiles |
+| `spA = spB` | compiles | compiles |
+| `spA = constSP` | **rejected** C2679 | compiles |
+| `spA = MakeSP()` | compiles | compiles |
+| `ThingSP c = MakeSP()` | compiles | compiles |
+| `ThingSP c = pRaw` | compiles | compiles |
+| `ThingSP c = 0` | compiles | compiles |
+
+Thirteen rows moved, and they are four groups. **Six** are a `const` safe pointer becoming
+usable at all: only `operator->` was const, so a const one could not be tested,
+dereferenced, asked whether it was empty, compared, or assigned from. **Two** are `==` and
+`!=`, the comparison this class is for, arriving. **Three** stop compiling -- `int n = sp`,
+`sp + 1`, and `sp == 0`, which had been answering "is it non-empty" against zero. And
+**two** go the other way: `spA - spB` and `spA < spB` were ambiguous and now resolve
+through the pointer arm, because taking the bool candidate away leaves the pointer one
+alone. `<` orders two safe pointers the way the pointers order, which is a defensible
+thing to be able to do; `-` is the distance between two unrelated payloads, which is not.
+Neither is an improvement asked for, and both are recorded rather than defended.
+
+And one row did not move, which is the row that matters most: **`spA = MakeSP()` compiles
+in both columns and does not mean the same thing in either.** That is why the rest of this
+section is runtime output rather than compiler verdicts.
+
+### What the conversions were doing
+
+`operator = ( P2PSafePtr& )` took its source by NON-const reference, so a temporary could
+not bind to it. The only other candidate is `operator = ( SafePtrType* )`, reached through
+the implicit pointer conversion -- and that arm stamps a fresh count of ONE, knowing
+nothing of the count the temporary is still holding. Counting what happens to the pointee:
+
+```
+-- what the conversions do --
+  two holders of one Thing                     live=1
+  one holder let go                            live=1
+  both let go                                  live=0 dtors=1
+  assigned from a temporary, still in scope    live=0 dtors=1
+  ... and the survivor reads                   FREED STORAGE
+  ... its destructor would free it again       SECOND DELETE (suppressed here)
+  scope left                                   live=0 dtors=1
+  delete sp, with the holder still alive       live=0 dtors=1
+
+asserts=0
+```
+
+`live=0` with the assignee still in scope is a read of freed storage, and the assignee's
+own destructor is the second delete. The probe takes the pointer back out rather than
+crashing on it, because the job here is to report. The same program against the fixed
+template:
+
+```
+-- what the conversions do --
+  two holders of one Thing                     live=1
+  one holder let go                            live=1
+  both let go                                  live=0 dtors=1
+  assigned from a temporary, still in scope    live=1 dtors=0
+  ... and the survivor reads                   its own Thing
+  scope left                                   live=0 dtors=1
+  delete sp, with the holder still alive       live=0 dtors=1
+
+asserts=0
+```
+
+One payload, shared, freed once. The LAST row of both listings reads the same, and
+that is not an oversight: `delete sp` reaches through the pointer conversion, which
+stays, so it frees the payload under a holder that still counts one either way. That
+row is §26's entry.
+
+### The empty one
+
+Something else shares these paths, and it had never been put to them. `SwapRef2Shared()`
+migrates a count to the heap whenever the source is still holding its own, and neither
+copy path asks first whether there is anything to count. An empty source therefore gets a
+heap count of ZERO -- which the copy constructor then raises to one, for a pointee that
+does not exist:
+
+```
+-- the empty safe pointer --
+  a copy of an empty one                       empty=yes asserts=0
+  ... the copy destructed                      asserts=1
+  ... and the source after it                  asserts=2
+  assigned from an empty one                   empty=yes asserts=0
+  ... both destructed                          asserts=0
+  three holders of one Thing                   reads 9/9/9 asserts=0
+  ... all three destructed                     asserts=0
+
+asserts=0
+```
+
+The copy's destructor asserts, then frees the count; the source's destructor then reads
+the freed int. This is reachable only because the copy constructor was repaired earlier in
+this same work -- before that it did not compile, so nothing had ever copied one of these.
+After:
+
+```
+-- the empty safe pointer --
+  a copy of an empty one                       empty=yes asserts=0
+  ... the copy destructed                      asserts=0
+  ... and the source after it                  asserts=0
+  assigned from an empty one                   empty=yes asserts=0
+  ... both destructed                          asserts=0
+  three holders of one Thing                   reads 9/9/9 asserts=0
+  ... all three destructed                     asserts=0
+
+asserts=0
+```
+
+### The fix
+
+- **`operator bool` is explicit, and const.** The contextual conversions are what anybody
+  wants from it and they survive explicit: `if ( sp )`, `!sp`, `sp && x`, `sp ? a : b`,
+  `static_cast<bool>`. It does not make this a bool-free type and the table says so -- a
+  `SafePtrType*` converts to bool on its own, so `bool b = sp` still compiles and always
+  did. Nothing in the built tree used this conversion at all: deleting it outright and
+  compiling nine solutions in both configurations gave **0 errors**.
+- **`operator SafePtrType*()` stays IMPLICIT, and that was measured rather than assumed.**
+  Deleting it named eight call sites -- `PostP2PeerMsg(spMsg)`, `RemoveP2PmsgPump(spPump)`,
+  `P2PeerMsg *pMsg = spMsg` and their kind -- so it is the idiom the library is written in.
+  It is const now.
+- **`operator = ` takes its source by const reference.** A temporary binds here instead of
+  falling through, which is the whole of the first defect above.
+- **Both copy paths ask whether there is anything to share**, which is the whole of the
+  second.
+- **`==` and `!=` exist**, against another safe pointer and against a raw one, and both are
+  const. They are identity of the POINTEE: two safe pointers over one payload are equal
+  however separately they came by it. The raw-pointer arm is not a convenience -- without
+  it `sp == pThing` builds a TEMPORARY safe pointer around `pThing` through the implicit
+  constructor, and that temporary deletes what it was handed when the comparison ends.
+- **`operator*`, `IsEmpty` and the pointer conversion are const**, which is the six rows.
+
+### The teeth
+
+Put the eight new cases to the unfixed template and the run does not finish. Two checks
+fail and the CRT reports the double free directly, and the process dies there:
+
+```
+      FAIL [assigning from a temporary shares it instead of seizing it]  SafePtrProbe::nLive == 1
+      FAIL [assigning from a temporary shares it instead of seizing it]  oPtr->nValue == 1234
+      ASSERT ... debug_heap.cpp(904) : Assertion failed: _CrtIsValidHeapPointer(block)
+      ASSERT ... debug_heap.cpp(908) : Assertion failed: is_block_type_valid(header->_block_use)
+```
+
+Nothing after it runs, so nothing after it is measured. Lifting that case as well -- along
+with the two whole cases and sixteen checks the old declarations simply reject -- lets the
+rest be put to it, and the empty one bites too:
+
+```
+      ASSERT [copying an empty safe pointer leaves both of them empty]  MsgCollectors.h(157) : Assertion failed!
+      ASSERT [copying an empty safe pointer leaves both of them empty]  MsgCollectors.h(157) : Assertion failed!
+  cases   : 212  (1 with failures)
+  checks  : 1208  (2 failed)
+  result  : FAIL
+```
+
+`MsgCollectors.h(157)` is `ASSERT(m_pSafePtrType != NULL)` inside `Delete()`, reached with
+a count of one and nothing to count.
+
+### The gate
+
+Nine solutions in both configurations: **0 errors**. The suite 215 cases static and 210
+through the DLL, both PASS; `MscsUnitTests` 125; C4; the golden image byte-identical at
+4104 bytes; §17's agreement sweep 29 agree 0 differ; §18, §19, §22, §23 and §24 unchanged;
+Chartboard 0 errors and its four drivers 17, 13, 24 and 15 checks, none failing.
+
+## 26. What is left
 
 - **`IsSole`'s FALSE is still not a guarantee, and now it is measured rather than
   assumed.** §24 pins the row: a field that has been asked for its descendants keeps a
@@ -2001,18 +2212,21 @@ and its four drivers 17, 13, 24 and 15 checks, none failing.
   more than that. If a caller is ever found copying grown values in a loop, the answer is
   to hand it a handle — `r_Object()` — and not to make the value copy shallow again.
 
-- **`P2PSafePtr` carries the same shape and was not touched.** It declares
-  `operator SafePtrType*()` and `operator bool()` together, so `int n = ptr` compiles
-  there too; `ptr == ptr` does not, but for the opposite reason — C2593, the two
-  conversions are ambiguous rather than one of them silently winning. A refused
-  comparison is not the defect §21 fixed, and it is a raw-pointer template rather than a
-  Msgcore object, so it is recorded here and left alone.
+- **`delete sp` still compiles, and so does `sp[0]`.** Both reach through
+  `operator SafePtrType*()`, which §25 measured as load-bearing at eight call sites and
+  therefore left implicit: a conversion that hands out the raw pointer hands out
+  everything a raw pointer can do. Deleting through it frees the payload under a holder
+  that still counts one, and the holder's own destructor is then the second free --
+  measured, and left, because closing it means taking the conversion away and rewriting
+  those eight sites around `Dereference()` and `operator->`. What is NOT left is the same
+  thing happening without anybody writing it down: the two paths where the compiler chose
+  that arm on its own are closed.
 
 Nothing else from this investigation is outstanding. That is not a claim that the grammar
-is without defect — only that every case these twenty-four sections measured has an answer,
+is without defect — only that every case these twenty-five sections measured has an answer,
 and that the answer is pinned by a test.
 
-## 26. Reproducing this document
+## 27. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
