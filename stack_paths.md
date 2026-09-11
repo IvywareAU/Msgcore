@@ -3,7 +3,7 @@
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
 > every line of output below was run against this tree; §6, §7 and §10 say how to
-> reproduce them. §8 records a heap finding that is not about `^` at all.
+> reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
 
@@ -39,13 +39,15 @@ followed nowhere:
 | `P3PmsgVect::Drop` | did not exist, so the base class ran | **deleting a vect from a container asserted; no stack needed** |
 | `MsgStck::Drop` | unlinked every generation and freed none | **every pushed block leaked, for every caller** |
 | `MsgStck::Drop`, free order | released the chain deepest-first | the blocks came back only as far as the allocator could coalesce them (§8) |
+| `P2PmsgHeap_Collate*` | merged forwards only | **any ascending run of frees leaked its blocks — no stack needed (§8)** |
 | `P2PmsgMgr::RootPath2Object` | stripped off every component | `^` and `@` were looked up as plain child names |
 | `P3Pmsg_SplitRootPath` | refused a bare `^`, dropped a trailing one | **`.Root.Item^` silently answered with `Item` itself** |
 | `RootPath2Object`, on a miss | assigned a void object into a `P3PmsgItem` | threw `"Invalid overloaded context"` instead of answering |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
-`8729312` (releasing them in an order the heap can reclaim, §7-§8).
+`8729312` (releasing them in an order the heap can reclaim, §7-§8) and `4bb228a` (the
+heap's own half of that, §8).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -472,12 +474,13 @@ After the fix: **117 cases, 587 checks, PASS** static and **PASS** dll, and
 `MsgVect.cpp`, `MsgVect.h` and `P2Pmsg.cpp` from `d2763ce~1` — or just `MsgVect.cpp` and
 `MsgVect.h` to isolate the vect `Drop` on its own.
 
-## 8. The heap only coalesces forwards
+## 8. The heap only coalesced forwards
 
 Found while measuring §7, and it is **not** a stack defect — the stack was only the thing
-standing on it. It is recorded here because that is where the evidence is.
+standing on it. It is recorded here because that is where the evidence is. Fixed by
+`4bb228a`; the two properties below are what it was.
 
-Two properties of the IOMAGE/BSTRio allocator combine badly:
+Two properties of the IOMAGE/BSTRio allocator combined badly:
 
 - **`P2PmsgHeap_CollateIOMAGE` merges a freed block only with its NEXT physical
   neighbour.** There is no backward merge, and not by oversight: a `VBHeap` block carries
@@ -507,20 +510,57 @@ kid0  331  1155  1979  2803  3627        <- +824 a round
 That is ordinary use of the object model, and it drifts. §7's stack case is the same
 mechanism reached by a different route.
 
-### What fixing it would cost
+### The fix: a boundary tag, in free blocks only
 
-Not attempted here, because both candidates reach past this document's subject:
+A free block now records its own size in its tail, so the block after it can work out where
+it began. `P2PmsgHeap_Free` then collates **from the predecessor** as well as from the block
+being freed — which absorbs it by the existing forward path, so there is no second merge
+routine to keep in step with the first.
 
-- **A boundary tag** — a footer carrying the block size, so a freed block can find and
-  merge with its predecessor. This is the real fix and it is a change to the **on-disk
-  image format**: `VBHeap` blocks are what an IOMAGE file is made of, and `LINKAGE.md`'s
-  rule about offsets minted against one copy of a heap applies to every image already
-  written.
-- **A closer-fit search** — keep walking when the head is much larger than the request, so
-  the small blocks get taken. Cheaper, and no format change, but it moves every allocation
-  the library makes and `MscsUnitTests/golden_ref.p2p` pins that layout.
+**The tag goes in free blocks only, and that is what makes it cheap.** A classic boundary
+tag sits on every block, allocated ones included, which would move every byte of every
+image — the cost this section quoted when it was written up as an open item, and it was
+wrong. The tag is only ever *read* when the predecessor turns out to be free, so it only
+needs to *exist* in a free block, and a free block's tail is dead space nothing else uses.
+Allocated blocks are untouched, byte for byte.
 
-Either wants its own change, its own measurements and its own golden-image decision.
+**A stale tag cannot cause a wrong merge.** It is a hint; the candidate's own header is the
+authority. `PrevFree` recomputes the address from the recorded size and then requires the
+block it lands on to declare the same size, the same addressing mode, and to be free,
+linked and allocated. A tag left behind inside a block since handed out, a coincidence in
+payload bytes, a heap read off the wire — all fail that, and the answer is "no
+predecessor", which is exactly where this started.
+
+**Save scrubs the tags and puts them back.** A free block's tail is dead space in memory
+but is still inside the arena that gets written out, and this tree keeps its serialised
+slack deterministic on purpose. Persisting the tags would corrupt nothing — nothing reads
+the inside of a free block back, and old and new builds load each other's images either way
+— but it would make an image written by this build differ from one written before the tags
+existed, which is the drift `golden_ref.p2p` exists to catch. So `Save` scrubs, writes, and
+re-stamps through an RAII guard, because `Save` throws from a dozen places in between.
+
+```
+the same five children, Truncate, refill, repeat
+
+    before   331  1155  1979  2803  3627      +824 a round
+    after    331   331   331   331   331
+```
+
+`MscsUnitTests/golden_ref.p2p` is **byte-identical** against a `golden_utf16` built on the
+patched library. Without the scrub it differed in exactly six bytes at offset 4092 — one
+tag, in the trailing free block — which is the measurement that decided the scrub was
+worth its cost.
+
+Both arms, IOMAGE and BSTRio, take the same change, deliberately: they walk and merge by
+the same rules, and a fix that lands on one and not the other is how the two drift apart.
+
+### The other candidate, not taken
+
+A **closer-fit search** — keep walking when the head of the free list is much larger than
+the request, so the small blocks get taken — would have hidden most of the symptom without
+addressing the cause, and it moves every allocation the library makes, which is the layout
+`golden_ref.p2p` pins. The tag reclaims the space instead of routing around it, and costs
+the golden image nothing.
 
 ## 9. What `^` still does not do
 
