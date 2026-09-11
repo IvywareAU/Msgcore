@@ -2610,6 +2610,243 @@ static void Test_HeapCloserFit()
     }
 }
 
+// ---------------------------------------------------------------------------
+// '^' on a COLLECTION, rather than on an item
+// ---------------------------------------------------------------------------
+static void Test_CollectionStack()
+{
+    //  aStack is a VBLockItem field. A VBLockAttr and a VBLockDesc do not have
+    //  one, so a '^' applied to a COLLECTION used to answer "broken path" --
+    //  correct, but less than the block can say. What those blocks DO carry is
+    //  aParent, so the item that owns the collection can be found, and that
+    //  item has a stack whose snapshot holds a copy of the whole collection.
+    //
+    //  So "Item@^" is the attribute collection as it stood at the last push,
+    //  which is the attribute collection INSIDE the snapshot -- the same object
+    //  "Item^@" names. That is what these cases pin: '^' COMMUTES with '@' and
+    //  with '.', because a push copies a whole item and not a fragment of one.
+    //
+    //  Nothing was added to any block to make this work.
+    //
+    //  The store is built the way §4 of stack_paths.md builds it, and that is
+    //  not incidental: attributes reached through a P2PmsgMgr(VBLock_Addr64,
+    //  ...) store did not resolve at all when this was first written, by any
+    //  path, '^' or no '^'. That is its own question and not this one's, so
+    //  these cases use the arrangement that is known to work.
+    TF_CASE("'^' on an attribute collection is the snapshot's collection")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        oLive.r_Stck().Push();                          // snapshot: Currency
+        oLive.r_Attr() += P3PmsgField(L"Venue");        // added AFTER the push
+
+        P3PmsgObject oViaItem = oLive.SelectObject(L"^@Currency");
+        P3PmsgObject oViaColl = oLive.SelectObject(L"@^Currency");
+        TF_CHECK(!oViaItem.IsVoid());
+        TF_CHECK(!oViaColl.IsVoid());
+        if (!oViaItem.IsVoid() && !oViaColl.IsVoid())
+            TF_CHECK(oViaItem.GetP2Pos() == oViaColl.GetP2Pos());   // commutes
+
+        //  The collection itself, when the path ends on the '^' -- and it is
+        //  the SNAPSHOT's, not the live one.
+        P3PmsgObject oColl = oLive.SelectObject(L"@^");
+        TF_CHECK(!oColl.IsVoid());
+        TF_CHECK(oColl.IsAttr());
+        if (!oColl.IsVoid())
+            TF_CHECK(oColl.GetP2Pos() != oLive.r_Attr().r_Object().GetP2Pos());
+
+        //  Venue went in after the push, so it is in the live collection and
+        //  in neither spelling of the snapshot's.
+        TF_CHECK(!oLive.SelectObject(L"@Venue").IsVoid());
+        TF_CHECK( oLive.SelectObject(L"@^Venue").IsVoid());
+        TF_CHECK( oLive.SelectObject(L"^@Venue").IsVoid());
+    }
+
+    //  Pushes nest, and a snapshot's own collections point at the SNAPSHOT
+    //  rather than back at the live item -- measured, because if they pointed
+    //  back at the live item "@^^" would loop on the first generation instead
+    //  of descending. So the delimiter repeats here exactly as it does on an
+    //  item: "@^" is the collection before the last push, "@^^" the one before
+    //  that.
+    TF_CASE("'@^^' descends a generation, as '^^' does")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        oLive.r_Stck().Push();                          // generation 1
+        oLive.r_Attr() += P3PmsgField(L"Venue");
+        oLive.r_Stck().Push();                          // generation 2
+        oLive.r_Attr() += P3PmsgField(L"Third");
+
+        P3PmsgObject oOne = oLive.SelectObject(L"@^");
+        P3PmsgObject oTwo = oLive.SelectObject(L"@^^");
+        TF_CHECK(!oOne.IsVoid());
+        TF_CHECK(!oTwo.IsVoid());
+        if (!oOne.IsVoid() && !oTwo.IsVoid())
+            TF_CHECK(oOne.GetP2Pos() != oTwo.GetP2Pos());
+
+        //  Generation 2 has Venue; generation 1 does not. Neither has Third.
+        TF_CHECK(!oLive.SelectObject(L"@^Venue").IsVoid());
+        TF_CHECK( oLive.SelectObject(L"@^^Venue").IsVoid());
+        TF_CHECK(!oLive.SelectObject(L"@^^Currency").IsVoid());
+        TF_CHECK( oLive.SelectObject(L"@^Third").IsVoid());
+
+        //  And the same answers by the other spelling.
+        TF_CHECK(!oLive.SelectObject(L"^^@Currency").IsVoid());
+        TF_CHECK( oLive.SelectObject(L"^^@Venue").IsVoid());
+    }
+
+    //  The descendant arm. It is reached by handing the collection to
+    //  P3Pmsg_SelectObject directly -- NOT by P3PmsgDesc::SelectObject, which
+    //  despite its name is a cursor Goto by plain name and parses no path. A
+    //  path that goes through an item does not come this way either: the field
+    //  arm's '.' re-enters on the item, so "Item.^" is the item's own stack --
+    //  which the commuting rule says is the same object anyway, and that is
+    //  what the last check here measures.
+    TF_CASE("'^' on a descendant collection is the snapshot's collection")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc() += P3PmsgField(L"BHP");
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        oLive.r_Desc(P3PmsgField::AttrCMD_Create);
+        oLive.r_Desc() += P3PmsgField(L"Last");
+        oLive.r_Stck().Push();                          // snapshot: Last
+        oLive.r_Desc() += P3PmsgField(L"Close");        // added AFTER the push
+
+        P3PmsgObject oDescObj = oLive.r_Desc().r_Object();
+        TF_CHECK(oDescObj.IsDesc());
+
+        P3PmsgObject oViaItem = oLive.SelectObject(L"^.Last");
+        P3PmsgObject oViaColl = P3Pmsg_SelectObject(&oDescObj, L"^Last");
+        TF_CHECK(!oViaItem.IsVoid());
+        TF_CHECK(!oViaColl.IsVoid());
+        if (!oViaItem.IsVoid() && !oViaColl.IsVoid())
+            TF_CHECK(oViaItem.GetP2Pos() == oViaColl.GetP2Pos());
+
+        P3PmsgObject oColl = P3Pmsg_SelectObject(&oDescObj, L"^");
+        TF_CHECK(!oColl.IsVoid());
+        TF_CHECK(oColl.IsDesc());
+        if (!oColl.IsVoid())
+            TF_CHECK(oColl.GetP2Pos() != oDescObj.GetP2Pos());
+
+        TF_CHECK(!oLive.SelectObject(L"Close").IsVoid());
+        TF_CHECK( P3Pmsg_SelectObject(&oDescObj, L"^Close").IsVoid());
+    }
+
+    //  An item that never had any attributes. r_Attr() hands back an object
+    //  carrying no block, which matched no arm of the selector and fell through
+    //  to the ASSERT(0) closing it -- by way of IsRoot(), which asserts a SECOND
+    //  time on a SYS-heap object. The ANSWER was always right; the two
+    //  assertions were not, and asking a bare item for an attribute it has not
+    //  got is ordinary use.
+    //
+    //  IsVoid() was not the test that catches it: that wants m_hVBList and
+    //  m_aVBLock both zero, and an empty collection keeps the handle of the
+    //  heap it would have been allocated from.
+    //
+    //  This case is why the framework counts a debug assertion as a failure.
+    //  Before the fix it returns these same void objects and still fails, on
+    //  the assertions alone.
+    TF_CASE("a collection that was never created answers, without asserting")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc() += P3PmsgField(L"RIO");
+
+        P3PmsgField oBare = mgr.RootPath2Object(L".Store.RIO");
+        TF_CHECK(!oBare.IsVoid());
+        oBare.r_Stck().Push();
+
+        TF_CHECK(oBare.SelectObject(L"^@Any").IsVoid());
+        TF_CHECK(oBare.SelectObject(L"@^").IsVoid());
+        TF_CHECK(oBare.SelectObject(L"@Any").IsVoid());
+    }
+
+    //  Nothing pushed: still a broken path, rather than an assertion or -- the
+    //  outcome that would be worst -- the live collection answering as though
+    //  it were the snapshot.
+    TF_CASE("a collection with nothing pushed is still a broken path")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        TF_CHECK(!oLive.IsStacked());
+
+        TF_CHECK(!oLive.SelectObject(L"@Currency").IsVoid());
+        TF_CHECK( oLive.SelectObject(L"@^").IsVoid());
+        TF_CHECK( oLive.SelectObject(L"@^Currency").IsVoid());
+        TF_CHECK( oLive.SelectObject(L"^").IsVoid());
+    }
+
+    //  A ROOT path carrying '@^' does NOT work, and this case pins the wrong
+    //  answer rather than pretending it does. P3Pmsg_SplitRootPath builds each
+    //  component starting at its delimiter and running to the next one; '^' is
+    //  a delimiter, so "@^Currency" yields a component that is the single
+    //  character '@', which the length test rejects -- and the split returns
+    //  FALSE, which P2PmsgMgr::RootPath2Object does not look at. The walk then
+    //  runs over whatever components were collected before the refusal and
+    //  answers the PARENT.
+    //
+    //  So ".Store.BHP@^Currency" comes back as BHP: not the attribute, not
+    //  void, but the item the path started from. The object-path spelling above
+    //  is the one that works today.
+    TF_CASE("a root path with '@^' answers the wrong object -- known, unfixed")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        oLive.r_Stck().Push();
+
+        const P2Pos posItem = oLive.GetP2Pos();
+        P3PmsgObject oViaObject = oLive.SelectObject(L"@^Currency");
+        TF_CHECK(!oViaObject.IsVoid());                 // the object path works
+
+        try
+        {
+            P3PmsgObject oViaRoot = mgr.RootPath2Object(L".Store.BHP@^Currency");
+            //  Documented, not endorsed: it answers the item itself.
+            TF_CHECK(!oViaRoot.IsVoid());
+            if (!oViaRoot.IsVoid())
+                TF_CHECK(oViaRoot.GetP2Pos() == posItem);
+        }
+        catch (P2Pevent* pEVT)
+        {
+            //  If this ever starts throwing instead, that is an improvement on
+            //  a wrong answer and this case should be rewritten, not deleted.
+            tf_fail(__FILE__, __LINE__, "root path with '@^' now throws -- revisit this case");
+            pEVT->Cancel(false);
+        }
+    }
+}
+
 void RunMsgcoreSuite()
 {
     Test_Data_TypedValues();
@@ -2631,6 +2868,7 @@ void RunMsgcoreSuite()
     Test_StackDrop();
     Test_RootPath();
     Test_ListPath();
+    Test_CollectionStack();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();

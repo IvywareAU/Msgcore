@@ -6784,6 +6784,26 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
     TCHAR     nsObjectname[MAX_TNAME_SIZE];
     LPCTNAM lpszParsedname = ParseObjectPath ( lpszObjectPath, nsObjectname, ARRAYSIZE(nsObjectname) );
 
+    //  AN OBJECT THAT NAMES NO BLOCK IS AN ORDINARY ANSWER, NOT A LOGIC ERROR.
+    //  r_Attr() on an item that has no attributes hands back one of these, so
+    //  "Item@Tag" -- and now "Item@^" -- arrive here with nothing to select
+    //  against. Every arm below tests a type this object does not have, so it
+    //  used to fall all the way through to the ASSERT(0) at the end of the
+    //  function, by way of IsRoot() on the way past, which asserts a SECOND
+    //  time on a SYS-heap object (P2PmsgHeap_IsRoot has no arm for one). The
+    //  value RETURNED was already right; it was the two assertions that were
+    //  wrong, and asking a bare item for an attribute it has not got is not a
+    //  debug-build event.
+    //
+    //  Tested on the ADDRESS and not with IsVoid(), which wants m_hVBList and
+    //  m_aVBLock BOTH zero. An empty collection keeps the handle of the heap it
+    //  would have been allocated from and carries no block, so it is not void
+    //  by that test -- it was the half of the condition that made this look
+    //  handled when it was not. GetVBLocknn() is the plain accessor and
+    //  dereferences nothing, which matters here: there is nothing to read.
+    if ( pObject->IsVoid() || pObject->GetVBLocknn() == 0 )
+      return P3PmsgObject();         // Selection path broken
+
     // P3PmsgNodes
     /*if ( pObject->IsNode() )
     {
@@ -6897,16 +6917,54 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
         ASSERT(0);
         return P3PmsgObject();
       }
-      //  A '^' cannot be followed from here, and it is not an assertable
-      //  condition: an attribute COLLECTION has no stack of its own -- aStack
-      //  is a VBLockItem field and this block is a VBLockAttr. The attributes
-      //  IN it are items and do have one, which is why "Item@Attr^" resolves:
-      //  the Goto below lands on the attribute item and the field arm above
-      //  follows its stack. Only a '^' applied to the collection itself
-      //  arrives here, and that is a broken path, reported the way every other
-      //  broken path in this function is.
+      //  '^' ON THE COLLECTION ITSELF. An attribute collection has no stack of
+      //  its own -- aStack is a VBLockItem field and this block is a
+      //  VBLockAttr -- which is why this used to answer "broken path". It is
+      //  not the only thing a VBLockAttr carries, though: it carries aParent,
+      //  so the item that OWNS the collection can be found, and that item has
+      //  a stack, and its snapshot holds a copy of the whole collection --
+      //  Push copies name, data, attributes and descendants.
+      //
+      //  So "Item@^" is the attribute collection as it stood at the last push,
+      //  which IS the attribute collection inside the snapshot: "Item@^" and
+      //  "Item^@" name the same object. '^' commutes with '@' and with '.',
+      //  and it does so for the reason §3 already gives about pushed items --
+      //  a snapshot is a whole item, not a fragment of one.
+      //
+      //  NOTHING IS ADDED TO A VBLockAttr, so this costs no format change and
+      //  no image moves. aParent is already there, already maintained
+      //  (P3Pmsg_GetPath walks it to build a path), and P3PmsgObject::GetParent
+      //  already reads it. Measured: a pushed item's collections point at the
+      //  PUSHED item, not back at the live one, so "Item@^^" descends a
+      //  generation exactly as "Item^^" does rather than looping.
+      //
+      //  Note "Item@Attr^" is a different path and always worked: the Goto
+      //  below lands on the attribute ITEM, which has a stack of its own, and
+      //  the field arm above follows it.
       if ( *lpszObjectPath == T_StckDelim )
-        return P3PmsgObject();         // Selection path broken
+      {
+        P3PmsgObject oOwner = pObject->GetParent();
+        if ( oOwner.IsVoid() )
+          return P3PmsgObject();       // Orphaned collection; path broken
+        //  Copy-INITIALISED, not assigned: the converting constructor takes a
+        //  list and a vect as well as a field, where operator= would throw
+        //  "Invalid overloaded context". The field arm above relies on the
+        //  same distinction, and §6 is why the owner can be any of the three.
+        P3PmsgField oOwnerField = oOwner;
+        if ( !oOwnerField.IsStacked() )
+          return P3PmsgObject();       // Nothing pushed; path broken
+        P3PmsgField& oStacked = oOwner.IsList() ? (P3PmsgField&)oOwnerField.r_Stck().r_list()
+                              : oOwner.IsVect() ? (P3PmsgField&)oOwnerField.r_Stck().r_vect()
+                              :                   (P3PmsgField&)oOwnerField.r_Stck().r_item();
+        P3PmsgObject oStackedAttr = oStacked.r_Attr().r_Object();
+        //  A path that ends on a '^' answers the thing the '^' named, which is
+        //  the rule the field arm follows too. ("Item@" on its own is a
+        //  different case and still answers nothing: it ends on a '@' with an
+        //  empty name, and the Goto below is what refuses it.)
+        if ( *++lpszObjectPath == 0 )
+          return oStackedAttr;
+        return P3Pmsg_SelectObjectRecurse ( &oStackedAttr, lpszObjectPath );
+      }
       if ( !oAttr.r_Curs().Goto(nsObjectname) )
         return P3PmsgObject();         // Selection path broken;
       if ( *lpszParsedname == 0 )
@@ -6941,12 +6999,35 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
         ASSERT(0);
         return P3PmsgObject();
       }
-      //  As for attributes: a descendant COLLECTION has no aStack, only the
-      //  items in it do, and those are reached by name and then followed by the
-      //  field arm. No longer unreachable -- the arm above used to swallow
-      //  every '^' before it could get here.
+      //  As for attributes, and for the same reasons -- read that arm for the
+      //  whole of it. A VBLockDesc has no aStack either, and carries the same
+      //  aParent, so a descendant collection's '^' is the descendant collection
+      //  inside the owner's snapshot.
+      //
+      //  This arm is reached by handing a descendant collection to
+      //  P3Pmsg_SelectObject directly -- NOT by P3PmsgDesc::SelectObject,
+      //  which despite the name never parses a path at all: it is a cursor
+      //  Goto by plain name (and is defined twice, identically, in MsgDesc.cpp
+      //  and P2Pmsg.cpp). A path that goes THROUGH an item does not come here
+      //  either: the field arm's '.' re-enters on the item rather than on its
+      //  collection, so "Item.^" is the item's own stack -- the same object,
+      //  by the commuting rule above.
       if ( *lpszObjectPath == T_StckDelim )
-        return P3PmsgObject();         // Selection path broken
+      {
+        P3PmsgObject oOwner = pObject->GetParent();
+        if ( oOwner.IsVoid() )
+          return P3PmsgObject();       // Orphaned collection; path broken
+        P3PmsgField oOwnerField = oOwner;
+        if ( !oOwnerField.IsStacked() )
+          return P3PmsgObject();       // Nothing pushed; path broken
+        P3PmsgField& oStacked = oOwner.IsList() ? (P3PmsgField&)oOwnerField.r_Stck().r_list()
+                              : oOwner.IsVect() ? (P3PmsgField&)oOwnerField.r_Stck().r_vect()
+                              :                   (P3PmsgField&)oOwnerField.r_Stck().r_item();
+        P3PmsgObject oStackedDesc = oStacked.r_Desc().r_Object();
+        if ( *++lpszObjectPath == 0 )
+          return oStackedDesc;
+        return P3Pmsg_SelectObjectRecurse ( &oStackedDesc, lpszObjectPath );
+      }
       if ( !oDesc.r_Curs().Goto(nsObjectname) )
         return P3PmsgObject();         // Selection path broken;
       if ( *lpszParsedname == 0 )
