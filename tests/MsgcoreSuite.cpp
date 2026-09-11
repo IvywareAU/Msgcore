@@ -924,6 +924,154 @@ static void Test_Stack()
 }
 
 // ---------------------------------------------------------------------------
+// MsgStck::Drop : releasing the generations, not just unlinking them
+// ---------------------------------------------------------------------------
+static void Test_StackDrop()
+{
+    //  MsgStck::Drop walked to the deepest generation, zeroed each aStack on the
+    //  way back up, and returned. It freed NOTHING -- every pushed item block,
+    //  and the name and data blocks hanging off it, stayed allocated with
+    //  nothing left pointing at them. Every caller wants the storage back:
+    //  P3PmsgField::Drop, P3PmsgList::Drop and P3PmsgVect::Drop all reach it
+    //  while dismantling an item, MsgFacade's FacadeNode exposes it as the COM
+    //  "drop the stack" verb, and TargetCore's P2PeerMsg calls it when it
+    //  replaces one stack with another.
+    //
+    //  The observable is address reuse: a block that was freed goes back on the
+    //  free list, so an identical allocation that follows lands in it.
+    //
+    //  IN AN IOMAGE-BACKED MANAGER, DELIBERATELY. A standalone P3PmsgItem sits
+    //  on the SYS heap, where a P2Pos is a raw CRT pointer and Msgcore is not
+    //  the only thing allocating from it -- every transient P3PmsgDesc that a
+    //  path selection news up competes for the same block, so reuse there is
+    //  luck rather than evidence. Inside a manager the address is an offset into
+    //  one image and Msgcore's own allocator is the only claimant, which is what
+    //  makes these checks mean what they say.
+    TF_CASE("dropping a stack frees the generation's block")
+    {
+        P2PmsgMgr mgr(VBLock_Addr64, 4096, 1u << 20);
+        mgr.r_name() = L"Root";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create);
+        mgr.r_Desc() += P3PmsgField(L"Host", DataBSTR08(L"payload"));
+
+        P3PmsgField oHost(mgr.r_Desc().SelectObject(L"Host"));
+        TF_CHECK(!oHost.r_Object().IsVoid());
+
+        oHost.r_Stck().Push();
+        P3PmsgObject oGen = P3Pmsg_SelectObject(&oHost.r_Object(), L"^");
+        TF_CHECK(!oGen.IsVoid());
+        P2Pos posFirst = oGen.GetP2Pos();
+
+        oHost.r_Stck().Drop();
+        TF_CHECK(!oHost.IsStacked());
+        TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"^").IsVoid());
+
+        //  An identical push has to be able to reuse the block.
+        oHost.r_Stck().Push();
+        P3PmsgObject oAgain = P3Pmsg_SelectObject(&oHost.r_Object(), L"^");
+        TF_CHECK(!oAgain.IsVoid());
+        TF_CHECK(oAgain.GetP2Pos() == posFirst);
+    }
+
+    //  Drop has no recursion of its own any more: the Drop() it calls on the
+    //  generation ends with "if (IsStacked()) r_Stck().Drop()", so it re-enters
+    //  MsgStck::Drop for the next generation down and the chain unwinds itself.
+    //  This is what checks it reaches all of them and not just the head.
+    //
+    //  ASSERTED AS REACHABILITY, AND THIS CASE PASSES WITHOUT THE FIX -- said
+    //  plainly because the name would otherwise claim more than it checks. The
+    //  old Drop unlinked the whole chain correctly; what it did not do was free
+    //  it, and the case above is what measures that. This one guards the
+    //  traversal: that Drop still reaches every generation now that the walk is
+    //  the Drop() recursion rather than a loop of its own, and that the live
+    //  item comes through it unharmed.
+    //
+    //  Address reuse is not asserted for three the way it is for one, and the
+    //  reason is the heap rather than this function: instrumented, all three
+    //  OBJ__Free calls run, the three blocks are contiguous 206-byte
+    //  allocations, and the next round still takes its first block from the END
+    //  of the coalesced span and then allocates fresh past it, leaving the rest
+    //  unused -- 206 bytes per generation below the head, every round. That is
+    //  a free-list characteristic and it deserves its own look; asserting reuse
+    //  here would be asserting the allocator's geometry rather than this fix.
+    TF_CASE("dropping a stack empties the whole chain")
+    {
+        P2PmsgMgr mgr(VBLock_Addr64, 4096, 1u << 20);
+        mgr.r_name() = L"Root";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create);
+        mgr.r_Desc() += P3PmsgField(L"Host", DataBSTR08(L"payload"));
+
+        P3PmsgField oHost(mgr.r_Desc().SelectObject(L"Host"));
+
+        oHost.r_Stck().Push();
+        oHost.r_Stck().Push();
+        oHost.r_Stck().Push();
+        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^"  ).IsVoid());
+        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^^" ).IsVoid());
+        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^^^").IsVoid());
+
+        oHost.r_Stck().Drop();
+
+        //  Every generation gone, not merely the one the live item pointed at.
+        TF_CHECK(!oHost.IsStacked());
+        TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"^"  ).IsVoid());
+        TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"^^" ).IsVoid());
+        TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"^^^").IsVoid());
+
+        //  And the live item is untouched by its own stack being dropped.
+        TF_CHECK(oHost == L"Host");
+        oHost.AssertValid();
+
+        //  Pushing again still works on top of the emptied stack.
+        oHost.r_Stck().Push();
+        TF_CHECK(oHost.IsStacked());
+        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^" ).IsVoid());
+        TF_CHECK( P3Pmsg_SelectObject(&oHost.r_Object(), L"^^").IsVoid());
+    }
+
+    //  Freed by the generation's OWN type. A pushed list is a list, and
+    //  P3PmsgField::Drop opens ASSERT(OBJ__IsField()) and frees the item block
+    //  with no Truncate() behind it, which would leave every element in the
+    //  snapshot allocated -- the same trap P3PmsgVect::Drop was added to close.
+    TF_CASE("dropping a pushed list frees the list generation")
+    {
+        P2PmsgMgr mgr(VBLock_Addr64, 4096, 1u << 20);
+        mgr.r_name() = L"Root";
+        P3PmsgList oSeed(L"Numbers", P3PmsgData((int)0));
+        oSeed.AddListTail(P3PmsgData((int)1));
+        oSeed.AddListTail(P3PmsgData((int)2));
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create);
+        mgr.r_Desc() += oSeed;
+
+        P3PmsgList oList(mgr.r_Desc().SelectObject(L"Numbers"));
+        TF_CHECK(oList.r_Object().IsList());
+
+        oList.r_Stck().Push();
+        P3PmsgObject oGen = P3Pmsg_SelectObject(&oList.r_Object(), L"^");
+        TF_CHECK(!oGen.IsVoid());
+        TF_CHECK(oGen.IsList());
+        P2Pos posFirst = oGen.GetP2Pos();
+
+        oList.r_Stck().Drop();
+        TF_CHECK(!oList.IsStacked());
+        oList.AssertValid();
+
+        //  The live list is untouched by its own stack being dropped.
+        TF_CHECK_EQ((int)oList.GetCount(), 2);
+
+        oList.r_Stck().Push();
+        P3PmsgObject oAgain = P3Pmsg_SelectObject(&oList.r_Object(), L"^");
+        TF_CHECK(!oAgain.IsVoid());
+        TF_CHECK(oAgain.GetP2Pos() == posFirst);
+        if (!oAgain.IsVoid())
+        {
+            P3PmsgList oAgainList(oAgain);
+            TF_CHECK_EQ((int)oAgainList.GetCount(), 2);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3PmsgVect::Drop : deleting a vector out of a container
 // ---------------------------------------------------------------------------
 static void Test_VectDrop()
@@ -2097,6 +2245,7 @@ void RunMsgcoreSuite()
     Test_Stack();
     Test_StackContainers();
     Test_VectDrop();
+    Test_StackDrop();
     Test_RootPath();
     Test_ListPath();
     Test_Event();

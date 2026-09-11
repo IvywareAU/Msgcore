@@ -505,18 +505,63 @@ MsgStck__AllocItem ( MsgStck *pThis, const P3PmsgField& oField )
     return aVBLock;
 }
 
+//
+//  Releases every generation on the item's stack.
+//  NOTES: IT USED TO FREE NOTHING. It walked to the deepest generation, zeroed
+//         each aStack on the way back up, and returned -- so every pushed block,
+//         and the name and data blocks hanging off it, stayed allocated with
+//         nothing left pointing at them. Every caller wants the storage back:
+//         P3PmsgField::Drop, P3PmsgList::Drop and P3PmsgVect::Drop all reach
+//         here while dismantling an item, MsgFacade's FacadeNode exposes it as
+//         the COM "drop the stack" verb, and TargetCore's P2PeerMsg calls it
+//         when it replaces one stack with another.
+//         Measured on a single push of a 272-byte item: push, record the
+//         snapshot's P2Pos, Drop, push an identical item again, and the second
+//         snapshot landed 272 bytes further on instead of in the block the
+//         first one had vacated.
+//       : NO EXPLICIT RECURSION ANY MORE, and none is wanted: the Drop() below
+//         ends with "if (IsStacked()) r_Stck().Drop()", so it re-enters here for
+//         the next generation down and the chain unwinds itself. Unlinking
+//         BEFORE the free is what keeps that from looking at a block that has
+//         already gone.
+//       : BY THE GENERATION'S OWN TYPE. A pushed list is a list, and
+//         P3PmsgField::Drop opens ASSERT(OBJ__IsField()) and frees the item
+//         block with no Truncate(), which would leak every element in it --
+//         the same trap P3PmsgVect::Drop was added to close.
 void
 MsgStck::Drop ( )
 {
     if ( m_pP3PmsgField == nullptr )
       return;
     VBLock *pVBLock = (VBLock *)m_pP3PmsgField -> r_Object().GetVBLock ( );
-    VBLaddr aStack = VBLockItem_GetStack ( pVBLock->oHdr.uVBLockDefs, VBLock_pItem(pVBLock) );
+    if ( pVBLock == nullptr )
+      return;
+    UCHAR   uVBLock = pVBLock->oHdr.uVBLockDefs;
+    VBLaddr aStack  = VBLockItem_GetStack ( uVBLock, VBLock_pItem(pVBLock) );
     if ( !aStack )
       return;
-    P3PmsgField oField ( m_pP3PmsgField->OBJ__hVBList, aStack, 0 );
-                oField.r_Stck().Drop();
-    VBLockItem_SetStack ( pVBLock->oHdr.uVBLockDefs, VBLock_pItem(pVBLock), 0 );
+
+    // Unlink, then free
+    VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock), 0 );
+
+    P2PmsgHANDLE hVBList = m_pP3PmsgField -> OBJ__hVBList;
+    VBLockItem  *pItem   = VBLock_pItem (
+                             (VBLock *)m_pP3PmsgField->r_Object().Msg2Phys(aStack) );
+    if ( VBLockItem_IsList(pItem) )
+    {
+      P3PmsgList oGen ( hVBList, aStack, 0 );
+      oGen.Drop ( );
+    }
+    else if ( VBLockItem_IsVect(pItem) )
+    {
+      P3PmsgVect oGen ( hVBList, aStack, 0 );
+      oGen.Drop ( );
+    }
+    else
+    {
+      P3PmsgField oGen ( hVBList, aStack, 0 );
+      oGen.Drop ( );
+    }
 }
 
 //  Navigation and 
