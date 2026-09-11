@@ -6829,10 +6829,28 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
       }
       if ( *lpszObjectPath == T_AttrDelim )
         return P3Pmsg_SelectObjectRecurse ( &oField.r_Attr().r_Object(), ++lpszObjectPath );
+      //  '^' follows the item's stack: the aStack address a Push() wrote, so a
+      //  path can name a value the field USED to hold. The delimiter has been
+      //  in the grammar from the start -- ParseObjectPath stops on it,
+      //  P3Pmsg_IsPathDelimiter answers TRUE for it and P3Pmsg_IsValidItemname
+      //  rejects it from item names -- but this arm, the one place following it
+      //  would have happened, was never written and asserted instead.
+      //
+      //  Pushes nest (MsgStck::Push re-links the current head onto the new
+      //  item), so the delimiter repeats: "Field^" is the item as it stood
+      //  before the last push, "Field^^" before the one before that. Whatever
+      //  follows is read against the pushed item exactly as it would be against
+      //  a live one, because a pushed item IS a whole item -- Push copies name,
+      //  data, attributes and descendants -- so "Field^.Child" and
+      //  "Field^@Attr" mean inside the snapshot what they mean outside it.
       if ( *lpszObjectPath == T_StckDelim )
       {
-        ASSERT(0);
-        return P3PmsgObject();
+        if ( !oField.IsStacked() )
+          return P3PmsgObject();       // Nothing pushed; selection path broken
+        P3PmsgField& oStacked = oField.r_Stck().r_item();
+        if ( *++lpszObjectPath == 0 )
+          return oStacked.r_Object();  // Path ends on the pushed item itself
+        return P3Pmsg_SelectObjectRecurse ( &oStacked.r_Object(), lpszObjectPath );
       }
       //if ( oField.r_name().c_wcsicmp(++lpszObjectPath) == 0 )
       //  return *pObject;
@@ -6867,11 +6885,16 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
         ASSERT(0);
         return P3PmsgObject();
       }
+      //  A '^' cannot be followed from here, and it is not an assertable
+      //  condition: an attribute COLLECTION has no stack of its own -- aStack
+      //  is a VBLockItem field and this block is a VBLockAttr. The attributes
+      //  IN it are items and do have one, which is why "Item@Attr^" resolves:
+      //  the Goto below lands on the attribute item and the field arm above
+      //  follows its stack. Only a '^' applied to the collection itself
+      //  arrives here, and that is a broken path, reported the way every other
+      //  broken path in this function is.
       if ( *lpszObjectPath == T_StckDelim )
-      {
-        ASSERT(0);
-        return P3PmsgObject();
-      }
+        return P3PmsgObject();         // Selection path broken
       if ( !oAttr.r_Curs().Goto(nsObjectname) )
         return P3PmsgObject();         // Selection path broken;
       if ( *lpszParsedname == 0 )
@@ -6883,7 +6906,15 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
     if ( pObject->IsDesc() )
     {
       P3PmsgDesc oDesc = *pObject;
-      if ( *lpszObjectPath == T_StckDelim )
+      //  T_DescDelim, not T_StckDelim. This is the descendant arm: it steps
+      //  over the delimiter and re-enters on the same collection, which is what
+      //  the field arm above -- and the node arm above that -- both do for '.'.
+      //  It was testing the STACK constant, so "Desc^name" descended and
+      //  "Desc.name" fell through to the Goto below carrying the empty name
+      //  ParseObjectPath had stopped at, and matched nothing. With '^' now
+      //  meaning the stack everywhere else, this could not be left reading the
+      //  same character.
+      if ( *lpszObjectPath == T_DescDelim )
       {
         return P3Pmsg_SelectObjectRecurse ( &oDesc.r_Object(), ++lpszObjectPath );
         //lpszObjectPath = ParseObjectPath ( ++lpszObjectPath, strObjectname );
@@ -6898,11 +6929,12 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
         ASSERT(0);
         return P3PmsgObject();
       }
+      //  As for attributes: a descendant COLLECTION has no aStack, only the
+      //  items in it do, and those are reached by name and then followed by the
+      //  field arm. No longer unreachable -- the arm above used to swallow
+      //  every '^' before it could get here.
       if ( *lpszObjectPath == T_StckDelim )
-      {
-        ASSERT(0);
-        return P3PmsgObject();
-      }
+        return P3PmsgObject();         // Selection path broken
       if ( !oDesc.r_Curs().Goto(nsObjectname) )
         return P3PmsgObject();         // Selection path broken;
       if ( *lpszParsedname == 0 )

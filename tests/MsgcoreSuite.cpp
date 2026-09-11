@@ -807,6 +807,86 @@ static void Test_Stack()
         oField.AssertValid();
         TF_CHECK(oField == L"Larry");
     }
+
+    //  The '^' path delimiter, which is what the stack link is FOR from a
+    //  caller's side. It has been in the grammar since the beginning --
+    //  ParseObjectPath stops on it, P3Pmsg_IsPathDelimiter answers TRUE for it,
+    //  P3Pmsg_IsValidItemname refuses it in a name -- and every arm of
+    //  P3Pmsg_SelectObjectRecurse that could have followed it was ASSERT(0).
+    //  So the stack was reachable only through r_Stck(); no path could name a
+    //  pushed value.
+    TF_CASE("'^' selects the value the field held before the push")
+    {
+        P3PmsgItem oHost(L"Host", DataBSTR08(L"live"));
+        oHost.r_Stck().Push();
+        oHost = P3PmsgName(L"Host-Changed");
+
+        P3PmsgObject oWas = P3Pmsg_SelectObject ( &oHost.r_Object(), L"^" );
+        TF_CHECK(!oWas.IsVoid());
+        if (!oWas.IsVoid())
+        {
+          P3PmsgField oWasField = oWas;
+          TF_CHECK(oWasField == L"Host");
+        }
+
+        //  ... and once it is popped there is nothing to select again.
+        oHost.r_Stck().Pop();
+        TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"^").IsVoid());
+    }
+
+    //  Pushes nest -- MsgStck::Push reads the current head before allocating
+    //  and re-links it onto the new item -- so the delimiter has to repeat.
+    TF_CASE("'^^' reaches the generation before the last one")
+    {
+        P3PmsgItem oHost(L"Gen0");
+        oHost.r_Stck().Push();
+        oHost = P3PmsgName(L"Gen1");
+        oHost.r_Stck().Push();
+        oHost = P3PmsgName(L"Gen2");
+
+        P3PmsgObject oOne = P3Pmsg_SelectObject ( &oHost.r_Object(), L"^"  );
+        P3PmsgObject oTwo = P3Pmsg_SelectObject ( &oHost.r_Object(), L"^^" );
+        TF_CHECK(!oOne.IsVoid());
+        TF_CHECK(!oTwo.IsVoid());
+        if (!oOne.IsVoid()) { P3PmsgField oF = oOne; TF_CHECK(oF == L"Gen1"); }
+        if (!oTwo.IsVoid()) { P3PmsgField oF = oTwo; TF_CHECK(oF == L"Gen0"); }
+
+        //  One more than there are generations is a broken path, not a crash.
+        TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"^^^").IsVoid());
+    }
+
+    //  A pushed item is a WHOLE item -- Push copies name, data, attributes and
+    //  descendants -- so a path does not have to stop at the '^'. This is also
+    //  what makes the snapshot worth naming: it holds the children the live
+    //  item has since lost or gained.
+    TF_CASE("a path continues through the pushed item")
+    {
+        P3PmsgItem oHost;
+        oHost.r_name() = L"Snap";
+        oHost.r_Desc(P3PmsgField::AttrCMD_Create);
+        oHost.r_Desc() += P3PmsgField(L"Before");
+        oHost.r_Stck().Push();
+        oHost.r_Desc() += P3PmsgField(L"After");
+
+        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^.Before").IsVoid());
+        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"Before"  ).IsVoid());
+        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"After"   ).IsVoid());
+
+        //  The child added AFTER the push is not in the snapshot.
+        TF_CHECK( P3Pmsg_SelectObject(&oHost.r_Object(), L"^.After" ).IsVoid());
+    }
+
+    //  A field that was never pushed has no aStack to follow. That is an
+    //  ordinary miss -- the same void P3PmsgObject every other broken path in
+    //  P3Pmsg_SelectObjectRecurse returns -- and NOT the ASSERT(0) that used to
+    //  stand here, which took a debug build down for asking a legitimate
+    //  question.
+    TF_CASE("'^' on an unpushed field is a miss, not an assertion")
+    {
+        P3PmsgItem oPlain(L"Plain");
+        TF_CHECK(P3Pmsg_SelectObject(&oPlain.r_Object(), L"^").IsVoid());
+        TF_CHECK(P3Pmsg_SelectObject(&oPlain.r_Object(), L"^.Child").IsVoid());
+    }
 }
 
 // ---------------------------------------------------------------------------
