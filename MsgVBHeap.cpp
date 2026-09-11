@@ -3525,10 +3525,13 @@ P2PmsgHeap_CreateBSTRio ( VBListBSTRio *pBSTRio, VBLsize nBufferLen )
     // that is the C4 mistake exactly: the structure is checked in the build
     // nobody ships.
     //
-    // Only this overload is changed. The single-argument one keeps its ASSERT,
-    // because it is for images this process just built, where the walk is a
-    // developer aid and not a gate -- and because running it there would make
-    // every ordinary heap creation pay for a full block walk.
+    // The single-argument overload KEEPS that ASSERT, because it is for images
+    // this process just built, where the walk is a developer aid and not a gate
+    // -- and because running it unconditionally would make every ordinary heap
+    // creation pay for a full block walk. What it no longer does is run it
+    // inside this gate: see the note at the ASSERT itself. THIS is the only
+    // structural gate on the untrusted BSTRio path, and the walk now happens
+    // exactly once per load rather than twice.
     if ( !P2PmsgHeap_AssertVBlocksBSTRio ( hVBList ) )
     {
       // Free the handle but NOT the image. P2PmsgHeap_Close deletes
@@ -3606,7 +3609,30 @@ P2PmsgHeap_CreateBSTRio ( VBListBSTRio *pBSTRio )
     // TODO: Delete above sequence ^^^
 
     // Tidy up, and
-    ASSERT(P2PmsgHeap_AssertVBlocksBSTRio(pHandle));
+    //  NOT inside a gate -- the BSTRio half of the note the IOMAGE twin carries
+    //  at the same place above, and the last call site on either arm that did
+    //  not have it.
+    //
+    //  The assertion is kept, because a TRUSTED caller handing this overload a
+    //  corrupt image is a bug in that caller and worth stopping on. What it must
+    //  not do is fire for the length-validated overload, which opens a gate and
+    //  is about to run this very walk again and refuse on its answer. Two things
+    //  went wrong when it did, and the second is the sharper one:
+    //
+    //    * the image was walked TWICE per load, once to assert about it and once
+    //      to decide about it; and
+    //    * every check INSIDE the walk is already gate-aware -- VBHEAP_ASSERT0
+    //      and VBHEAP_DIAG stay silent inside a gate and feed bResult instead --
+    //      so the walk's own diagnostics were correctly quiet and this one
+    //      ungated ASSERT on its RETURN VALUE fired in their place. The gate did
+    //      not merely fail to suppress the noise: it CREATED it. Outside a gate
+    //      the same walk rewrites the key block to agree with the blocks it
+    //      counted and answers true, so the assertion does not fire; inside a
+    //      gate it refuses to rewrite, answers false, and the assertion fires on
+    //      exactly the images the gate was about to reject by name. Four of the
+    //      nineteen images in the corpus did that, all four at this line.
+    if ( !P2PmsgHeap_InUntrustedGate() )
+      ASSERT(P2PmsgHeap_AssertVBlocksBSTRio(pHandle));
     return pHandle;
 }
 
@@ -4406,6 +4432,14 @@ ASSERT(VBHeap_IsAddr(pVBLock,pHandle->uAddrType));
       //  nothing is collated between finding the block and allocating it -- so
       //  the retry is taken at most once, and the throw below cannot be reached
       //  by any heap this allocator built.
+      //
+      //  There is no ASSERT on the retry flag here. Reaching the second pass
+      //  with it already set means the free list does not describe this image,
+      //  which is a condition that matters outside Debug -- so it throws, by
+      //  name, four lines below. Asserting it as well only puts a dialog in
+      //  front of a refusal that is already correct. Refer the register's
+      //  item 19: if the condition matters in Release, throw; if it does not,
+      //  do not assert it either.
       aVBLockFree = aVBLockBest;
       pVBLock     = VBList2PhysVBHeap ( hVBList, aVBLockFree );
       if ( pVBLock == nullptr                         ||
@@ -4415,7 +4449,6 @@ ASSERT(VBHeap_IsAddr(pVBLock,pHandle->uAddrType));
            !VBHeap_IsFree(pVBLock)                    ||
            VBHeap_Sizenn(pVBLock) < nSizeof              )
       {
-        ASSERT(!bFirstFit);
         if ( !bFirstFit )
         {
           bFirstFit = true;
@@ -4581,6 +4614,14 @@ ASSERT(VBHeap_IsLinked(pVBLock));
       //  nothing is collated between finding the block and allocating it -- so
       //  the retry is taken at most once, and the throw below cannot be reached
       //  by any heap this allocator built.
+      //
+      //  There is no ASSERT on the retry flag here. Reaching the second pass
+      //  with it already set means the free list does not describe this image,
+      //  which is a condition that matters outside Debug -- so it throws, by
+      //  name, four lines below. Asserting it as well only puts a dialog in
+      //  front of a refusal that is already correct. Refer the register's
+      //  item 19: if the condition matters in Release, throw; if it does not,
+      //  do not assert it either.
       aVBLockFree = aVBLockBest;
       pVBLock     = VBList2PhysVBHeap ( hVBList, aVBLockFree );
       if ( pVBLock == nullptr                         ||
@@ -4590,7 +4631,6 @@ ASSERT(VBHeap_IsLinked(pVBLock));
            !VBHeap_IsFree(pVBLock)                    ||
            VBHeap_Sizenn(pVBLock) < nSizeof              )
       {
-        ASSERT(!bFirstFit);
         if ( !bFirstFit )
         {
           bFirstFit = true;

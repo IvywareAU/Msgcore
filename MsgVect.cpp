@@ -587,10 +587,22 @@ P3PmsgVect::Truncate ( )
 //       : The body is P3PmsgList::Drop's, with Truncate() doing the
 //         type-specific part -- it frees the element blocks through
 //         FreeElemDeep and then unchains the aExtra continuations.
+//       : THE TYPE TEST THROWS RATHER THAN ASSERTS, and the reason is the
+//         first note above. P3PmsgField::Drop already had the same test as
+//         ASSERT(OBJ__IsField()), and it did not stop a vect being dropped
+//         through it, because an ASSERT is not in the binary that did the
+//         dropping. Repeating the pattern one level down would buy exactly
+//         as much. It is not decoration either: Truncate() reads the element
+//         slot array through VBLock_pVect and hands what it finds to Free, so
+//         on a block that is not a vect those are arbitrary bytes taken as
+//         addresses. That matters in Release, which is the whole of item 19.
 void
 P3PmsgVect::Drop ( )
 {
-    ASSERT(r_Object().IsVect());
+    if ( !r_Object().IsVect() )
+      EVERR->MODULE
+           ->Message(L"Drop on a P3PmsgVect whose block is not a vect")
+           ->Throw();
     if ( IsAttributed() )
       r_Attr().Drop();
     if ( IsDescendant() )

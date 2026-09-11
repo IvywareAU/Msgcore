@@ -2898,8 +2898,20 @@ P3PmsgObject::RehomeInlineItem ( )
       m_hVBList = P2PmsgHeap_CreateSYS ( m_uVBLock, g_nVBListCreateHeap_SizeMax );
     m_uVBLock = P2PmsgHeap_Addrnn ( m_hVBList );
 
+    //  VBLsize IS UNSIGNED -- Msgcore.h spells it UINT_PTR -- so a declared
+    //  size at or below the header size does not make the subtraction below
+    //  negative, it makes it enormous, and hands P2PmsgHeap_Alloc a request
+    //  near the address-space ceiling. This was an ASSERT, which is the
+    //  release-readiness register's item 19 exactly: the condition matters in
+    //  Release, so it throws there too rather than compiling out of the only
+    //  build anybody ships.
     const VBLsize nSizeofHdr = P2PmsgHeap_Sizeof_Hdr ( m_hVBList );
-    ASSERT(nSizeofHdr>0&&nVBLockSize>nSizeofHdr);
+    if ( nSizeofHdr == 0 || nVBLockSize <= nSizeofHdr )
+      EVERR->MODULE
+           ->AFP(nVBLockSize)->AFP(nSizeofHdr)
+           ->Message(L"Inline block of %I64u cannot carry a header of %I64u"
+                    , (UINT64)nVBLockSize, (UINT64)nSizeofHdr )
+           ->Throw();
     const VBLaddr aVBLock = P2PmsgHeap_Alloc ( m_hVBList, VBLock_Item
                                              , nVBLockSize - nSizeofHdr );
     memcpy ( P2PmsgHeap_Addr2Phys ( m_hVBList, aVBLock )
@@ -2927,7 +2939,17 @@ P2PmsgObject_CopyHeapVBLock ( P2PmsgHANDLE hVBList, VBLaddr aVBLock )
     const VBLsize nVBLockSize= VBLock_Hdr_u_SizeNN ( pVBLock );
     const UCHAR   uVBLockType= pVBLock->oHdr.uVBLockDefs & VBLock_TypeMask;
     const VBLsize nSizeofHdr = P2PmsgHeap_Sizeof_Hdr ( hVBList );
-    ASSERT(nSizeofHdr>0&&nVBLockSize>nSizeofHdr);
+    //  THE SAME UNSIGNED SUBTRACTION AS RehomeInlineItem, and a worse input:
+    //  nVBLockSize is read out of the block's OWN header, so on a heap opened
+    //  from an image it is attacker-shaped. Under an ASSERT the guard is in no
+    //  shipped binary at all; item 19 says a condition that matters in Release
+    //  throws there.
+    if ( nSizeofHdr == 0 || nVBLockSize <= nSizeofHdr )
+      EVERR->MODULE
+           ->AFP(nVBLockSize)->AFP(nSizeofHdr)
+           ->Message(L"Block declares %I64u, which cannot carry a header of %I64u"
+                    , (UINT64)nVBLockSize, (UINT64)nSizeofHdr )
+           ->Throw();
 
     const VBLaddr aCopy      = P2PmsgHeap_Alloc ( hVBList, uVBLockType
                                                 , nVBLockSize - nSizeofHdr );
@@ -3551,6 +3573,13 @@ P3PmsgField::P3PmsgField ( )
 //         reviving it would flip every field copy in this tree and in
 //         Chartboard from a value to an alias, silently, which is a decision
 //         and not a bug fix.
+//       : AND SO HAS THE ASSERT(OBJ__hVBList==nullptr) THAT REPLACED IT. It
+//         asserted the finding this note already states, in one of six
+//         constructors that all call RenderThisSafe and none of which asserts
+//         it. Nothing in either build branches on the answer -- the assignment
+//         below runs either way -- so item 19's second half applies: a
+//         condition that does not matter in Release does not want asserting
+//         either. It is prose now, where the rest of the finding lives.
 //       : THE HANDLE IS SPELLED r_Object(). `P3PmsgField oB = oA` is a copy of
 //         the item; `P3PmsgField oB = oA.r_Object()` is the item. The library
 //         writes the second wherever it means to write through -- refer
@@ -3560,7 +3589,6 @@ P3PmsgField::P3PmsgField ( const P3PmsgField& rhs )
            : P3PmsgName ( (P3PmsgField *)0 ), P3PmsgData ( (P3PmsgField *)0 )
 {
     RenderThisSafe ( );
-    ASSERT(OBJ__hVBList==nullptr);
    *this = rhs;
 }
 P3PmsgField::P3PmsgField ( LPCTSTR lpszName, size_t nSize )

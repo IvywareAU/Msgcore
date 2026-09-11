@@ -209,12 +209,13 @@ cxx-to-c  P3PmsgVect::VerifyContainment    # UNTRIAGED (method, MsgVect.h:113)
 #  measured. It read "a caller on the flat surface wants the answer and has it --
 #  IsSole is the question the C API would carry". The caller does not have it: there
 #  is no msgcore_field_is_sole in Msgcore_c.h, and none of the nine
-#  msgcore_field_is_* predicates answers this question. IsSole scores BOUND only
-#  through check_api_drift.ps1's prefix fallback, which roots 'is_sole' at 'is' and
-#  matches msgcore_field_is_null. The argument above survives the correction whole --
+#  msgcore_field_is_* predicates answers this question. IsSole scored BOUND only
+#  through check_api_drift.ps1's prefix fallback, which rooted 'is_sole' at 'is' and
+#  matched msgcore_field_is_null. The argument above survives the correction whole --
 #  the working of a question is not the question -- but whether the flat surface
-#  should carry the question itself is now an open entry rather than a settled
-#  premise. Refer stack_paths.md sections 29 and 34.
+#  should carry the question itself was left open rather than settled. Refer
+#  stack_paths.md sections 29 and 34; the fallback no longer scores it, and IsSole
+#  carries a line of its own at the bottom of this file.
 cxx-to-c  P3PmsgField::HeapHolders    # the working of IsSole, and takes a P2PmsgHANDLE
 cxx-to-c  P3PmsgDesc::HeapHolders    # as P3PmsgField::HeapHolders, one level in
 cxx-to-c  P3PmsgAttr::HeapHolders    # as P3PmsgField::HeapHolders, one level in
@@ -250,15 +251,18 @@ cxx-to-c  P3PmsgVect::HeapHolders    # as P3PmsgField::HeapHolders, plus the ele
 #  (Msgcore_c.h:886) frees no item the caller holds a handle on and unlinks nothing
 #  from the tree.
 #
-#  P3PmsgList::Drop (MsgList.h:122) is the same member under the same reason and has
-#  no line here ON PURPOSE. check_api_drift.ps1 scores it BOUND against
-#  msgcore_list_drop_head through its prefix fallback -- the root is
+#  P3PmsgList::Drop (MsgList.h:122) is the same member under the same reason, and it
+#  spent one section with no line here BECAUSE IT COULD NOT CARRY ONE: the prefix
+#  fallback scored it BOUND against msgcore_list_drop_head -- the root was
 #  'msgcore_list_drop' and msgcore_list_drop_head starts with it -- so a line would
-#  come back reported as redundant and the next reader would be told to delete it.
-#  msgcore_list_drop_head and _drop_tail actually bind P3PmsgList::DropHead and
-#  ::DropTail, which take one element off an end. The whole-object drop reaches no
-#  binding and is decided nowhere. Refer stack_paths.md section 34.
+#  have come back reported as redundant and the next reader told to delete it.
+#  msgcore_list_drop_head and _drop_tail bind P3PmsgList::DropHead and ::DropTail,
+#  which take one element off an end, and the tightened matcher now says so: a
+#  function that is already another member's exact binding is not evidence for this
+#  one. The line below is that reason promoted out of this comment, where section 34
+#  parked it.
 cxx-to-c  P3PmsgVect::Drop    # frees the item; every drop-shaped name on the flat surface releases a handle instead
+cxx-to-c  P3PmsgList::Drop    # as P3PmsgVect::Drop; msgcore_list_drop_head and _drop_tail are DropHead's and DropTail's
 cxx-to-c  P3PmsgField::Drop    # as P3PmsgVect::Drop; the surface deletes from the parent, by name
 cxx-to-c  P3PmsgAttr::Drop    # as P3PmsgVect::Drop, of a collection; msgcore_attr_truncate empties one without freeing it
 cxx-to-c  P3PmsgDesc::Drop    # as P3PmsgVect::Drop, of a collection; msgcore_desc_truncate empties one without freeing it
@@ -291,3 +295,257 @@ cxx-to-c  P3PmsgDesc::Drop    # as P3PmsgVect::Drop, of a collection; msgcore_de
 #  They are triaged together because they are one decision.
 cxx-to-c  P3PmsgField::operator!=    # identity, which msgcore_field_get_p2pos already carries as a comparable value
 cxx-to-c  P3PmsgField::operator==    # as operator!=; and the LPCTNAM overload is msgcore_field_get_name
+#
+# ---------------------------------------------------------------------------------
+#  The thirty-five the tightened matcher surfaced.
+#
+#  check_api_drift.ps1's prefix fallback used to root a C++ member at its first
+#  snake-cased segment and take whatever the surface listed first, which scored
+#  GetHeadPos against msgcore_list_get_count and IsSole against
+#  msgcore_field_is_null. Section 34 measured that -- 43 of 116 "bound" came
+#  through the fallback and 28 of those rooted at a bare accessor verb -- and
+#  deliberately left it, because tightening it turns silent passes into questions
+#  about the C API and that is a session of its own. This is that session. The
+#  honest bound count is 81, not 116, and the thirty-five members below are the
+#  difference. None of them was decided before today; every one of them was
+#  reported green.
+# ---------------------------------------------------------------------------------
+#
+#  A LIST POSITION IS A RAW ARENA OFFSET, AND THE ABI CANNOT HAND ONE OUT.
+#  GetHeadPos and GetTailPos return VBLaddr, and VBLaddr is `#define VBLaddr
+#  UINT_PTR` (Msgcore.h:49) -- an offset into the heap image, pointer-wide, which
+#  Msgcore.h:71 says to "key off pointer width on every toolchain". Two things
+#  follow and either alone is enough. It is not a stable VALUE: rule 2 at the top
+#  of Msgcore_c.h says any allocating call may move every block, and a position
+#  held across one addresses whatever now occupies that offset -- the same defect
+#  as a stale p2pos, without p2pos's re-resolution route through
+#  msgcore_mgr_p2pos2field. And it is not a stable TYPE: an export returning
+#  UINT_PTR makes the flat ABI pointer-width-dependent, which is the x86/x64 split
+#  section 33 spent a section on.
+#
+#  So the surface walks a list the two other ways, and both are re-validated on
+#  every call. By ordinal -- msgcore_list_get_int_at, _get_wstr_at, _set_int_at,
+#  _delete_at, all bounded by msgcore_list_get_count -- and by cursor, the whole
+#  msgcore_curs_ family, which owns the position rather than handing it to the
+#  caller. GetNext, GetPrev and GetTail are the same walk from the other end: they
+#  return P3PmsgData&, a reference into the live object, and P3PmsgData has no
+#  family in api-drift.config.psd1 at all because it has no C projection by design.
+cxx-to-c  P3PmsgList::GetHeadPos    # returns VBLaddr, a pointer-wide arena offset rule 2 invalidates; the surface indexes by ordinal
+cxx-to-c  P3PmsgList::GetTailPos    # as GetHeadPos, from the other end
+cxx-to-c  P3PmsgList::GetNext    # the VBLaddr walk, and it returns P3PmsgData&, which the surface does not carry
+cxx-to-c  P3PmsgList::GetPrev    # as GetNext, backwards
+cxx-to-c  P3PmsgList::GetTail    # returns P3PmsgData&; the surface reads element get_count-1 by ordinal
+#
+#  BLOCK GEOMETRY IS THE ARENA'S BUSINESS AND MFC'S POSITION IS NOT A C TYPE.
+#  GetVBLockType takes a POSITION (MsgList.h:125, MsgVect.h:101), which is MFC's
+#  list cookie and exactly the case this file's own header names -- "takes a
+#  P2PmsgHANDLE, which is not a type the flat surface has" -- and it answers with
+#  the storage block's type code, the uVBLockDefs nibble section 36 documents for
+#  the image scanner. GetVBLockListSize and GetVBLockVectSize answer with the
+#  block's byte size.
+#
+#  The surface asks the neighbouring question and asks it about CONTENT rather
+#  than storage: msgcore_list_get_type_at and msgcore_vect_get_type report an
+#  element's data type, msgcore_field_get_data_type a field's, and
+#  msgcore_type_name / msgcore_type_from_name give that vocabulary names. A block
+#  type code has no such vocabulary on the flat side, and publishing one would put
+#  the arena's header layout into the supported ABI, where every future change to
+#  the format becomes a breaking change.
+cxx-to-c  P3PmsgList::GetVBLockType    # takes an MFC POSITION and answers with a block type code; the surface reports data types
+cxx-to-c  P3PmsgVect::GetVBLockType    # as P3PmsgList::GetVBLockType
+cxx-to-c  P3PmsgList::GetVBLockListSize    # the storage block's byte size; arena layout, not message content
+cxx-to-c  P3PmsgVect::GetVBLockVectSize    # as GetVBLockListSize
+#
+#  THE LIBRARY'S OWN HANDLES ARE NOT THE SURFACE'S HANDLES. P2PmsgFieldHdl is
+#  three bare UINT_PTRs (P2PmsgVBLock.h:276-281) and its list and vect twins are
+#  the same shape; P2PmsgHANDLE is the heap handle the HeapHolders block above
+#  already refuses for being no type of the surface's. MsgFieldHandle and its
+#  siblings are opaque by construction: a caller obtains one from
+#  msgcore_mgr_root, _p2pos2field, _field_child or _from_field, and returns it
+#  through the matching _destroy. Exporting a getter for the internal struct would
+#  publish a pointer-width record of heap handle and block address -- unowned,
+#  undestroyable, and invalid after the next allocation -- beside the opaque handle
+#  the rules are written for. There would then be two handle vocabularies in one
+#  ABI and only one set of rules.
+cxx-to-c  P3PmsgField::GetP2PmsgFieldHdl    # returns three raw UINT_PTRs; the surface's handles are opaque and caller-owned
+cxx-to-c  P3PmsgList::GetP2PmsgListHdl    # as GetP2PmsgFieldHdl
+cxx-to-c  P3PmsgVect::GetP2PmsgVectHdl    # as GetP2PmsgFieldHdl
+cxx-to-c  P3PmsgField::GetP2PmsgHandle    # returns P2PmsgHANDLE, the heap handle, which is not a type the flat surface has
+#
+#  AN EXPORT THAT RETURNS BITS NOBODY CAN NAME CANNOT BE USED. GetAccess masks
+#  VBLockField::uAccessAttr (P2Pmsg.cpp:4279-4283) and GetPermissions masks
+#  VBLockDesc::uPermissions and VBLockAttr::uPermissions (MsgDesc.cpp:773-779).
+#  The access byte at least has a vocabulary -- AttrField_HIDDEN, _NOCOPY, _SORT,
+#  _TOUCH, _EXPAND (P2PmsgVBLock.h:283-289) -- but it is declared in a header
+#  Msgcore_c.h does not include and a C caller does not have, so a
+#  msgcore_field_get_access would answer with a UCHAR whose bits the caller cannot
+#  spell. The permission byte is worse: grep the repository and nothing names a
+#  single bit of it anywhere.  Exporting either means exporting the constants too,
+#  and the constants are the arena's on-disk semantics, which is the commitment
+#  the block-geometry reason above declines for the same reason.
+#
+#  SetAccess is here and its two SetPermissions counterparts are still UNTRIAGED
+#  above. That is not a distinction: SetAccess surfaced with this batch and they
+#  did not, and moving lines nobody asked about would move the UNTRIAGED count out
+#  from under the sections that quote it. They are the same argument when somebody
+#  reaches them.
+cxx-to-c  P3PmsgField::GetAccess    # masks a block-header byte whose bit names live in a header the C ABI does not publish
+cxx-to-c  P3PmsgField::SetAccess    # as GetAccess, writing; the same unspellable bits
+cxx-to-c  P3PmsgDesc::GetPermissions    # masks uPermissions, a byte no header in this repository names a single bit of
+cxx-to-c  P3PmsgAttr::GetPermissions    # as P3PmsgDesc::GetPermissions
+#
+#  THE DIRTY FLAG BELONGS TO THE C++ OBJECT, NOT TO THE ITEM. P3PmsgField::IsDirty
+#  is m_bFieldDirty || P3PmsgData::IsDirty() || P3PmsgName::IsDirty()
+#  (P2Pmsg.cpp:4293-4300) and the vect's adds m_bVectDirty (MsgVect.cpp:1111-1117).
+#  Every one of those is an in-memory flag on the wrapper, set by writes made
+#  THROUGH THAT WRAPPER, and nothing in the block records it. Two flat handles onto
+#  the same item are two C++ objects with two flags, so a msgcore_field_is_dirty
+#  would answer "has anything been written through this particular handle since it
+#  was made" -- a question about the handle's own short life, which rule 2 already
+#  tells callers to keep short.
+#
+#  The question that survives handles being minted and destroyed is the store's,
+#  and the surface carries it: msgcore_mgr_is_dirty and msgcore_mgr_set_dirty,
+#  which is what a caller deciding whether to msgcore_mgr_save actually needs.
+cxx-to-c  P3PmsgField::IsDirty    # a flag on the C++ wrapper, not on the item; msgcore_mgr_is_dirty outlives a handle
+cxx-to-c  P3PmsgVect::IsDirty    # as P3PmsgField::IsDirty, plus m_bVectDirty
+#
+#  THE PARENT POINTER IS SOMETHING THE FLAT CALLER ALREADY HAS. GetField returns
+#  P3PmsgField* -- the owning field of the collection (MsgDesc.h:211, MsgAttr.h:182).
+#  On the flat surface a collection handle can only have come from a field handle,
+#  through msgcore_desc_from_field or msgcore_attr_from_field, so the caller is
+#  holding the answer before it asks. Handing it back would also break the one rule
+#  the handle group states without exception -- "Returned handles are caller-owned
+#  (msgcore_field_destroy)" (Msgcore_c.h:523-524) -- because this one is not: it
+#  aliases the collection's owner, and destroying it would take down the tree the
+#  collection is standing in.
+cxx-to-c  P3PmsgDesc::GetField    # the owning field, which a flat caller already holds: msgcore_desc_from_field is the only way in
+cxx-to-c  P3PmsgAttr::GetField    # as P3PmsgDesc::GetField
+#
+#  SELECT BY VALUE AND SELECT BY REFERENCE ARE ONE CALL IN C. Select returns
+#  P3PmsgField by VALUE and SelectItem returns P3PmsgField& (MsgDesc.h:158-165,
+#  MsgAttr.h:131-138); the pair exists because C++ callers choose between a
+#  detached copy and an alias into the collection. The flat surface has no such
+#  choice to offer: msgcore_desc_select_item and msgcore_attr_select_item return an
+#  opaque handle the caller owns and destroys, which is already the by-value form,
+#  and rule 2 governs it either way. A second export would differ from the first in
+#  nothing a C caller could observe.
+#
+#  SelectObject is refused for a different reason and a harder one: it returns
+#  P3PmsgObject, and P3PmsgObject is one of the four classes api-drift.config.psd1
+#  keeps out of TypeMap on purpose, because it has no C projection by design. The
+#  surface answers "what kind of thing is this" the way section 20 settled it --
+#  msgcore_field_is_list, _is_vect, _is_attr, _is_desc, _is_null, _is_void asked of
+#  a field handle -- rather than by handing over an untyped node.
+cxx-to-c  P3PmsgDesc::Select    # by-value select; msgcore_desc_select_item already returns an owned handle, which is the same thing in C
+cxx-to-c  P3PmsgAttr::Select    # as P3PmsgDesc::Select
+cxx-to-c  P3PmsgDesc::SelectObject    # returns P3PmsgObject, a class the config keeps off the surface by design
+cxx-to-c  P3PmsgAttr::SelectObject    # as P3PmsgDesc::SelectObject
+#
+#  IsName IS DECLARED AND NEVER DEFINED. MsgVect.h:145 declares it beside IsData,
+#  IsField, IsList and IsVect, and MsgVect.cpp defines those four and not this one
+#  -- the whole repository contains no P3PmsgVect::IsName body. Its four siblings
+#  bind exactly, to msgcore_vect_is_data, _is_field, _is_list and _is_vect. This
+#  one cannot be bound because there is nothing to bind to: a wrapper calling it
+#  would not link. That is a defect in MsgVect.cpp rather than a decision about the
+#  C API, and it is recorded here as the former.
+cxx-to-c  P3PmsgVect::IsName    # declared at MsgVect.h:145 and defined nowhere; a binding would not link
+#
+#  A PATH IS A MANAGER'S QUESTION. GetPath returns a CString built by walking from
+#  this field up to the root, and CString is an MFC type the flat surface does not
+#  have. The surface asks the same question of the manager and answers in wchar_t*:
+#  msgcore_mgr_p2pos2path, reached with msgcore_field_get_p2pos -- two calls that a
+#  field-side export would collapse into one only by giving every field handle a
+#  manager it does not carry.
+cxx-to-c  P3PmsgField::GetPath    # returns CString; msgcore_field_get_p2pos + msgcore_mgr_p2pos2path is the flat spelling
+#
+#  GetP2Pos IS BOUND AND THE MATCHER CANNOT SEE IT. msgcore_field_get_p2pos is the
+#  binding, quoted by rule 2 itself at Msgcore_c.h:108-109 and again at :531 as the
+#  durable alternative to a live handle. It does not match because ConvertTo-Snake
+#  splits GetP2Pos into get_p2_pos while the surface spells get_p2pos, and no
+#  sequence of general rules turns one into the other without inventing a
+#  dictionary. This is the extractor, not the design -- the third of the three ways
+#  out the check prints -- and the line exists so that the next reader is not told a
+#  bound member is unbound.
+cxx-to-c  P3PmsgField::GetP2Pos    # bound as msgcore_field_get_p2pos; the snake-caser spells it get_p2_pos and cannot match
+#
+#  PageRegistration IS BOUND UNDER A DIFFERENT NAME, TWICE. The two overloads
+#  (P2PmsgMgr.h:211-215) install the page-in/page-out pair and the populate
+#  callback, and the surface spells them msgcore_mgr_set_paging_sinks and
+#  msgcore_mgr_set_populate_sink (Msgcore_c.h:1027-1032), with msgcore_pagein_fn,
+#  msgcore_pageout_fn and msgcore_populate_fn as the C signatures of the three
+#  P2Page*CBFnc types. The rename is deliberate and documented -- the C header
+#  spends fifteen lines on how a sink must behave and how it differs from the
+#  trigger sink -- so the missing binding is the matcher's, not the surface's.
+#  PageRegistrationPush and PageRegistrationPop bind exactly and are a different
+#  pair of calls.
+cxx-to-c  P2PmsgMgr::PageRegistration    # bound as msgcore_mgr_set_paging_sinks and msgcore_mgr_set_populate_sink; a rename the matcher cannot follow
+#
+#  THE PATH GRAMMAR HAS NO FLAT SPELLING, AND THAT IS THIS INVESTIGATION'S OWN
+#  SUBJECT. RootPath2Object takes an absolute object path and resolves it, which
+#  means it implements the grammar sections 2 to 5 and 17 to 19 are about: the
+#  leading '.' root marker, '.' descent, '@' into attributes, and '^' into the
+#  pushed generation. The flat surface carries no path parser at all. It descends
+#  one named step at a time -- msgcore_mgr_root, then msgcore_field_child or
+#  msgcore_field_select_item -- and it has no spelling whatever for '@' or '^',
+#  which are the two components that make the grammar more than string
+#  concatenation.
+#
+#  Exporting a path resolver would therefore not be adding a convenience; it would
+#  commit the supported ABI to a grammar whose corner cases this document needed
+#  thirty-odd sections to pin down, and every one of those cases would become an
+#  ABI promise. msgcore_mgr_p2pos2path goes the other way -- position to text --
+#  and commits to nothing, which is why it is there and this is not.
+cxx-to-c  P2PmsgMgr::RootPath2Object    # resolves the '.'/'@'/'^' path grammar; the surface descends a step at a time and spells neither '@' nor '^'
+#
+#  A MANAGER-SIDE PREDICATE KEYED ON A POSITION IS TWO CALLS ON THE FLAT SIDE.
+#  IsField ( P2Pos ) and IsAttributed ( UCHAR, P2Pos ) ask about the object at a
+#  position rather than about the manager, so the flat caller resolves first --
+#  msgcore_mgr_p2pos2field -- and then asks the field: msgcore_field_is_list and
+#  msgcore_field_is_vect settle IsField between them, and
+#  msgcore_field_is_attributed answers the unmasked half of IsAttributed. The
+#  masked half is the access byte again, and the reason it is not exported is the
+#  one two blocks up: the bits have no names on this side of the boundary.
+#
+#  Two calls instead of one is the shape the whole handle group is written in --
+#  obtain, use, discard -- and a manager-side shortcut would have to hold a
+#  resolved field across the caller's next mutation, which rule 2 forbids.
+cxx-to-c  P2PmsgMgr::IsField    # p2pos2field then msgcore_field_is_list / _is_vect; the surface asks the item, not the manager
+cxx-to-c  P2PmsgMgr::IsAttributed    # as IsField; msgcore_field_is_attributed answers the unmasked half and the mask is the unnamed access byte
+#
+#  IsSole AND IsInline: NOT CARRIED, AND THE DECISION IS THE OWNER'S TO REVISIT.
+#  These are the two members section 34 named. IsSole asks whether a write through
+#  this field can be seen anywhere but here and its TRUE is a guarantee (section 26,
+#  narrowed by sections 29 and 31); IsInline asks whether the block lives inside the
+#  field object, where its TRUE is a guarantee and its FALSE is not (section 24).
+#  Both scored BOUND against msgcore_field_is_null through the old 'is' root, which
+#  is how section 29's HeapHolders reason came to say a flat caller "wants the
+#  answer and has it". It does not have it. There is no msgcore_field_is_sole and no
+#  msgcore_field_is_inline, and none of the nine msgcore_field_is_* predicates
+#  answers either question.
+#
+#  The case FOR carrying IsSole is real and should be written down rather than
+#  argued away. msgcore_field_is_sole ( MsgFieldHandle ) would be
+#  signature-identical to the nine predicates already there, it needs no type the
+#  surface lacks, and its TRUE is the one fact a flat caller cannot reconstruct from
+#  anything else on the surface: p2pos answers identity, not exclusivity, and there
+#  is no flat route to P2PmsgHeap_RefCount. A TreeFS host deciding whether it may
+#  write in place has exactly this question.
+#
+#  The case AGAINST is that it is an ADDITION TO THE SUPPORTED ABI. Msgcore_c.h is
+#  the 282-function surface the README calls supported; a new export bumps
+#  Msgcore_version.h in the same commit, and that is a versioning decision belonging
+#  to whoever owns the release, not to a check that reads names. There is a second
+#  half: IsSole's FALSE still promises nothing (section 26's asymmetry, unmoved by
+#  sections 29 and 31, and the per-block reference count is still a different
+#  library), so the export would be a predicate that is load-bearing in one
+#  direction and advisory in the other, and the header would have to say so in as
+#  many words. IsInline is the same shape and weaker: its FALSE is explicitly not a
+#  guarantee (section 24), and it describes where storage sits rather than what the
+#  caller may do, which is the block-geometry line this file has already drawn twice.
+#
+#  So: not carried, today, by this file. The lines below record that, not a refusal
+#  in principle. Adding msgcore_field_is_sole remains a live option and the argument
+#  for it is above, in full, on purpose.
+cxx-to-c  P3PmsgField::IsSole    # no msgcore_field_is_sole exists; carrying one is an ABI addition and a version bump, and is the owner's call
+cxx-to-c  P3PmsgField::IsInline    # as IsSole, and weaker: its FALSE guarantees nothing and it describes storage placement

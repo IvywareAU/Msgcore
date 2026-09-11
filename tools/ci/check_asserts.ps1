@@ -54,6 +54,22 @@
     are 250 and it is the CALLWRAP form that numbers 277. The 277 was real; it
     was measuring the more serious category and calling it the other one.
 
+    SIX OF THE `predicate` COUNT ARE NOT ASSERTIONS, and the figure in
+    assert-baseline.txt has carried them since the day it was banked. PowerShell's
+    -match is case-INSENSITIVE unless you spell it -cmatch, so the classifier's
+    \b(?:ASSERT|P2PASSERT)\s*\( also matches `->Assert()` -- P2Pevent's fluent
+    builder, six call sites, all of them in MsgVBHeap.cpp (2525, 2545, 2625, 2644,
+    3916, 3973 as of 46a63f8). The inner text after the paren is `)->Throw();`, which
+    is neither `0)` nor an identifier, so each lands in `predicate`. They are the
+    OPPOSITE of what this script is against: every one sits on a branch that ends
+    in ->Throw() or ->Cancel(), which is item 19's own prescription -- assert in
+    Debug, refuse in Release. Worse, P2Pevent::Assert is `{ ASSERT(0); return this; }`
+    (Msgexception.h:353), already counted once as the `marker` it is, so the six are
+    a second count of one site. Read the banked predicate figure as six high.
+    NOT FIXED HERE. Spelling it -cmatch drops the number by six in the same breath
+    as the stale-baseline re-bank, and two corrections landing in one figure is how
+    a baseline stops meaning one thing. It wants its own commit and its own reason.
+
     WHAT THIS CANNOT DO. Decide whether a given site is load-reachable. That is
     a call-graph question and this is a grep; the baseline stops the counts
     growing, and reducing them is manual triage. Directionality is the point:

@@ -60,6 +60,20 @@
     the reason the register keeps relearning: a number nobody prints is a number
     nobody reads.
 
+    HOW IT MATCHES, AND WHY THAT IS A DESIGN AND NOT A DETAIL. The exact test is
+    the family prefix plus the member name snake-cased, and it is the only test
+    that is evidence on its own. Everything else is the prefix fallback, which
+    exists for one real shape -- DeclareItem, one C++ name the surface spells out
+    as msgcore_field_declare_int / _double / _wstr because C has no overloads --
+    and which used to accept far more than that shape. Section 34 measured it: 43
+    of 116 "bound" came through the fallback and 28 of those rooted at a bare
+    accessor verb, where GetHeadPos scored against msgcore_list_get_count and
+    IsSole against msgcore_field_is_null. Those were not bindings and the check
+    was reporting them green. Test-RootCandidates below is the tightening, in
+    three tests with an argument each, and it moved the honest bound count from
+    116 to 81. The split is still printed on every run, because a fallback match
+    is still weaker evidence than an exact one even when it is right.
+
     WHAT IT CANNOT DO. It compares NAMES. It cannot see that a binding's
     behaviour drifted -- msgcore_mgr_load answering differently after 0278981 is
     invisible here, because the signature never moved. Only a test catches that,
@@ -279,8 +293,86 @@ $boundCnt  = 0
 $scanned   = 0
 $untriaged = 0
 $rootCnt   = 0     # of $boundCnt, how many matched by the prefix fallback
-$verbCnt   = 0     # ... and how many of THOSE rooted at a bare accessor verb
-$verbHits  = @()
+$refusedCnt = 0    # members whose fallback found candidates and was refused them
+$refused   = @()
+
+# THE PREFIX FALLBACK, AND THE THREE THINGS IT IS NOT ALLOWED TO DO.
+#
+# The fallback exists for ONE shape: a C++ name the flat surface spells out as
+# several functions, because the overloads it collapses are separate calls in C.
+# DeclareItem -> msgcore_field_declare_double / _int / _wstr is that shape, and
+# no exact comparison can find it.
+#
+# Rooting at the first snake segment and taking whatever matched first made that
+# shape indistinguishable from three others, and section 34 measured the damage:
+# 43 of 116 "bound" came through here and 28 of those rooted at a bare accessor
+# verb, where GetHeadPos scored against msgcore_list_get_count. Each test below
+# names one way a root match is not a binding. They are applied to the candidate
+# SET, not to the first hit, so the order the surface happens to be read in stops
+# deciding anything.
+function Test-RootCandidates {
+    param(
+        [string]$Target,          # the family prefix, e.g. 'msgcore_list_'
+        [string[]]$Segments,      # the C++ name, snake-cased and split
+        [object]$SurfaceNames,    # every function on the surface
+        [hashtable]$Claimed       # surface name -> the member that spells it EXACTLY
+    )
+
+    $root  = $Target + $Segments[0]
+
+    # 1. A SURFACE NAME EQUAL TO THE ROOT IS A TRUNCATION, NOT AN OVERLOAD. The
+    #    exact test has already failed by the time we are here, so the C++ name
+    #    carries segments the root does not, and a function named exactly the root
+    #    carries none of them either: msgcore_mgr_root is not RootPath2Object with
+    #    the path resolution left implied, it is a different call. Only STRICT
+    #    extensions can be evidence of a spread-out name.
+    #
+    #    This runs FIRST so that the refusal count below means something. A member
+    #    with nothing under its root at all was never going to match and is not a
+    #    refusal; it is an ordinary miss, and reporting it as one would put every
+    #    P3PmsgBSTR member in the tally -- Msgcore_c.h spells no msgcore_bstrio_
+    #    function of any kind.
+    $cands = @($SurfaceNames | Where-Object { $_.StartsWith($root + '_') })
+    if ($cands.Count -eq 0) {
+        $why = if ($SurfaceNames.Contains($root)) { 'only a truncation of the name matches the root' } else { $null }
+        return [pscustomobject]@{ Hit = $null; Why = $why }
+    }
+
+    # 2. AN ACCESSOR VERB IS THE FAMILY'S VERB, NOT THIS MEMBER'S NAME. A root of
+    #    'get'/'set'/'is'/'put'/'has' with more name behind it matches every
+    #    accessor in the family and therefore distinguishes nothing: IsInline and
+    #    IsSole and IsDirty all score against msgcore_field_is_null, which answers
+    #    none of them. Refused outright -- there is no candidate set worth ranking.
+    if ($Segments.Count -gt 1 -and $Segments[0] -in @('get','set','is','put','has')) {
+        return [pscustomobject]@{ Hit = $null; Why = 'root is a bare accessor verb' }
+    }
+
+    # 3. A FUNCTION THAT IS ALREADY SOMEBODY'S IS NOT EVIDENCE FOR SOMEBODY ELSE.
+    #    Two ways a candidate is spoken for. It is the EXACT counterpart of a
+    #    different scanned member -- msgcore_list_drop_head is DropHead's, so it
+    #    cannot also be whole-object Drop's. Or it is the UTF-8 twin of the
+    #    function beside it -- msgcore_attr_select_item_u8 is the same binding as
+    #    msgcore_attr_select_item spelled for char*, and a twin is never a call of
+    #    its own.
+    $free = @($cands | Where-Object {
+        -not $Claimed.ContainsKey($_) -and
+        -not ($_.EndsWith('_u8') -and $SurfaceNames.Contains($_.Substring(0, $_.Length - 3)))
+    })
+    if ($free.Count -eq 0) {
+        return [pscustomobject]@{ Hit = $null; Why = 'every function under the root already binds another member' }
+    }
+
+    # Which of the survivors to report. Not "whichever came first": rank by how
+    # many of the C++ name's own segments the candidate spells, so AddListTail
+    # reports against msgcore_list_add_tail_* rather than against _add_head_*.
+    # This changes no bound/unbound verdict -- it changes what the run says the
+    # evidence WAS, which is the whole point of printing it.
+    $best = $free | Sort-Object `
+        @{ Expression = { $n = $_; @($Segments | Where-Object { ($n.Substring($Target.Length) -split '_') -contains $_ }).Count }; Descending = $true },
+        @{ Expression = { $_.Length } },
+        @{ Expression = { $_ } }
+    return [pscustomobject]@{ Hit = @($best)[0]; Why = $null }
+}
 
 foreach ($pair in $cfg.Pairs) {
     $pairId = $pair.Id
@@ -291,6 +383,23 @@ foreach ($pair in $cfg.Pairs) {
         'cfn' { $surfaceNames = Get-CFunctions $pair.Surface.Files $pair.Surface.ApiMacro }
         'idl' { $ifaces       = Get-IdlInterfaces $pair.Surface.Files }
         default { Write-Error "pair '$pairId': unknown Surface.Kind '$($pair.Surface.Kind)'"; exit 2 }
+    }
+
+    # Which surface functions are already spelled EXACTLY by some scanned member.
+    # Built in a pass of its own before any matching, because test 3 above needs
+    # the whole answer while judging the first member -- a fallback rooted at
+    # 'drop' has to know DropHead exists whether or not DropHead has been reached
+    # yet. Only the cfn pairs use it; an IDL pair maps property names instead.
+    $claimed = @{}
+    if ($pair.Surface.Kind -eq 'cfn') {
+        foreach ($tn in $pair.TypeMap.Keys) {
+            if (-not $up.ContainsKey($tn)) { continue }
+            $tg = $pair.TypeMap[$tn]
+            foreach ($m in $up[$tn]) {
+                $e = $tg + (ConvertTo-Snake $m.Name)
+                if ($surfaceNames.Contains($e)) { $claimed[$e] = "${tn}::$($m.Name)" }
+            }
+        }
     }
 
     foreach ($typeName in $pair.TypeMap.Keys) {
@@ -315,26 +424,21 @@ foreach ($pair in $cfg.Pairs) {
 
             $hit     = $null
             $byRoot  = $false      # matched by the prefix fallback, not exactly
-            $bareVerb = $false     # ... and the root was an accessor verb alone
             if ($pair.Surface.Kind -eq 'cfn') {
                 $snake = ConvertTo-Snake $mem.Name
                 $exact = $target + $snake
                 if ($surfaceNames.Contains($exact)) { $hit = $exact }
                 else {
-                    $seg  = ($snake -split '_')
-                    $root = $target + $seg[0]
-                    foreach ($n in $surfaceNames) {
-                        if ($n -eq $root -or $n.StartsWith($root + '_')) { $hit = $n; break }
-                    }
-                    if ($hit) {
-                        $byRoot = $true
-                        # A root of 'get'/'is'/'set' with more name behind it is an
-                        # accessor VERB matching anything in the family. The fallback
-                        # was written for DeclareItem -> declare_double, where the
-                        # root is the whole name; this is the case it was not written
-                        # for and cannot tell apart. Counted, not rejected -- refer
-                        # stack_paths.md section 34.
-                        $bareVerb = $seg.Count -gt 1 -and $seg[0] -in @('get','is','set','put')
+                    $r = Test-RootCandidates -Target $target -Segments ($snake -split '_') `
+                                             -SurfaceNames $surfaceNames -Claimed $claimed
+                    if ($r.Hit) { $hit = $r.Hit; $byRoot = $true }
+                    elseif ($r.Why) {
+                        # Refused, not absent. Counted and named, because "this
+                        # member has no binding" and "this member had a match and
+                        # the rule threw it out" are different sentences and the
+                        # second one is the interesting half of the backlog.
+                        $refusedCnt++
+                        $refused += "$typeName::$($mem.Name)   [$($r.Why)]"
                     }
                 }
             }
@@ -373,12 +477,10 @@ foreach ($pair in $cfg.Pairs) {
 
             if ($hit) {
                 $boundCnt++
-                if ($byRoot)   { $rootCnt++ }
-                if ($bareVerb) { $verbCnt++; $verbHits += "$typeName::$($mem.Name) -> $hit" }
+                if ($byRoot) { $rootCnt++ }
                 if ($ShowBound) {
                     Write-Host ("  bound    {0,-46} -> {1}{2}" -f "$typeName::$($mem.Name)", $hit,
-                                $(if ($bareVerb) { '   (prefix fallback, accessor root)' }
-                                  elseif ($byRoot) { '   (prefix fallback)' } else { '' }))
+                                $(if ($byRoot) { '   (prefix fallback)' } else { '' }))
                 }
             }
             else {
@@ -424,16 +526,16 @@ if ($untriaged -gt 0) {
     if ($env:GITHUB_ACTIONS) { Write-Host "::notice file=$allowFile::$untriaged UNTRIAGED api-drift entries" }
 }
 # A number nobody prints is a number nobody reads, which is why UNTRIAGED is printed
-# above. BOUND has the same problem and it had gone unnoticed: a match through the
-# prefix fallback is weaker evidence than an exact one, and a match whose root is a
-# bare accessor verb is usually no evidence at all. Printing the split is not a
-# judgement on any one of them -- refer stack_paths.md section 34, which measured it
-# and deliberately did not tighten the matcher.
-if ($rootCnt -gt 0) {
-    Write-Host ("  {0} of the {1} bound matched by prefix fallback, {2} of those at a bare accessor root." -f
-                $rootCnt, $boundCnt, $verbCnt)
-    if ($ShowBound -and $verbHits.Count -gt 0) {
-        foreach ($v in $verbHits) { Write-Host "      $v" }
+# above. BOUND had the same problem: a match through the prefix fallback is weaker
+# evidence than an exact one, so the split stays printed even now the fallback is
+# tightened -- section 34 measured 43 of 116 through it and that number is the reason
+# this line exists. The refusals are printed beside it because a member the rule threw
+# out is a member somebody has to decide about; it is the backlog arriving, not noise.
+if ($rootCnt -gt 0 -or $refusedCnt -gt 0) {
+    Write-Host ("  {0} of the {1} bound matched by prefix fallback; {2} more were refused by it." -f
+                $rootCnt, $boundCnt, $refusedCnt)
+    if ($ShowBound -and $refused.Count -gt 0) {
+        foreach ($v in $refused) { Write-Host "      refused  $v" }
     }
 }
 

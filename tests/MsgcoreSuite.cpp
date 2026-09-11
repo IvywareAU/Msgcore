@@ -3616,6 +3616,210 @@ static void Test_SoleCollectionCursors()
 
 
 // ---------------------------------------------------------------------------
+// P2PmsgMgr : the one holder a store adds, and why it is not subtracted
+// ---------------------------------------------------------------------------
+// What-is-left recorded that P2PmsgMgr is not descended into and that nobody
+// had measured what a manager owns. Measured here, and the answer is in two
+// halves.
+//
+// A MANAGER OWNS NO SUB-OBJECT A FIELD DOES NOT. P2PmsgMgr derives from
+// P3PmsgItem, which IS P3PmsgField (P2Pmsg.h:893), and every member it declares
+// of its own (P2PmsgMgr.h:336-355) is a heap handle, a Win32 file handle, a
+// CString, a GUID, a share mode, a CRITICAL_SECTION, three window message
+// numbers, six callback function pointers and four callback keys. Not one of
+// them is a P3PmsgObject or holds one, and nothing in P2PmsgMgr.cpp news a
+// P3Pmsg sub-object and caches it. So the inherited P3PmsgField::HeapHolders
+// walk is ALREADY COMPLETE over every view a manager owns -- its attributes,
+// its descendants, its stack, its snapshot and the cursors those carry -- which
+// is what the mine= column below prints and what these cases pin by number.
+//
+// THE ONE REFERENCE THE WALK DOES NOT MAKE IS m_hMgr, and it is deliberately
+// left out. It is the heap's own creation reference: P2PmsgHeap_CreateBSTRio
+// mints the handle at nRefCount = 1 (MsgVBHeap.cpp:3400) and ~P2PmsgMgr closes
+// it (P2PmsgMgr.cpp:74-76), which is why refs is exactly mine + 1 on every row
+// of a manager nobody else is holding. It is not subtracted for two reasons:
+//
+//   - IT IS NOT A VIEW. The rule the walk rests on is an object rule -- every
+//     path that gives a P3PmsgObject a non-zero m_hVBList AddRefs it, so a live
+//     object whose handle is this handle IS one reference. m_hMgr is not a
+//     P3PmsgObject, was never Connect()ed and names no block, so refs - mine
+//     stops meaning "how many other views of this heap there are" the moment it
+//     is counted.
+//   - AND THE BLOCK IT WOULD GUARANTEE FOR IS THE ONE BLOCK ON THE HEAP WHOSE
+//     ADDRESS IS A FUNCTION OF THE HANDLE. P2PmsgHeap_Connect(h) returns the
+//     store root (MsgVBHeap.cpp:5040-5049), which is the manager's own item --
+//     asserted below. Everywhere else the count's premise holds, that an
+//     outsider cannot name a block without holding a counted reference to reach
+//     it through; for the store root it does not, and a raw handle held without
+//     an AddRef is already outside the count by P3PmsgObject::IsSole's own NOTES
+//     (P2Pmsg.cpp:3370-3373).
+//
+// So the undercount stays, which leaves FALSE, which promises nothing -- §26's
+// safe direction -- and a manager still answers !IsSole() as it always has.
+// What changes is that the shortfall is now exactly one, measured, and pinned:
+// if anybody ever teaches P2PmsgMgr to subtract its handle, every mine= number
+// below moves and these cases go red in both link modes.
+//
+// refs= is a static-mode column only, for the reason SoleRow and
+// Test_ImageAddressBounds both carry: P2PmsgHeap_RefCount is not exported. mine=
+// is, because HeapHolders is a public member of a whole-class exported class, so
+// the numbers that carry the teeth are checked either way.
+static void MgrShortBy ( const P3PmsgField& oField, int nShort )
+{
+#ifdef Msgcore_STATIC
+    const P2PmsgHANDLE hVBList = oField.GetP2PmsgHandle ( );
+    TF_CHECK_EQ ( P2PmsgHeap_RefCount ( hVBList )
+                , oField.HeapHolders  ( hVBList ) + nShort );
+#else
+    (void)oField;
+    (void)nShort;
+#endif
+}
+
+static int MgrMine ( const P3PmsgField& oField )
+{
+    return oField.HeapHolders ( oField.GetP2PmsgHandle ( ) );
+}
+
+static void Test_SoleManagerHoldsItsHeap()
+{
+    //  THE WALK REACHES EVERY VIEW, and the shortfall never grows. Each step
+    //  adds one holder and the inherited walk accounts for it: the root object,
+    //  then the P3PmsgDesc the manager made, then the cursor that collection
+    //  keeps for itself -- §31's members, reached through a manager.
+    TF_CASE("a manager's walk reaches every view it owns")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        SoleRow("a manager nobody has touched", mgr);
+        TF_CHECK_EQ(MgrMine(mgr), 1);      // the root object, and nothing else
+        MgrShortBy(mgr, 1);                // ... and the handle is the other ref
+        TF_CHECK(!mgr.IsSole());
+
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+        SoleRow("... with a descendant collection", mgr);
+        TF_CHECK_EQ(MgrMine(mgr), 2);
+        MgrShortBy(mgr, 1);
+        TF_CHECK(!mgr.IsSole());
+
+        mgr.r_Desc().SelectItem(L"AAA");   // ... and the collection's own cursor
+        SoleRow("... and that collection walked", mgr);
+        TF_CHECK_EQ(MgrMine(mgr), 3);
+        MgrShortBy(mgr, 1);
+        TF_CHECK(!mgr.IsSole());
+
+        TF_CHECK_EQ(mgr.r_Desc().SelectItem(L"AAA").r_data().c_int(), 1);
+    }
+
+    //  THE UNACCOUNTED REFERENCE IS THE HANDLE, and the block it keeps alive is
+    //  the manager's own item. P2PmsgHeap_Connect reads the store root off the
+    //  handle, which is why the manager's root is the one block an outsider can
+    //  name from a raw handle alone.
+    TF_CASE("the reference a manager's walk does not make is its own handle")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+#ifdef Msgcore_STATIC
+        const P2PmsgHANDLE hVBList = mgr.GetP2PmsgHandle();
+        TF_CHECK_EQ((int)P2PmsgHeap_RefCount(hVBList), 2);
+        TF_CHECK_EQ(mgr.HeapHolders(hVBList), 1);
+        TF_CHECK((VBLaddr)mgr.GetP2Pos() == P2PmsgHeap_Connect(hVBList));
+        TF_CHECK(P2PmsgHeap_IsRoot(hVBList, (VBLaddr)mgr.GetP2Pos()) ? true : false);
+#endif
+        TF_CHECK(!mgr.IsSole());
+        TF_CHECK(mgr.GetP2PmsgHandle() != 0);
+    }
+
+    //  A FIELD'S OWN PARTS ARE A MANAGER'S OWN PARTS. §26's attributes, §29's
+    //  stack and the snapshot a read of it news are all reached through the
+    //  inherited walk, and the shortfall is still one.
+    TF_CASE("a manager's attributes, stack and snapshot are walked like a field's")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        SoleRow("a manager with an attribute collection", mgr);
+        TF_CHECK_EQ(MgrMine(mgr), 2);
+        MgrShortBy(mgr, 1);
+
+        mgr.r_Stck().Push();
+        SoleRow("... and a push", mgr);
+        TF_CHECK_EQ(MgrMine(mgr), 3);
+        MgrShortBy(mgr, 1);
+
+        mgr.r_Stck().r_item();             // ... which news a field on this heap
+        SoleRow("... and the snapshot read", mgr);
+        TF_CHECK_EQ(MgrMine(mgr), 4);
+        MgrShortBy(mgr, 1);
+        TF_CHECK(!mgr.IsSole());
+    }
+
+    //  THE ROWS THAT MUST NOT MOVE. A stranger on the manager's OWN block is the
+    //  sharpest case there is: mine does not move, refs does, and the shortfall
+    //  is two rather than one.
+    TF_CASE("a manager whose root a stranger names is still not sole")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        P3PmsgField oStranger = mgr.r_Object();
+        SoleRow("a manager whose root a stranger names", mgr);
+        TF_CHECK_EQ(MgrMine(mgr), 1);      // the stranger is not one of mine
+        MgrShortBy(mgr, 2);
+        TF_CHECK(!mgr.IsSole());
+        TF_CHECK(!oStranger.IsSole());
+
+        //  ... and it is the same item, which is what makes it a stranger.
+        TF_CHECK(oStranger.GetP2PmsgHandle() == mgr.GetP2PmsgHandle());
+        TF_CHECK(oStranger.GetP2Pos() == mgr.GetP2Pos());
+    }
+
+    TF_CASE("a manager whose child a stranger holds is still not sole")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        P3PmsgField oKid = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+        SoleRow("a manager whose child a stranger holds", mgr);
+        TF_CHECK_EQ(MgrMine(mgr), 3);
+        MgrShortBy(mgr, 2);
+        TF_CHECK(!mgr.IsSole());
+
+        //  ... which a write through the stranger proves, the way it always did.
+        oKid.r_data().c_int(99);
+        TF_CHECK_EQ(mgr.r_Desc().SelectItem(L"AAA").r_data().c_int(), 99);
+    }
+
+    //  AND A COPY IS A SECOND STORE, NOT A SECOND VIEW. The copy constructor
+    //  creates its own heap (P2PmsgMgr.cpp:56) and copies the tree into it, so
+    //  neither manager is a holder of the other's heap and both are short by
+    //  exactly their own handle.
+    TF_CASE("a copy of a manager is a second store, not a second view")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create)
+            += P3PmsgField(L"AAA", P3PmsgData((int)1));
+
+        P2PmsgMgr oCopy = mgr;
+        SoleRow("the original", mgr);
+        SoleRow("the copy", oCopy);
+        TF_CHECK(mgr.GetP2PmsgHandle() != oCopy.GetP2PmsgHandle());
+        MgrShortBy(mgr,   1);
+        MgrShortBy(oCopy, 1);
+        TF_CHECK(!mgr.IsSole());
+        TF_CHECK(!oCopy.IsSole());
+
+        //  ... and a write to one is not a write to the other.
+        oCopy.r_Desc().SelectItem(L"AAA").r_data().c_int(88);
+        TF_CHECK_EQ(mgr.r_Desc().SelectItem(L"AAA").r_data().c_int(), 1);
+    }
+}
+
+
+// ---------------------------------------------------------------------------
 // P3PmsgObject : a chain longer than one link
 // ---------------------------------------------------------------------------
 // §27 measured every in-process path as producing exactly ONE link, and that
@@ -5441,6 +5645,162 @@ static void Test_ImageAddressBounds()
 #endif
 
 // ---------------------------------------------------------------------------
+// The untrusted BSTRio load path must REFUSE without ASSERTING.
+//
+// P2PmsgHeap_CreateBSTRio(pBSTRio,nBufferLen) opens a P2PmsgHeap_UntrustedGate
+// and then walks the block chain for real, throwing "BSTRio block structure is
+// corrupt" on a bad image. It delegates the construction to the single-argument
+// overload, which ends in ASSERT(P2PmsgHeap_AssertVBlocksBSTRio(pHandle)) --
+// and that assertion was NOT gate-aware, so the untrusted path walked the image
+// twice and the first walk raised a debug dialog about a structure the second
+// was a moment away from refusing by name.
+//
+// The corruption these cases use is the smallest one that reaches it, and it is
+// chosen to reproduce the mechanism rather than merely the symptom. Every check
+// INSIDE the walk is already gate-aware: VBHEAP_DIAG feeds bResult instead of
+// asserting once a gate is open. Bumping oKeys.nAllocEntries by one makes the
+// walk's key-counter comparison disagree, which OUTSIDE a gate is repaired in
+// place and answers true, and INSIDE a gate is a silent refusal that answers
+// false. So the only assertion the pre-fix build could raise was the ungated one
+// on the walk's RETURN VALUE -- the gate did not fail to suppress the noise, it
+// created it.
+//
+// TestFramework's _CrtSetReportHook already folds any trapped _CRT_ASSERT into a
+// failure of the current case, so a regression here fails the suite on its own.
+// The case counts them as well, through a hook pushed in front of that one, so
+// the failure says which line asserted instead of only that something did.
+//
+// STATIC LINK ONLY, for the reason Test_ImageAddressBounds gives above: no
+// P2PmsgHeap_* symbol is on the DLL's exported surface.
+#ifdef Msgcore_STATIC
+static int  s_nGateAsserts = 0;
+static char s_szGateAssert[512] = { 0 };
+static int __cdecl GateAssertCounter ( int nReportType, char *szMsg, int *pnRet )
+{
+    if ( nReportType == _CRT_ASSERT )
+    {
+        ++s_nGateAsserts;
+        if ( szMsg && !s_szGateAssert[0] )
+          strncpy_s ( s_szGateAssert, szMsg, _TRUNCATE );
+    }
+    //  FALSE, so TestFramework's own hook still sees it and still fails the
+    //  case. This one counts and names; it does not swallow.
+    (void)pnRet;
+    return FALSE;
+}
+
+static void Test_UntrustedBSTRioGate()
+{
+    wchar_t szDir[MAX_PATH]  = { 0 };
+    wchar_t szPath[MAX_PATH] = { 0 };
+    GetTempPathW(MAX_PATH, szDir);
+    swprintf_s(szPath, MAX_PATH, L"%smscs_bstrio_gate.p2p", szDir);
+
+    {
+        P2PmsgMgr oMgr(VBLock_Addr32, 2048, 1u << 20);
+        oMgr.r_Desc(P3PmsgField::AttrCMD_Create);
+        oMgr.r_Desc() += P3PmsgField(L"gate", P3PmsgData((int)7));
+        oMgr.Save(szPath);
+    }
+
+    char    *pFile = nullptr;
+    VBLsize  nFile = 0;
+    {
+        FILE *f = nullptr;
+        if (_wfopen_s(&f, szPath, L"rb") == 0 && f)
+        {
+            fseek(f, 0, SEEK_END);
+            long n = ftell(f);
+            fseek(f, 0, SEEK_SET);
+            if (n > 0)
+            {
+                pFile = new char[(size_t)n];
+                nFile = (VBLsize)fread(pFile, 1, (size_t)n, f);
+            }
+            fclose(f);
+        }
+    }
+    _wremove(szPath);
+
+    //  A fresh copy per case: the walk writes to the image it is given.
+    auto copy = [&]( char **ppOut ) -> bool {
+        if ( !pFile || !nFile ) return false;
+        *ppOut = new char[(size_t)nFile];
+        memcpy ( *ppOut, pFile, (size_t)nFile );
+        return true;
+    };
+
+    TF_CASE("a saved store still loads through the length-validated overload")
+    {
+        //  The gate must not have become a blanket refusal, which is the way a
+        //  fix of this shape goes wrong.
+        char *pImage = nullptr;
+        TF_CHECK(copy(&pImage));
+        if ( !pImage ) return;
+        TF_CHECK(P2PmsgHeap_IsBSTRio(pImage) != FALSE);
+
+        P2PmsgHANDLE hHeap = nullptr;
+        try { hHeap = P2PmsgHeap_CreateBSTRio((VBListBSTRio *)pImage, nFile); }
+        catch (P2Pevent* pEVT) { if (pEVT) pEVT->Cancel(false); delete[] pImage; }
+        TF_CHECK(hHeap != nullptr);
+        if ( hHeap ) P2PmsgHeap_Close(hHeap);
+    }
+
+    TF_CASE("a corrupt image is refused BY NAME and without a single assertion")
+    {
+        char *pImage = nullptr;
+        TF_CHECK(copy(&pImage));
+        if ( !pImage ) return;
+
+        //  One counter, one too high. Header, declared size and all three root
+        //  offsets stay exactly as the writer left them, so every gate ahead of
+        //  the block walk passes and the walk is what decides.
+        VBListBSTRio *pBSTRio = (VBListBSTRio *)pImage;
+        pBSTRio->oKeys.nAllocEntries += 1;
+
+        s_nGateAsserts = 0;
+        s_szGateAssert[0] = 0;
+        _CrtSetReportHook2 ( _CRT_RPTHOOK_INSTALL, GateAssertCounter );
+
+        bool    bRefused = false;
+        CString strWhy;
+        P2PmsgHANDLE hHeap = nullptr;
+        try { hHeap = P2PmsgHeap_CreateBSTRio((VBListBSTRio *)pImage, nFile); }
+        catch (P2Pevent* pEVT)
+        {
+            bRefused = true;
+            if (pEVT) { strWhy = pEVT->GetMessage(); pEVT->Cancel(false); }
+            delete[] pImage;               // ownership never transferred
+        }
+
+        _CrtSetReportHook2 ( _CRT_RPTHOOK_REMOVE, GateAssertCounter );
+
+        //  Refused, and refused for the reason it was refused for.
+        TF_CHECK(bRefused);
+        TF_CHECK(hHeap == nullptr);
+        TF_CHECK(strWhy.Find(L"block structure is corrupt") >= 0);
+
+        //  And the whole point: no dialog on the way there.
+        if ( s_nGateAsserts )
+          printf("      first assertion was: %s", s_szGateAssert);
+        TF_CHECK_EQ(s_nGateAsserts, 0);
+
+        if ( hHeap ) P2PmsgHeap_Close(hHeap);
+    }
+
+    delete[] pFile;
+}
+#else
+static void Test_UntrustedBSTRioGate()
+{
+    TF_CASE("untrusted BSTRio gate -- static link only, heap API is not exported")
+    {
+        TF_CHECK(true);
+    }
+}
+#endif
+
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // VBHeap : the closer-fit search
 // ---------------------------------------------------------------------------
@@ -5972,6 +6332,7 @@ void RunMsgcoreSuite()
     Test_ValueCopiesItsPayload();
     Test_SoleStorage();
     Test_SoleCollectionCursors();
+    Test_SoleManagerHoldsItsHeap();
     Test_ValueCopyReleasesItsPayload();
     Test_ChainLongerThanOne();
     Test_Event();
@@ -5980,4 +6341,5 @@ void RunMsgcoreSuite()
     Test_IOmageEndianSentinel();
     Test_IOmageLayoutGeneration();
     Test_ImageAddressBounds();
+    Test_UntrustedBSTRioGate();
 }
