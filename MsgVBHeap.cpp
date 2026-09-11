@@ -957,6 +957,178 @@ VBList_VBHeapMin ( UCHAR uVBLaddr )
     return 0;
 }
 
+///////////////////////////////////////////////////////////////////////
+//  Boundary tags
+//  NOTES: This heap could only ever coalesce FORWARDS. Collate merges a freed
+//         block with its next physical neighbour, and there was no way to go
+//         the other way: a block is found by its address, its header sits at
+//         the front, and nothing in the image says how far back the previous
+//         block began. So a run of frees reclaimed its space only if it ran
+//         high address to low. Low to high -- which is what almost everything
+//         does, P3PmsgDesc::Truncate deleting child 0 over and over being the
+//         obvious one -- every block's neighbour was still allocated at the
+//         moment it was freed, nothing merged, and the list filled with
+//         separate blocks that first-fit then walked straight past, because the
+//         one that had absorbed the image tail sat at its head and satisfied
+//         everything. Measured before this: five children into a container,
+//         Truncate, refill, repeat -- 824 bytes a round, for ever.
+//
+//       : A FOOTER IN THE FREE BLOCK, NOT IN EVERY BLOCK, and that is the whole
+//         reason this costs no format change. The classic boundary tag puts a
+//         size footer on every block, allocated ones included, which would move
+//         every byte of every image and break the golden byte-identity gate
+//         along with every .p2p already written. It is not needed: the footer
+//         is only ever READ when the predecessor turns out to be free, so it
+//         only ever needs to EXIST in a free block -- and a free block's tail
+//         is dead space nothing else uses. An allocated block is untouched,
+//         byte for byte, so a tree that is built and saved without freeing
+//         anything serialises exactly as it did before.
+//
+//       : A STALE FOOTER CANNOT CAUSE A WRONG MERGE. The tag is a hint and the
+//         predecessor's own header is the authority: PrevFree recomputes the
+//         candidate address from the recorded size and then requires the block
+//         it lands on to declare the same size, the same addressing mode, and
+//         to be free, linked and allocated. Anything else -- a footer left
+//         behind inside a block that has since been handed out, a coincidence
+//         in payload bytes, a heap read off the wire -- fails that and the
+//         answer is simply "no predecessor", which is where this started.
+//
+//       : Blocks too small to hold a footer behind their free-list links do not
+//         get one. They keep the old behaviour, which is correct, just not
+//         improved.
+#define VBHeap_FootMagic 0x46544246u   // 'FBTF', little-endian on disk
+
+#pragma pack(push,1)
+typedef struct VBHeapFoot__
+{
+    UINT32 uMagic;                     // VBHeap_FootMagic
+    UINT64 nSize;                      // Size of the block this sits at the end of
+} VBHeapFoot;
+#pragma pack(pop)
+
+//  Smallest free block that can carry a tag without treading on the nPrev and
+//  nNext links at its front.
+static inline VBLsize
+P2PmsgHeap_FootMin ( UCHAR uAddrType ) noexcept
+{
+    return VBList_VBHeapMin ( uAddrType ) + sizeof(VBHeapFoot);
+}
+
+//  Writes the tag at the end of a free block. Silent no-op when the block is
+//  too small to carry one, or is not free.
+static void
+P2PmsgHeap_StampFoot ( P2PmsgHANDLE hVBList, VBLaddr aVBLock ) noexcept
+{
+    const VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    if ( aVBLock == 0 || aVBLock >= pHandle->nSizeofAlloc )
+      return;
+    VBHeap *pVBLock = VBList2PhysVBHeap ( hVBList, aVBLock );
+    if ( pVBLock == nullptr || !VBHeap_IsFree(pVBLock) )
+      return;
+    const VBLsize nSizeof = VBHeap_Sizenn ( pVBLock );
+    if ( nSizeof < P2PmsgHeap_FootMin(pHandle->uAddrType) )
+      return;
+    if ( aVBLock + nSizeof > pHandle->nSizeofAlloc )
+      return;                          // Declared size leaves the image
+    VBHeapFoot *pFoot = (VBHeapFoot *)( (char *)pVBLock + nSizeof - sizeof(VBHeapFoot) );
+    pFoot -> uMagic = VBHeap_FootMagic;
+    pFoot -> nSize  = (UINT64)nSizeof;
+}
+
+//  Answers the address of the free block physically BEFORE aVBLock, or 0 when
+//  there is none to be had. Every field it reads is cross-checked against the
+//  candidate's own header; see the note above on why a stale tag is harmless.
+static VBLaddr
+P2PmsgHeap_PrevFree ( P2PmsgHANDLE hVBList, VBLaddr aVBLock ) noexcept
+{
+    const VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    const VBLsize nHdr = P2PmsgHeap_Sizeof_Hdr ( hVBList );
+    if ( nHdr == 0 || aVBLock <= nHdr + sizeof(VBHeapFoot) )
+      return 0;                        // No room for a block and a tag before us
+    if ( aVBLock > pHandle->nSizeofAlloc )
+      return 0;
+
+    const VBHeapFoot *pFoot =
+      (const VBHeapFoot *)( (char *)P2PmsgHeap_Addr2Phys(hVBList,aVBLock)
+                          - sizeof(VBHeapFoot) );
+    if ( pFoot == nullptr || pFoot->uMagic != VBHeap_FootMagic )
+      return 0;
+
+    const UINT64 nSize = pFoot -> nSize;
+    if ( nSize < P2PmsgHeap_FootMin(pHandle->uAddrType) || nSize >= aVBLock )
+      return 0;                        // Nonsense, or it would start before the image
+    const VBLaddr aPrev = aVBLock - (VBLaddr)nSize;
+    if ( aPrev < nHdr )
+      return 0;
+
+    const VBHeap *pPrev = VBList2PhysVBHeap ( hVBList, aPrev );
+    if ( pPrev == nullptr )
+      return 0;
+    if ( !VBHeap_IsAddr(pPrev,pHandle->uAddrType) ||
+         !VBHeap_IsAlloc(pPrev)                   ||
+         !VBHeap_IsLinked(pPrev)                  ||
+         !VBHeap_IsFree(pPrev)                       )
+      return 0;
+    if ( (UINT64)VBHeap_Sizenn(pPrev) != nSize )
+      return 0;                        // The tag and the block disagree: believe the block
+    return aPrev;
+}
+
+//  Takes the tags back out of the free blocks, and puts them back.
+//  NOTES: A TAG MUST NOT REACH AN IMAGE ON DISK. It lives in the tail of a free
+//         block, which is dead space in memory but is still written out when
+//         the arena is serialised -- and this tree keeps its serialised slack
+//         DETERMINISTIC on purpose (the zeroed grown tail in ResizeIOMAGE,
+//         byte_order.md 4.2), with MscsUnitTests/golden_ref.p2p gating it byte
+//         for byte across operating systems. Persisting the tag would not
+//         corrupt anything: free-block contents are never read back, an old
+//         build loads a new image and a new build loads an old one, the only
+//         cost being no backward merge until the block is freed again. What it
+//         WOULD do is make an image saved by a patched build differ from one
+//         saved by an unpatched build, which is precisely the drift that gate
+//         exists to catch. So the tag stays in memory, where it belongs: Save
+//         scrubs, writes, and re-stamps.
+//       : Bounded like every other walk of this list -- the links come off the
+//         wire and can be made cyclic. Refer P2PmsgHeap_AllocBSTRio.
+void
+P2PmsgHeap_ScrubFoots ( P2PmsgHANDLE hVBList, bool bRestore ) noexcept
+{
+    if ( hVBList == nullptr )
+      return;
+    VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    VBLaddr aFree = 0;
+    if ( pHandle->uVBListType == P2PmsgHeap_IOMAGE )
+      aFree = VBHeapRoot_GetFree ( pHandle->u.IOMAGE.pRoot );
+    else if ( pHandle->uVBListType == P2PmsgHeap_BSTRio )
+      aFree = pHandle->u.BSTRio.pBSTRio->oKeys.aFree;
+    else
+      return;                          // SYS heaps are never serialised
+
+    const VBLsize nMaxFree = P2PmsgHeap_MaxBlocks ( hVBList );
+    VBLsize       nWalked  = 0;
+    while ( aFree )
+    {
+      if ( ++nWalked > nMaxFree )
+        return;                        // Cyclic; say nothing, this is a courtesy pass
+      VBHeap *pFree = VBList2PhysVBHeap ( hVBList, aFree );
+      if ( pFree == nullptr )
+        return;
+      if ( bRestore )
+      {
+        P2PmsgHeap_StampFoot ( hVBList, aFree );
+      }
+      else
+      {
+        const VBLsize nSizeof = VBHeap_Sizenn ( pFree );
+        if ( VBHeap_IsFree(pFree)                             &&
+             nSizeof >= P2PmsgHeap_FootMin(pHandle->uAddrType) &&
+             aFree + nSizeof <= pHandle->nSizeofAlloc             )
+          memset ( (char *)pFree + nSizeof - sizeof(VBHeapFoot), 0, sizeof(VBHeapFoot) );
+      }
+      aFree = VBHeap_GetNext ( pFree, 0 );
+    }
+}
+
 UINT
 VBList_VBHeapMax ( UINT16 uVBHeapDefs ) noexcept
 {
@@ -1283,6 +1455,10 @@ P2PmsgHeap_AssertValidIOMAGE(hVBList);
       VBHeap *pFreeLast = (VBHeap *)P2PmsgHeap_Addr2Phys ( hVBList, aFreeLast );
       VBHeap_SetNext ( pFreeLast, aVBLockExtra );
     }
+
+    //  The grown tail is a free block like any other, and it is the one most
+    //  worth tagging: it is what the block below it merges into.
+    P2PmsgHeap_StampFoot ( hVBList, aVBLockExtra );
 
     // Tidy up, and
 ASSERT(VBHeap_IsLinked(pVBLockExtra));
@@ -2122,6 +2298,10 @@ P2PmsgHeap_ResizeBSTRio( P2PmsgHANDLE hVBList, VBLsize nSizeofExtra, bool bOvers
       VBHeap_SetNext ( pFreeLast, aVBLockExtra );
     }
 
+    //  The grown tail is a free block like any other, and it is the one most
+    //  worth tagging: it is what the block below it merges into.
+    P2PmsgHeap_StampFoot ( hVBList, aVBLockExtra );
+
     // Tidy up, and
 ASSERT(VBHeap_IsLinked(pVBLockExtra));
 ASSERT(VBHeap_IsAlloc(pVBLockExtra));
@@ -2399,8 +2579,11 @@ TOP:VBLsize nSizeof     = VBLock_Hdr_u_SizeNN ( pVBLock );
       else if ( uVBLock == VBLock_Addr08 )
         pVBLock->oHdr.u.nSize08 += pVBLockNext->oHdr.u.nSize08;
       pVBLockNext->oHdr.uVBLockDefs = 0;       
+      //  The block just grew, so its tag moved with its end.
+      P2PmsgHeap_StampFoot ( hVBList, aVBLock );
       goto TOP;
     }
+    P2PmsgHeap_StampFoot ( hVBList, aVBLock );
     return nSizeof;
 }
 VBLsize
@@ -2474,8 +2657,11 @@ TOP:VBLsize nSizeof     = VBLock_Hdr_u_SizeNN ( pVBLock );
       else if ( uVBLock == VBLock_Addr08 )
         pVBLock->oHdr.u.nSize08 += pVBLockNext->oHdr.u.nSize08;
       pVBLockNext->oHdr.uVBLockDefs = 0;       
+      //  The block just grew, so its tag moved with its end.
+      P2PmsgHeap_StampFoot ( hVBList, aVBLock );
       goto TOP;
     }
+    P2PmsgHeap_StampFoot ( hVBList, aVBLock );
     return nSizeof;
 }
 
@@ -2543,6 +2729,9 @@ ASSERT(VBHeap_IsFree(pVBLockFree));
       VBHeap_SetNext ( VBList2PhysVBHeap(hVBList,aVBLockPrev), aVBLockExtra );
     if ( aVBLockNext )
       VBHeap_SetPrev ( VBList2PhysVBHeap(hVBList,aVBLockNext), aVBLockExtra );
+    //  A brand new free block, so it needs a tag of its own. Without this the
+    //  remainder of every split is invisible to the block after it.
+    P2PmsgHeap_StampFoot ( hVBList, aVBLockExtra );
 //ASSERT(VBHeap_IsAddr(pVBLockExtra,pHandle->uAddrType));
 //ASSERT(VBHeap_IsFree(pVBLockExtra));
 //ASSERT(VBHeap_IsAlloc(pVBLockExtra));
@@ -2632,6 +2821,9 @@ ASSERT(VBHeap_IsFree(pVBLockFree));
       VBHeap_SetNext ( VBList2PhysVBHeap(hVBList,aVBLockPrev), aVBLockExtra );
     if ( aVBLockNext )
       VBHeap_SetPrev ( VBList2PhysVBHeap(hVBList,aVBLockNext), aVBLockExtra );
+    //  A brand new free block, so it needs a tag of its own. Without this the
+    //  remainder of every split is invisible to the block after it.
+    P2PmsgHeap_StampFoot ( hVBList, aVBLockExtra );
 //ASSERT(VBHeap_IsAddr(pVBLockExtra,pHandle->uAddrType));
 //ASSERT(VBHeap_IsFree(pVBLockExtra));
 //ASSERT(VBHeap_IsAlloc(pVBLockExtra));
@@ -3705,6 +3897,14 @@ P2PmsgHeap_FreeBSTRio ( P2PmsgHANDLE hVBList, VBLaddr aVBLock )
     pVBHeap->oHdr.uVBLockDefs &= ~VBLock_TypeMask;
     nSizeof = P2PmsgHeap_CollateBSTRio ( hVBList, aVBLock );
 
+    //  BACKWARDS -- refer P2PmsgHeap_FreeIOMAGE for the whole of it. Same
+    //  defect, same repair, and deliberately the same shape: both arms walk
+    //  and merge by the same rules, so a fix that lands on one of them and not
+    //  the other is how they drift.
+    VBLaddr aPrevFree = P2PmsgHeap_PrevFree ( hVBList, aVBLock );
+    if ( aPrevFree )
+      P2PmsgHeap_CollateBSTRio ( hVBList, aPrevFree );
+
     // Triggers
     CMapTriggers *pTriggers = pHandle->u.BSTRio.pCMapTriggers;
     if ( pTriggers )
@@ -3753,6 +3953,17 @@ P2PmsgHeap_FreeIOMAGE ( P2PmsgHANDLE hVBList, VBLaddr aVBLock )
     pHandle->nFreeEntries++;
     pVBHeap->oHdr.uVBLockDefs &= ~VBLock_TypeMask;
     nSizeof = P2PmsgHeap_CollateIOMAGE ( hVBList, aVBLock );
+
+    //  BACKWARDS, which is the half this heap never had. Collate only ever
+    //  looks forward, so the line above merges anything free that sits AFTER
+    //  this block and stops. If the block before it is also free, the two are
+    //  adjacent and should be one -- and now that a free block carries its size
+    //  in its tail, the predecessor can be found. Collating FROM it absorbs
+    //  this block by the same forward path, so there is no second merge routine
+    //  to keep in step with the first.
+    VBLaddr aPrevFree = P2PmsgHeap_PrevFree ( hVBList, aVBLock );
+    if ( aPrevFree )
+      P2PmsgHeap_CollateIOMAGE ( hVBList, aPrevFree );
 
     // Tidy up, and
     pHandle -> bDirty = true;          // Triggers dirty flag

@@ -1075,6 +1075,140 @@ static void Test_StackDrop()
 }
 
 // ---------------------------------------------------------------------------
+// VBHeap : backward coalescing, via the free-block boundary tag
+// ---------------------------------------------------------------------------
+static void Test_HeapCoalesce()
+{
+    //  The heap could only ever coalesce FORWARDS: P2PmsgHeap_Collate* merges a
+    //  freed block with its NEXT physical neighbour, and nothing in the image
+    //  said how far back the previous block began. So a run of frees reclaimed
+    //  its space only if it ran high address to low. Low to high -- which is
+    //  what almost everything does -- every block's neighbour was still
+    //  allocated when it was freed, nothing merged, and the free list filled
+    //  with separate blocks that first-fit then walked straight past, because
+    //  the one that had absorbed the image tail sat at the head and satisfied
+    //  every request.
+    //
+    //  A free block now carries its own size in its tail, so the block after it
+    //  can find it. Allocated blocks are untouched, which is why this costs no
+    //  format change and golden_ref.p2p is still byte-identical.
+    //
+    //  P3PmsgDesc::Truncate is the ordinary way to provoke it: it empties a
+    //  container by deleting child 0 over and over, which is ascending order.
+    //  Measured before the tag, the first child walked 331, 1155, 1979, 2803,
+    //  3627 -- 824 bytes a round, for ever.
+    TF_CASE("a container truncated and refilled reuses its blocks")
+    {
+        P2PmsgMgr mgr(VBLock_Addr64, 4096, 1u << 20);
+        mgr.r_name() = L"Root";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create);
+        P2Pos posRound0 = 0;
+
+        for (int nRound = 0; nRound < 5; nRound++)
+        {
+            for (int i = 0; i < 5; i++)
+            {
+                wchar_t sz[32];
+                swprintf_s(sz, 32, L"Kid%d", i);
+                mgr.r_Desc() += P3PmsgField(sz, DataBSTR08(L"payload"));
+            }
+            TF_CHECK(mgr.r_Desc().Exists(L"Kid0"));
+            TF_CHECK(mgr.r_Desc().Exists(L"Kid4"));
+
+            P3PmsgObject o = mgr.r_Desc().SelectObject(L"Kid0");
+            TF_CHECK(!o.IsVoid());
+            if (!o.IsVoid())
+            {
+                if (nRound == 0)
+                    posRound0 = o.GetP2Pos();
+                else
+                    TF_CHECK(o.GetP2Pos() == posRound0);   // no drift
+            }
+            mgr.r_Desc().Truncate();
+            TF_CHECK(!mgr.r_Desc().Exists(L"Kid0"));
+        }
+    }
+
+    //  The same thing one block at a time, and in the order that used to be the
+    //  bad one: two siblings side by side, the LOWER freed first. Before the
+    //  tag its neighbour was still allocated, so it never merged with anything
+    //  and the pair could not be handed back as one span.
+    TF_CASE("two adjacent blocks freed low-to-high merge into one")
+    {
+        P2PmsgMgr mgr(VBLock_Addr64, 4096, 1u << 20);
+        mgr.r_name() = L"Root";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create);
+        mgr.r_Desc() += P3PmsgField(L"Low",  DataBSTR08(L"payload"));
+        mgr.r_Desc() += P3PmsgField(L"High", DataBSTR08(L"payload"));
+
+        P3PmsgObject oLow = mgr.r_Desc().SelectObject(L"Low");
+        TF_CHECK(!oLow.IsVoid());
+        const P2Pos posLow = oLow.IsVoid() ? 0 : oLow.GetP2Pos();
+
+        mgr.r_Desc().r_Curs().Goto(L"Low");
+        mgr.r_Desc().r_Curs().Delete();
+        mgr.r_Desc().r_Curs().Goto(L"High");
+        mgr.r_Desc().r_Curs().Delete();
+        TF_CHECK(!mgr.r_Desc().Exists(L"Low"));
+        TF_CHECK(!mgr.r_Desc().Exists(L"High"));
+
+        //  One span again, so the next pair starts back at the bottom of it.
+        mgr.r_Desc() += P3PmsgField(L"Low",  DataBSTR08(L"payload"));
+        mgr.r_Desc() += P3PmsgField(L"High", DataBSTR08(L"payload"));
+        P3PmsgObject oBack = mgr.r_Desc().SelectObject(L"Low");
+        TF_CHECK(!oBack.IsVoid());
+        if (!oBack.IsVoid())
+            TF_CHECK(oBack.GetP2Pos() == posLow);
+        mgr.AssertValid();
+    }
+
+    //  A tag lives in the tail of a free block, which is dead space in memory
+    //  but is still inside the arena Save writes out. Save scrubs the tags,
+    //  writes, and puts them back, so an image from this build is byte-for-byte
+    //  what an image from a build without tags would have been -- the property
+    //  MscsUnitTests/golden_ref.p2p gates. This checks the round trip still
+    //  works either side of that, and that the heap keeps coalescing after a
+    //  Save has scrubbed and restored it.
+    TF_CASE("a save round-trips and leaves the tags working")
+    {
+        wchar_t szDir[MAX_PATH]  = { 0 };
+        wchar_t szPath[MAX_PATH] = { 0 };
+        GetTempPathW(MAX_PATH, szDir);
+        swprintf_s(szPath, MAX_PATH, L"%smscs_heap_tags.p2p", szDir);
+
+        try
+        {
+            P2PmsgMgr mgr(VBLock_Addr64, 4096, 1u << 20);
+            mgr.r_name() = L"Root";
+            mgr.r_Desc(P3PmsgField::AttrCMD_Create);
+            mgr.r_Desc() += P3PmsgField(L"Keep", DataBSTR08(L"payload"));
+            mgr.r_Desc() += P3PmsgField(L"Drop", DataBSTR08(L"payload"));
+            mgr.r_Desc().r_Curs().Goto(L"Drop");
+            mgr.r_Desc().r_Curs().Delete();      // leaves a tagged free block
+            mgr.Save(szPath);
+
+            //  Still coalescing after the scrub/restore.
+            P3PmsgObject o1 = mgr.r_Desc().SelectObject(L"Keep");
+            TF_CHECK(!o1.IsVoid());
+            mgr.r_Desc() += P3PmsgField(L"Again", DataBSTR08(L"payload"));
+            TF_CHECK(mgr.r_Desc().Exists(L"Again"));
+            mgr.AssertValid();
+
+            P2PmsgMgr oBack(szPath);
+            TF_CHECK(oBack.r_Desc().Exists(L"Keep"));
+            TF_CHECK(!oBack.r_Desc().Exists(L"Drop"));
+            oBack.AssertValid();
+        }
+        catch (P2Pevent* pEVT)
+        {
+            tf_fail(__FILE__, __LINE__, "unexpected P2Pevent during save round-trip");
+            pEVT->Cancel(false);
+        }
+        _wremove(szPath);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3PmsgVect::Drop : deleting a vector out of a container
 // ---------------------------------------------------------------------------
 static void Test_VectDrop()
@@ -2248,6 +2382,7 @@ void RunMsgcoreSuite()
     Test_Stack();
     Test_StackContainers();
     Test_VectDrop();
+    Test_HeapCoalesce();
     Test_StackDrop();
     Test_RootPath();
     Test_ListPath();

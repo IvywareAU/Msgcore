@@ -160,6 +160,11 @@ UCHAR
 P2PmsgHeap_Addrnn ( P2PmsgHANDLE hVBHeap );
 VBLsize
 P2PmsgHeap_Sizeof ( P2PmsgHANDLE hVBHeap );
+//  Free-block boundary tags are an in-memory accelerator and must not reach a
+//  serialised image; Save scrubs them, writes, and restores them. Refer the
+//  note on P2PmsgHeap_ScrubFoots in MsgVBHeap.cpp.
+void
+P2PmsgHeap_ScrubFoots ( P2PmsgHANDLE hVBHeap, bool bRestore ) noexcept;
 VBLsize
 P2PmsgHeap_Sizeof ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock );
 VBListIOmage*

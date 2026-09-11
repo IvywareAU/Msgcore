@@ -370,6 +370,17 @@ P2PmsgMgr::Load ( LPCTSTR lpszFilename )
     return FALSE;
 }*/
 
+//  Puts the free-block boundary tags back, whatever happens between the scrub
+//  and the last byte being written. Save throws from a dozen places in between.
+namespace {
+struct P2PmsgScrubGuard
+{
+    P2PmsgHANDLE m_h;
+    explicit P2PmsgScrubGuard ( P2PmsgHANDLE h ) noexcept : m_h(h) {}
+   ~P2PmsgScrubGuard ( ) { P2PmsgHeap_ScrubFoots ( m_h, true ); }
+};
+}
+
 BOOL
 P2PmsgMgr::Save ( LPCTSTR lpszFilename, bool bDefragment )
 {
@@ -410,6 +421,13 @@ P2PmsgMgr::Save ( LPCTSTR lpszFilename, bool bDefragment )
       }
 
       // Capture the heap image to persist.
+      //  Scrubbed of free-block boundary tags first, and re-stamped once the
+      //  bytes are out. The tags are an in-memory accelerator for backward
+      //  coalescing; letting them reach the file would make an image written by
+      //  this build differ from one written before the tags existed, for no
+      //  gain -- nothing ever reads the inside of a free block back.
+      P2PmsgHeap_ScrubFoots ( m_hMgr, false );
+      P2PmsgScrubGuard shFoots ( m_hMgr );   // Re-stamps, including on a throw
       void    *vpIOmage     = P2PmsgHeap_pImage ( m_hMgr );
       VBLsize  dwIOmageSize = P2PmsgHeap_Sizeof ( m_hMgr );
 
