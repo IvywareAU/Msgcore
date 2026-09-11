@@ -1023,6 +1023,8 @@ Msgcore_EXT CString
 P3Pmsg_GetPath ( const P3PmsgField *pField );
 Msgcore_EXT CString
 P3Pmsg_GetPath ( const P3PmsgAttr *pAttr );
+Msgcore_EXT VBLsize
+P3Pmsg_GetStckDepth ( const P3PmsgField *pItem, VBLaddr aOwner );
 Msgcore_EXT P3PmsgObject
 P3Pmsg_GetRoot ( const P3PmsgItem *pItem );
 Msgcore_EXT BOOL

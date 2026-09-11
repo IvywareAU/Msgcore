@@ -1613,6 +1613,167 @@ static void Test_RootPath()
 }
 
 // ---------------------------------------------------------------------------
+// P3Pmsg_GetPath : naming an object that lives in a snapshot
+// ---------------------------------------------------------------------------
+static void Test_GeneratedStackPath()
+{
+    //  GetPath walks aParent, and a snapshot had none: MsgStck::Push left the
+    //  field zero. A zero parent is what GetPath reads as a FLOATING item, so
+    //  every snapshot of BHP answered ".BHP" wherever BHP actually lived --
+    //  and every GENERATION answered the same ".BHP".
+    //
+    //  Not just a path that fails to resolve: ".BHP" parses as the root name
+    //  BHP with no components at all, so RootPath2Object walks nothing and
+    //  hands back the ROOT. A path the library generated for one object,
+    //  naming another.
+    //
+    //  Nothing in the block could be walked to find the owner -- aStack runs
+    //  owner -> newest -> older and a snapshot has no back-link along it -- so
+    //  Push now records the owner in aParent, and GetPath counts the
+    //  generation by walking the owner's chain. The walk doubles as the proof
+    //  that the block is on it.
+    TF_CASE("a snapshot's path is the owner's, plus '^'")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc() += P3PmsgField(L"BHP");
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        TF_CHECK(P3Pmsg_GetPath(&oLive) == L".Store.BHP");
+
+        oLive.r_Stck().Push();
+        P3PmsgField oSnap = oLive.SelectObject(L"^");
+        TF_CHECK(!oSnap.IsVoid());
+
+        const CString strSnap = P3Pmsg_GetPath(&oSnap);
+        TF_CHECK(strSnap == L".Store.BHP^");
+
+        //  And the path the library just produced comes back to the object it
+        //  was produced for, which is the whole point of generating one.
+        P3PmsgObject oBack = mgr.RootPath2Object(strSnap);
+        TF_CHECK(!oBack.IsVoid());
+        if (!oBack.IsVoid())
+            TF_CHECK(oBack.GetP2Pos() == oSnap.GetP2Pos());
+
+        //  A push does not move the live item, and must not rename its path.
+        TF_CHECK(P3Pmsg_GetPath(&oLive) == L".Store.BHP");
+    }
+
+    //  Pushes nest, and the delimiter repeats. Two generations used to share
+    //  one string; there is no reading of ".BHP" that distinguishes them.
+    TF_CASE("every generation gets its own path, and each resolves")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc() += P3PmsgField(L"BHP");
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        oLive.r_Desc(P3PmsgField::AttrCMD_Create);
+        oLive.r_Desc() += P3PmsgField(L"Early");
+        oLive.r_Stck().Push();                          // generation 1
+        oLive.r_Desc() += P3PmsgField(L"Late");
+        oLive.r_Stck().Push();                          // generation 2
+
+        P3PmsgField oNewer = oLive.SelectObject(L"^");
+        P3PmsgField oOlder = oLive.SelectObject(L"^^");
+        TF_CHECK(!oNewer.IsVoid());
+        TF_CHECK(!oOlder.IsVoid());
+        TF_CHECK(oNewer.GetP2Pos() != oOlder.GetP2Pos());
+
+        const CString strNewer = P3Pmsg_GetPath(&oNewer);
+        const CString strOlder = P3Pmsg_GetPath(&oOlder);
+        TF_CHECK(strNewer == L".Store.BHP^");
+        TF_CHECK(strOlder == L".Store.BHP^^");
+
+        P3PmsgObject oBackNewer = mgr.RootPath2Object(strNewer);
+        P3PmsgObject oBackOlder = mgr.RootPath2Object(strOlder);
+        TF_CHECK(!oBackNewer.IsVoid());
+        TF_CHECK(!oBackOlder.IsVoid());
+        if (!oBackNewer.IsVoid())
+            TF_CHECK(oBackNewer.GetP2Pos() == oNewer.GetP2Pos());
+        if (!oBackOlder.IsVoid())
+            TF_CHECK(oBackOlder.GetP2Pos() == oOlder.GetP2Pos());
+    }
+
+    //  A snapshot holds a whole item, so the things inside it have paths too --
+    //  and they always came out right ABOVE the snapshot and wrong at it, the
+    //  recursion carrying ".BHP" up from the bottom. One fix at the snapshot
+    //  fixes the subtree over it.
+    TF_CASE("what is inside a snapshot names itself through the '^'")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        oLive.r_Desc(P3PmsgField::AttrCMD_Create);
+        oLive.r_Desc() += P3PmsgField(L"Last");
+        oLive.r_Stck().Push();
+
+        P3PmsgField oAttr = oLive.SelectObject(L"^@Currency");
+        TF_CHECK(!oAttr.IsVoid());
+        const CString strAttr = P3Pmsg_GetPath(&oAttr);
+        TF_CHECK(strAttr == L".Store.BHP^@Currency");
+        P3PmsgObject oBackAttr = mgr.RootPath2Object(strAttr);
+        TF_CHECK(!oBackAttr.IsVoid());
+        if (!oBackAttr.IsVoid())
+            TF_CHECK(oBackAttr.GetP2Pos() == oAttr.GetP2Pos());
+
+        P3PmsgField oKid = oLive.SelectObject(L"^.Last");
+        TF_CHECK(!oKid.IsVoid());
+        const CString strKid = P3Pmsg_GetPath(&oKid);
+        TF_CHECK(strKid == L".Store.BHP^.Last");
+        P3PmsgObject oBackKid = mgr.RootPath2Object(strKid);
+        TF_CHECK(!oBackKid.IsVoid());
+        if (!oBackKid.IsVoid())
+            TF_CHECK(oBackKid.GetP2Pos() == oKid.GetP2Pos());
+    }
+
+    //  aParent on an item means "the collection I am linked into", and the
+    //  three Drop implementations read it to decide which collection to unlink
+    //  themselves from -- anything else is ASSERT(0). Push borrows the field
+    //  to mean "the item I was pushed from", which is true only while the
+    //  block is on that item's stack, so MsgStck returns the loan where it
+    //  takes the block off the chain rather than leaving the free to trip over
+    //  it. The framework counts a debug assertion as a failure, which is what
+    //  makes "stays silent" a thing this case can test.
+    TF_CASE("a pop and a drop leave no borrowed parent behind")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc() += P3PmsgField(L"BHP");
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        oLive.r_Stck().Push();
+        oLive.r_Stck().Push();
+
+        oLive.r_Stck().Pop();                           // frees the newest
+        TF_CHECK(oLive.IsStacked());
+        TF_CHECK(P3Pmsg_GetPath(&oLive) == L".Store.BHP");
+
+        oLive.r_Stck().Drop();                          // frees the rest
+        TF_CHECK(!oLive.IsStacked());
+        TF_CHECK(P3Pmsg_GetPath(&oLive) == L".Store.BHP");
+    }
+
+    //  An item with no parent at all is still a floating item, and still says
+    //  so. A snapshot in an image written before any of this carries a zero
+    //  parent and comes out of the same arm, unchanged.
+    TF_CASE("an item with no parent still answers with its own name")
+    {
+        P3PmsgField oLoose(L"Loose");
+        TF_CHECK(P3Pmsg_GetPath(&oLoose) == L".Loose");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3Pmsg_SelectObject : path components against a list or a vector
 // ---------------------------------------------------------------------------
 static void Test_ListPath()
@@ -2952,6 +3113,7 @@ void RunMsgcoreSuite()
     Test_RootPath();
     Test_ListPath();
     Test_CollectionStack();
+    Test_GeneratedStackPath();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();

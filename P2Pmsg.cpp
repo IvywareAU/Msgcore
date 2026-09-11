@@ -6552,6 +6552,51 @@ P3Pmsg_GetRootname ( LPCTSTR lpszItemPath )
     return strRootname;
 }
 
+//
+//  How many '^' name pItem from the item at aOwner, or 0 if that item's stack
+//  does not hold pItem at all.
+//
+//  The walk is the answer to both questions at once: a snapshot records its
+//  OWNER in aParent, not the generation above it, so the distance has to be
+//  counted -- and counting it means following the chain, which is also what
+//  proves the block is on it. A parent that points at an item for some other
+//  reason (a list holding an element, say) simply never matches and comes back
+//  zero, which is the caller's signal to carry on as before.
+//
+//  It is also the test for "am I a snapshot": the three Drop implementations
+//  read aParent to decide which collection to unlink themselves from, and a
+//  snapshot belongs to none -- MsgStck has already taken it off the aStack
+//  chain by then. That code was correct only because a stack block's aParent
+//  used to be zero.
+Msgcore_EXT VBLsize
+P3Pmsg_GetStckDepth ( const P3PmsgField *pItem, VBLaddr aOwner )
+{
+    if ( pItem == nullptr || aOwner == 0 )
+      return 0;
+    VBLock *pOwner = (VBLock *)pItem -> r_Object().Msg2Phys ( aOwner );
+    if ( pOwner == nullptr || !VBLock_IsItem(pOwner) )
+      return 0;
+
+    const UCHAR   uVBLock = pOwner->oHdr.uVBLockDefs;
+    const VBLaddr aItem   = pItem->r_Object().GetVBLocknn ( );
+    if ( aItem == 0 )
+      return 0;
+
+    VBLaddr aStck  = VBLockItem_GetStack ( uVBLock, VBLock_pItem(pOwner) );
+    VBLsize nDepth = 1;
+    while ( aStck )
+    {
+      if ( aStck == aItem )
+        return nDepth;
+      VBLock *pStck = (VBLock *)pItem -> r_Object().Msg2Phys ( aStck );
+      if ( pStck == nullptr || !VBLock_IsItem(pStck) )
+        return 0;
+      aStck = VBLockItem_GetStack ( pStck->oHdr.uVBLockDefs, VBLock_pItem(pStck) );
+      nDepth++;
+    }
+    return 0;
+}
+
 CString
 P3Pmsg_GetAttrPath ( const P3PmsgField *pField, VBLaddr aParent )
 {
@@ -6662,6 +6707,30 @@ P3Pmsg_GetPath ( const P3PmsgField *pItem )
     }
     VBLock *pParent = P2PmsgField_GetVBLockParent ( pItem );
     VBLockItem *pParentItem = VBLock_pItem ( pParent );
+
+    //  Process stack parent
+    //  NOTES: A snapshot is its owner at an earlier moment, not a child of it,
+    //         so its path is the owner's plus one '^' per generation and no
+    //         name of its own -- '^' IS the component (§5 of stack_paths.md).
+    //       : MsgStck::Push left aParent zero, which the floating-item arm
+    //         above reads as "no parent" -- so every snapshot of BHP answered
+    //         ".BHP" wherever BHP actually lived, and every GENERATION
+    //         answered the same ".BHP". Not a path to this object, and a path
+    //         to a different one.
+    //       : A snapshot in an image written before that still carries zero
+    //         and still comes out of the arm above, unchanged.
+    if ( VBLock_IsItem(pParent) )
+    {
+      const VBLsize nStck = P3Pmsg_GetStckDepth ( pItem, aParent );
+      if ( nStck )
+      {
+        P3PmsgField oOwner ( pItem->GetP2PmsgHandle(), aParent, 0 );
+        strPath = P3Pmsg_GetPath ( &oOwner );
+        for ( VBLsize i = 0; i < nStck; i++ )
+          strPath += T_StckDelim;
+        return strPath;                // The name is the owner's, and said
+      }                                // once: '^' carries none of its own
+    }
 
     // Process descendent parent
     if ( VBLock_IsDesc(pParent) )

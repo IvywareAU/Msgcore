@@ -156,6 +156,14 @@ MsgStck__Unlink ( MsgStck *pThis, VBLaddr aPopped, VBLaddr aBelow )
     VBLock       *pVBLock1 = (VBLock *)oObject.Msg2Phys ( aPopped );
     VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock),  aBelow );
     VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock1), 0      );
+    //  Off the chain, so no longer a snapshot of anything. aParent on an item
+    //  means "the collection I am linked into", and Push borrows it to mean
+    //  "the item I was pushed from" -- which is true only while the block is
+    //  on that item's stack. P3PmsgField::Drop reads aParent to decide which
+    //  collection to unlink from and ASSERTs on anything else, so the loan has
+    //  to be returned here, where the block stops being a snapshot, and not
+    //  left for the free to trip over. Same idiom as every other unlink.
+    VBLockItem_SetParent ( uVBLock, VBLock_pItem(pVBLock1), 0      );
 }
 
 //
@@ -259,6 +267,22 @@ MsgStck::Push ( )
     VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock),  aVBLock1 );
     VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock1), aVBLock2 );
     pVBLock1 -> oHdr.uVBLockDefs |= VBLock_Linked;
+
+    //  RECORD THE OWNER. aParent was left zero here, and a zero parent is what
+    //  P3Pmsg_GetPath reads as a FLOATING item -- so every snapshot of BHP,
+    //  whatever its generation and wherever BHP lived, answered ".BHP": not
+    //  this object's path, resolving to something else entirely, and the same
+    //  string for all of them. Nothing else in the block could be walked to
+    //  find the owner, because aStack runs the other way (owner -> newest ->
+    //  older) and a snapshot has no back-link along it.
+    //
+    //  The OWNER, not the generation above: the older generations already
+    //  point at it and go on pointing at it, so a push adds this one line and
+    //  Pop and Drop have nothing to maintain -- the block they unlink is one
+    //  they free. P3Pmsg_GetPath counts the generation by walking the owner's
+    //  chain, which also tells it that this really is a snapshot of that item.
+    VBLockItem_SetParent ( uVBLock, VBLock_pItem(pVBLock1)
+                         , m_pP3PmsgField->r_Object().GetVBLocknn() );
 
     //  Read the size while pVBLock1 is still fresh: everything below this line
     //  allocates, and the copies are addressed by VBLaddr, not by pointer.
@@ -571,7 +595,9 @@ MsgStck::Drop ( )
       VBLock     *pGen  = (VBLock *)m_pP3PmsgField->r_Object().Msg2Phys(aGen);
       VBLockItem *pItem = VBLock_pItem ( pGen );
       VBLaddr     aNext = VBLockItem_GetStack ( pGen->oHdr.uVBLockDefs, pItem );
-      VBLockItem_SetStack ( pGen->oHdr.uVBLockDefs, pItem, 0 );
+      VBLockItem_SetStack  ( pGen->oHdr.uVBLockDefs, pItem, 0 );
+      //  And the owner it was pushed from -- refer MsgStck__Unlink.
+      VBLockItem_SetParent ( pGen->oHdr.uVBLockDefs, pItem, 0 );
       if ( VBLockItem_IsList(pItem) )
       {
         P3PmsgList oGen ( hVBList, aGen, 0 );
