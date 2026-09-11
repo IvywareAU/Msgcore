@@ -832,7 +832,23 @@ P2PmsgMgr::RootPath2Object ( LPCWSTR lpszObjectPath )
     // Problematic
     try
     {
-      P3Pmsg_SplitRootPath ( lpszObjectPath, strRoot, oCListItems );
+      //  The verdict is the point of the call. Discarded, a path the splitter
+      //  REFUSED was walked anyway, over whatever components it had collected
+      //  before it gave up -- and since the walk answers the last component it
+      //  managed, a malformed path came back as the object one step up from
+      //  where the refusal happened. A silently wrong object, with nothing to
+      //  distinguish it from a right one.
+      //
+      //  A missing descendant already throws here ("Path to object does not
+      //  exist"); a path that is not a path is at least as much the caller's
+      //  error, and void is reserved for a search that ran and found nothing.
+      if ( !P3Pmsg_SplitRootPath ( lpszObjectPath, strRoot, oCListItems ) )
+        EVERR->MODULE
+             //  L"%ls", never the path as the format itself -- refer the note
+             //  on the throw below.
+             ->Message(L"%ls", lpszObjectPath)
+             ->Message("Malformed object path")
+             ->Throw();
 
       // Process the full Object path
       POSITION posItems = oCListItems.GetHeadPosition();
@@ -914,6 +930,18 @@ P2PmsgMgr::RootPath2Object ( LPCWSTR lpszObjectPath )
         P3PmsgObject oSelected = oItemParent.SelectObject(lpszItemName);
         if ( oSelected.IsVoid() )
           return P3PmsgObject();
+        //  The assignment below is the operator= described above, and it
+        //  throws for anything that is not a field. Where there is nothing
+        //  left to walk there is also nothing to assign INTO oItemParent for:
+        //  the object IS the answer, and handing it back is what the contract
+        //  says. ".Root.Item@^" -- the attribute collection as it stood at the
+        //  last push -- resolves to a collection, and the object-path spelling
+        //  has always returned it; only the walk could not carry it.
+        //
+        //  A non-field reached BEFORE the last component still throws, and
+        //  deliberately: the walk has no way to step off one.
+        if ( posItems == nullptr && !oSelected.IsField() )
+          return oSelected;
         oItemParent = oSelected;
       }
       return oItemParent.r_Object();

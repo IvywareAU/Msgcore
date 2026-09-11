@@ -1538,6 +1538,77 @@ static void Test_RootPath()
         TF_CHECK(P3Pmsg_SplitRootPath(L".Root.Alpha^", strRoot, oItems));
         TF_CHECK(oItems.GetCount() == 2);
     }
+
+    //  '^' is a delimiter, and it is the only one that carries no name of its
+    //  own -- it names the pushed value of whatever stands to its left. So
+    //  where it follows a delimiter that DOES carry a name, it has not begun a
+    //  new component; it has qualified the one being read. "@^Tag" is a single
+    //  question, and reading it as two components left the first of them
+    //  nameless -- which the length test refused, taking the WHOLE path down
+    //  with it.
+    TF_CASE("'^' after '@' or '.' stays in the same component")
+    {
+        CString        strRoot;
+        CList<CString> oItems;
+
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root.Alpha@^Tag", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 2);
+        if (oItems.GetCount() == 2)
+            TF_CHECK(oItems.GetTail() == L"@^Tag");
+
+        //  Pushes nest, so the delimiter repeats and all of it is one step.
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root.Alpha@^^Tag", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 2);
+        if (oItems.GetCount() == 2)
+            TF_CHECK(oItems.GetTail() == L"@^^Tag");
+
+        //  The descendant collection reads the same way ...
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root.Alpha.^Kid", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 2);
+        if (oItems.GetCount() == 2)
+            TF_CHECK(oItems.GetTail() == L".^Kid");
+
+        //  ... and so does a '^' qualifying another '^', which used to be two
+        //  components that happened to walk to the same place.
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root.Alpha^^", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 2);
+        if (oItems.GetCount() == 2)
+            TF_CHECK(oItems.GetTail() == L"^^");
+
+        //  A '^' that follows a NAME still ends the component: the attribute
+        //  Tag has a stack of its own, and asking for it is a second step.
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root.Alpha@Tag^", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 3);
+    }
+
+    //  The splitter's verdict is the point of the call, and RootPath2Object
+    //  discarded it -- walking whatever components had been collected before
+    //  the refusal, and answering the object one step up from where it
+    //  happened. A wrong object, with nothing to tell it from a right one.
+    TF_CASE("a malformed root path throws rather than answering the parent")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Root";
+        mgr.r_Desc() += P3PmsgField(L"Alpha");
+
+        //  An empty component. Before: the root, because ".Root..Alpha" gave
+        //  up before collecting anything at all.
+        bool bThrewEmpty = false;
+        try   { mgr.RootPath2Object(L".Root..Alpha"); }
+        catch (P2Pevent* pEVT) { bThrewEmpty = true; pEVT->Cancel(false); }
+        TF_CHECK(bThrewEmpty);
+
+        //  A path that does not begin at a root fails the same first test.
+        bool bThrewRootless = false;
+        try   { mgr.RootPath2Object(L"Root.Alpha"); }
+        catch (P2Pevent* pEVT) { bThrewRootless = true; pEVT->Cancel(false); }
+        TF_CHECK(bThrewRootless);
+
+        //  A trailing '@' names no attribute and is still dropped rather than
+        //  refused, exactly as it always was -- the GetPath round-trip leans
+        //  on that and is not part of this change.
+        TF_CHECK(!mgr.RootPath2Object(L".Root.Alpha@").IsVoid());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2800,19 +2871,14 @@ static void Test_CollectionStack()
         TF_CHECK( oLive.SelectObject(L"^").IsVoid());
     }
 
-    //  A ROOT path carrying '@^' does NOT work, and this case pins the wrong
-    //  answer rather than pretending it does. P3Pmsg_SplitRootPath builds each
-    //  component starting at its delimiter and running to the next one; '^' is
-    //  a delimiter, so "@^Currency" yields a component that is the single
-    //  character '@', which the length test rejects -- and the split returns
-    //  FALSE, which P2PmsgMgr::RootPath2Object does not look at. The walk then
-    //  runs over whatever components were collected before the refusal and
-    //  answers the PARENT.
-    //
-    //  So ".Store.BHP@^Currency" comes back as BHP: not the attribute, not
-    //  void, but the item the path started from. The object-path spelling above
-    //  is the one that works today.
-    TF_CASE("a root path with '@^' answers the wrong object -- known, unfixed")
+    //  A ROOT path carrying '@^' now answers what the object path answers,
+    //  and it did not when the cases above were written. P3Pmsg_SplitRootPath
+    //  broke the component at the '^' and left a nameless "@" that its length
+    //  test refused; the split returned FALSE, and P2PmsgMgr::RootPath2Object
+    //  never looked at it -- so the walk ran over the components collected
+    //  before the refusal and ".Store.BHP@^Currency" came back as BHP. Not the
+    //  attribute, not void: the item the path started from.
+    TF_CASE("a root path carrying '@^' answers what the object path answers")
     {
         P2PmsgMgr mgr;
         mgr.r_name() = L"Store";
@@ -2823,27 +2889,43 @@ static void Test_CollectionStack()
 
         P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
         TF_CHECK(!oLive.IsVoid());
-        oLive.r_Stck().Push();
+        oLive.r_Desc(P3PmsgField::AttrCMD_Create);
+        oLive.r_Desc() += P3PmsgField(L"Last");
+        oLive.r_Stck().Push();                          // Currency, Last
+        oLive.r_Attr() += P3PmsgField(L"Venue");        // added AFTER the push
 
-        const P2Pos posItem = oLive.GetP2Pos();
         P3PmsgObject oViaObject = oLive.SelectObject(L"@^Currency");
-        TF_CHECK(!oViaObject.IsVoid());                 // the object path works
+        P3PmsgObject oViaRoot   = mgr.RootPath2Object(L".Store.BHP@^Currency");
+        TF_CHECK(!oViaObject.IsVoid());
+        TF_CHECK(!oViaRoot.IsVoid());
+        if (!oViaObject.IsVoid() && !oViaRoot.IsVoid())
+            TF_CHECK(oViaObject.GetP2Pos() == oViaRoot.GetP2Pos());
 
-        try
-        {
-            P3PmsgObject oViaRoot = mgr.RootPath2Object(L".Store.BHP@^Currency");
-            //  Documented, not endorsed: it answers the item itself.
-            TF_CHECK(!oViaRoot.IsVoid());
-            if (!oViaRoot.IsVoid())
-                TF_CHECK(oViaRoot.GetP2Pos() == posItem);
-        }
-        catch (P2Pevent* pEVT)
-        {
-            //  If this ever starts throwing instead, that is an improvement on
-            //  a wrong answer and this case should be rewritten, not deleted.
-            tf_fail(__FILE__, __LINE__, "root path with '@^' now throws -- revisit this case");
-            pEVT->Cancel(false);
-        }
+        //  And it is not the item the path started from, which is the answer
+        //  it used to give.
+        if (!oViaRoot.IsVoid())
+            TF_CHECK(oViaRoot.GetP2Pos() != oLive.GetP2Pos());
+
+        //  Venue was added after the push, so the snapshot's collection does
+        //  not carry it. An ordinary miss, and still an ordinary answer.
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP@^Venue").IsVoid());
+
+        //  The collection itself ends the walk, and it is not a field -- so
+        //  even once the splitter produced the component, the walk could not
+        //  assign it into the P3PmsgItem it carries. A last component needs no
+        //  assignment: it IS the answer.
+        P3PmsgObject oColl = mgr.RootPath2Object(L".Store.BHP@^");
+        TF_CHECK(!oColl.IsVoid());
+        TF_CHECK(oColl.IsAttr());
+        if (!oColl.IsVoid())
+            TF_CHECK(oColl.GetP2Pos() == oLive.SelectObject(L"@^").GetP2Pos());
+
+        //  The descendant collection reads the same way, and '^' commutes
+        //  with '.' in a root path just as it does in an object path.
+        P3PmsgObject oKid = mgr.RootPath2Object(L".Store.BHP.^Last");
+        TF_CHECK(!oKid.IsVoid());
+        if (!oKid.IsVoid())
+            TF_CHECK(oKid.GetP2Pos() == oLive.SelectObject(L"^.Last").GetP2Pos());
     }
 }
 

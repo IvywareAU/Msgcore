@@ -7227,8 +7227,25 @@ P3Pmsg_SplitRootPath ( LPCWSTR lpszObjectPath, CString& strRootname
     // NOTES: Always preceeded with [/|\|@|^]
     while ( lpszWorkingPath[0] )
     {
-      while ( !P3Pmsg_IsPathDelimiter(lpszWorkingPath) )
+      //  '^' is a delimiter, and it is the only one that introduces no NAME --
+      //  it names the pushed value of whatever stands to its left. So where it
+      //  follows a delimiter that DOES introduce one, it has not begun a new
+      //  component; it has qualified the component being read. "@^Currency" is
+      //  a single question -- the attribute Currency as it stood before the
+      //  last push -- and P3Pmsg_SelectObject answers it as one. Split at the
+      //  '^' it became a component "@" carrying no name at all, the length test
+      //  below rejected that, and the WHOLE path came back FALSE.
+      //
+      //  So the scan takes a '^' while the component is still nothing but
+      //  delimiters, and stops at one once a name has been read: "@^^Tag" is
+      //  one component, "@Tag^" is two. Pushes nest, hence the repetition.
+      bool bNamed = false;
+      while ( !P3Pmsg_IsPathDelimiter(lpszWorkingPath) ||
+              ( lpszWorkingPath[0] == T_StckDelim && !bNamed ) )
+      {
+        bNamed = bNamed || lpszWorkingPath[0] != T_StckDelim;
         strItemname += *lpszWorkingPath++;
+      }
       //  A component that is nothing but its delimiter carries an empty NAME,
       //  and for the descendant delimiters that is still malformed. '^'
       //  introduces no name at all -- it names the pushed item itself -- so it
