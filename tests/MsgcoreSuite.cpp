@@ -876,6 +876,40 @@ static void Test_Stack()
         TF_CHECK( P3Pmsg_SelectObject(&oHost.r_Object(), L"^.After" ).IsVoid());
     }
 
+    //  Pop drops the generation it restored from, and Drop() walks the stack:
+    //  P3PmsgField::Drop and P3PmsgList::Drop both end with
+    //  "if (IsStacked()) r_Stck().Drop()", and MsgStck::Drop zeroes every link
+    //  the rest of the way down without freeing a thing. So the popped item had
+    //  to be unlinked from the generation below it BEFORE being dropped, and it
+    //  was not: one pop severed everything under the generation it restored,
+    //  and leaked it. A single push and pop cannot see this -- there is nothing
+    //  below to sever -- and a single push and pop was the only shape anything
+    //  in the tree had ever exercised.
+    TF_CASE("a pop leaves the generations below it intact")
+    {
+        P3PmsgItem oHost(L"Gen0");
+        oHost.r_Stck().Push();
+        oHost = P3PmsgName(L"Gen1");
+        oHost.r_Stck().Push();
+        oHost = P3PmsgName(L"Gen2");
+        oHost.r_Stck().Push();
+        oHost = P3PmsgName(L"Gen3");
+
+        //  Three pushes: "^" is Gen2, "^^" is Gen1, "^^^" is Gen0.
+        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^^^").IsVoid());
+
+        oHost.r_Stck().Pop();                 // back to Gen2
+        TF_CHECK(oHost == L"Gen2");
+
+        //  Two generations should remain below it.
+        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^" ).IsVoid());
+        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^^").IsVoid());
+        P3PmsgObject o1 = P3Pmsg_SelectObject(&oHost.r_Object(), L"^" );
+        P3PmsgObject o2 = P3Pmsg_SelectObject(&oHost.r_Object(), L"^^");
+        if (!o1.IsVoid()) { P3PmsgField f = o1; TF_CHECK(f == L"Gen1"); }
+        if (!o2.IsVoid()) { P3PmsgField f = o2; TF_CHECK(f == L"Gen0"); }
+    }
+
     //  A field that was never pushed has no aStack to follow. That is an
     //  ordinary miss -- the same void P3PmsgObject every other broken path in
     //  P3Pmsg_SelectObjectRecurse returns -- and NOT the ASSERT(0) that used to
@@ -886,6 +920,184 @@ static void Test_Stack()
         P3PmsgItem oPlain(L"Plain");
         TF_CHECK(P3Pmsg_SelectObject(&oPlain.r_Object(), L"^").IsVoid());
         TF_CHECK(P3Pmsg_SelectObject(&oPlain.r_Object(), L"^.Child").IsVoid());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MsgStck : pushing a list and a vector
+// ---------------------------------------------------------------------------
+static void Test_StackContainers()
+{
+    //  MsgStck::Push() and Pop() were ASSERT(0) for both, so a list could not be
+    //  snapshotted at all and "List^" was a well-formed question with a
+    //  permanently empty answer. Nothing had to be written to allocate one:
+    //  MsgStck__AllocItem has dispatched on the item type since it was written,
+    //  sizing with P2PmsgList_SizeofItem and laying the block out with
+    //  P2PmsgList_InitItem. Push simply never called it for a list.
+    //
+    //  What the allocation does NOT carry is the payload -- VBLockList_Init
+    //  zeroes aFirst, aLast and nItems -- so the elements are walked over
+    //  separately, the way P3PmsgList::operator= does it.
+    TF_CASE("a list's elements survive a push and come back on the pop")
+    {
+        P3PmsgList oList(L"Numbers", P3PmsgData((int)0));
+        oList.AddListTail(P3PmsgData((int)1));
+        oList.AddListTail(P3PmsgData((int)2));
+        oList.AddListTail(P3PmsgData((int)3));
+
+        oList.r_Stck().Push();
+        TF_CHECK(oList.IsStacked());
+
+        //  Change the live list out of all recognition.
+        oList.Truncate();
+        oList.AddListTail(P3PmsgData((int)99));
+        TF_CHECK_EQ((int)oList.GetCount(), 1);
+
+        //  The snapshot still holds all three.
+        P3PmsgObject oWas = P3Pmsg_SelectObject(&oList.r_Object(), L"^");
+        TF_CHECK(!oWas.IsVoid());
+        if (!oWas.IsVoid())
+        {
+            TF_CHECK(oWas.IsList());
+            P3PmsgList oWasList(oWas);
+            TF_CHECK_EQ((int)oWasList.GetCount(), 3);
+            VBLaddr aPos = oWasList.GetHeadPos();
+            TF_CHECK(oWasList.GetNext(aPos).c_int() == 1);
+            TF_CHECK(oWasList.GetNext(aPos).c_int() == 2);
+            TF_CHECK(oWasList.GetNext(aPos).c_int() == 3);
+        }
+
+        oList.r_Stck().Pop();
+        TF_CHECK(!oList.IsStacked());
+        TF_CHECK_EQ((int)oList.GetCount(), 3);
+        VBLaddr aPos = oList.GetHeadPos();
+        TF_CHECK(oList.GetNext(aPos).c_int() == 1);
+        TF_CHECK(oList.GetNext(aPos).c_int() == 2);
+        TF_CHECK(oList.GetNext(aPos).c_int() == 3);
+        oList.AssertValid();
+    }
+
+    //  A list's name, attributes and descendants ride along too -- they are
+    //  VBLockItem header fields, the same ones a plain field pushes.
+    TF_CASE("a list pushes its name and attributes with it")
+    {
+        P3PmsgList oList(L"Numbers", P3PmsgData((int)0));
+        oList.AddListTail(P3PmsgData((int)7));
+        oList.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Unit");
+
+        oList.r_Stck().Push();
+        oList.r_name() = L"Numbers-Changed";
+
+        //  The '^' arm of the selector reaches the snapshot, and '@' keeps
+        //  working one step past it.
+        P3PmsgObject oWas = P3Pmsg_SelectObject(&oList.r_Object(), L"^");
+        TF_CHECK(!oWas.IsVoid());
+        if (!oWas.IsVoid())
+        {
+            P3PmsgField oWasField = oWas;
+            TF_CHECK(oWasField == L"Numbers");
+        }
+        TF_CHECK(!P3Pmsg_SelectObject(&oList.r_Object(), L"^@Unit").IsVoid());
+
+        oList.r_Stck().Pop();
+        TF_CHECK(oList == L"Numbers");
+        TF_CHECK(oList.r_Attr().Exists(L"Unit"));
+    }
+
+    //  A vector is the same story with an index instead of a chain. It needed
+    //  one thing a list did not: P3PmsgVect had no Drop() of its own, so Pop
+    //  would have reached P3PmsgField::Drop -- ASSERT(OBJ__IsField()), then a
+    //  free of the item block with every element block still allocated.
+    TF_CASE("a vector's elements survive a push and come back on the pop")
+    {
+        P3PmsgVect oVect(3, L"Payload", P3PmsgData((int)0));
+        oVect.r_data(0).c_int(10);
+        oVect.r_data(1).c_int(20);
+        oVect.r_data(2).c_int(30);
+
+        oVect.r_Stck().Push();
+        oVect.Truncate();
+        TF_CHECK_EQ((int)oVect.GetCount(), 0);
+
+        P3PmsgObject oWas = P3Pmsg_SelectObject(&oVect.r_Object(), L"^");
+        TF_CHECK(!oWas.IsVoid());
+        if (!oWas.IsVoid())
+        {
+            TF_CHECK(oWas.IsVect());
+            P3PmsgVect oWasVect(oWas);
+            TF_CHECK_EQ((int)oWasVect.GetCount(), 3);
+            TF_CHECK(oWasVect.r_data(0).c_int() == 10);
+            TF_CHECK(oWasVect.r_data(2).c_int() == 30);
+        }
+
+        oVect.r_Stck().Pop();
+        TF_CHECK_EQ((int)oVect.GetCount(), 3);
+        TF_CHECK(oVect.r_data(0).c_int() == 10);
+        TF_CHECK(oVect.r_data(1).c_int() == 20);
+        TF_CHECK(oVect.r_data(2).c_int() == 30);
+        oVect.AssertValid();
+    }
+
+    //  Pushes nest for a list exactly as they do for a field, and the '^^'
+    //  form reads the generation before the last.
+    TF_CASE("list pushes nest")
+    {
+        P3PmsgList oList(L"Numbers", P3PmsgData((int)0));
+        oList.AddListTail(P3PmsgData((int)1));       // gen 0: one element
+        oList.r_Stck().Push();
+        oList.AddListTail(P3PmsgData((int)2));       // gen 1: two
+        oList.r_Stck().Push();
+        oList.AddListTail(P3PmsgData((int)3));       // live: three
+
+        P3PmsgObject oOne = P3Pmsg_SelectObject(&oList.r_Object(), L"^" );
+        P3PmsgObject oTwo = P3Pmsg_SelectObject(&oList.r_Object(), L"^^");
+        TF_CHECK(!oOne.IsVoid());
+        TF_CHECK(!oTwo.IsVoid());
+        if (!oOne.IsVoid()) { P3PmsgList o(oOne); TF_CHECK_EQ((int)o.GetCount(), 2); }
+        if (!oTwo.IsVoid()) { P3PmsgList o(oTwo); TF_CHECK_EQ((int)o.GetCount(), 1); }
+
+        TF_CHECK(P3Pmsg_SelectObject(&oList.r_Object(), L"^^^").IsVoid());
+
+        //  And unwind all the way down.
+        oList.r_Stck().Pop();
+        TF_CHECK_EQ((int)oList.GetCount(), 2);
+        oList.r_Stck().Pop();
+        TF_CHECK_EQ((int)oList.GetCount(), 1);
+        TF_CHECK(!oList.IsStacked());
+    }
+
+    //  A pushed list inside a tree rather than standing on its own.
+    //
+    //  NOT reached with RootPath2Object, deliberately: it walks the path in a
+    //  P3PmsgItem, and P3PmsgField::operator=(const P3PmsgObject&) throws
+    //  "Invalid overloaded context" for anything that is not a field, so a root
+    //  path that lands on a list throws before it can answer. That is the one
+    //  item left in stack_paths.md section 7 and it is untouched here -- it
+    //  predates all of this, and it is the reason the descendant container is
+    //  asked directly below.
+    TF_CASE("a list pushed inside a tree keeps its own stack")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Root";
+        P3PmsgList oList(L"Numbers", P3PmsgData((int)0));
+        oList.AddListTail(P3PmsgData((int)5));
+        mgr.r_Desc() += oList;                       // PushBack deep-copies
+
+        P3PmsgObject oLive = mgr.r_Desc().SelectList(L"Numbers").r_Object();
+        TF_CHECK(!oLive.IsVoid());
+        TF_CHECK(oLive.IsList());
+
+        P3PmsgList oInTree(oLive);
+        oInTree.r_Stck().Push();
+        oInTree.AddListTail(P3PmsgData((int)6));
+        TF_CHECK_EQ((int)oInTree.GetCount(), 2);
+
+        //  The snapshot is a different object from the live one, and holds the
+        //  single element the list had when it was pushed.
+        P3PmsgObject oSnap = P3Pmsg_SelectObject(&oInTree.r_Object(), L"^");
+        TF_CHECK(!oSnap.IsVoid());
+        TF_CHECK(!(oSnap == oInTree.r_Object()));
+        if (!oSnap.IsVoid()) { P3PmsgList o(oSnap); TF_CHECK_EQ((int)o.GetCount(), 1); }
     }
 }
 
@@ -1045,11 +1257,11 @@ static void Test_ListPath()
         TF_CHECK( P3Pmsg_SelectObject(&oHost.r_Object(), L"Numbers.Nobody").IsVoid());
     }
 
-    //  MsgStck::Push() still asserts for a list, so there is never anything on
-    //  a list's aStack to follow. The question is legitimate all the same, and
-    //  the answer has to be the ordinary void -- not the assertion the list arm
-    //  used to raise for every component alike.
-    TF_CASE("'^' on a list is a miss, not an assertion")
+    //  A list that was never pushed has no aStack to follow, exactly as an
+    //  unpushed field does not. The answer is the ordinary void -- not the
+    //  assertion the list arm used to raise for every component alike. What a
+    //  PUSHED list answers is Test_StackContainers' business.
+    TF_CASE("'^' on an unpushed list is a miss, not an assertion")
     {
         P3PmsgList oList(L"Numbers", P3PmsgData((int)0));
         oList.AddListTail(P3PmsgData((int)1));
@@ -1832,6 +2044,7 @@ void RunMsgcoreSuite()
     Test_Curs_GotoKeyLifetime();
     Test_VBLockItem_UnknownType();
     Test_Stack();
+    Test_StackContainers();
     Test_RootPath();
     Test_ListPath();
     Test_Event();

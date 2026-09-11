@@ -89,6 +89,8 @@ class Msgcore_EXT P3PmsgVect : public P3PmsgField
         Delete ( int nElem );
       void
         Truncate ( );
+      virtual void
+        Drop ( );
       P3PmsgField&
         InsertAt ( int nElem, const P3PmsgField& oField );
       //P3PmsgNode&

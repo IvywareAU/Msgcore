@@ -6860,11 +6860,9 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
           return P3PmsgObject();       // Nothing pushed; selection path broken
         //  MsgStck keeps one accessor per item type and each THROWS if asked
         //  for the wrong one, so the type has to be re-tested here even though
-        //  everything above this line is type-agnostic. MsgStck::Push() still
-        //  asserts for lists and vectors -- only a field can be pushed today --
-        //  so IsStacked() above is what actually answers them, and it answers
-        //  false. Dispatching anyway costs a branch and means this arm is
-        //  already right on the day Push grows the other two.
+        //  everything above this line is type-agnostic. All three arms are live:
+        //  MsgStck::Push() pushes a list and a vector as well as a field, so
+        //  "List^" reaches a real snapshot with its elements in it.
         P3PmsgField& oStacked = pObject->IsList() ? (P3PmsgField&)oField.r_Stck().r_list()
                               : pObject->IsVect() ? (P3PmsgField&)oField.r_Stck().r_vect()
                               :                     (P3PmsgField&)oField.r_Stck().r_item();

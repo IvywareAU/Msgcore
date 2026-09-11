@@ -573,6 +573,56 @@ P3PmsgVect::Truncate ( )
 //
 
 //
+//  Memory management
+//  NOTES: P3PmsgList has had this since it was written; P3PmsgVect never did,
+//         so a vect fell through to P3PmsgField::Drop, which opens with
+//         ASSERT(OBJ__IsField()) -- false for a vect -- and then frees the item
+//         block WITHOUT Truncate(), leaking every element block and every
+//         aExtra continuation behind it. Nothing had dropped a vect before:
+//         P3PmsgDesc and P3PmsgAttr drop their children through the base class,
+//         and no vect had ever been a pushed stack generation because
+//         MsgStck::Push asserted for one. Popping a vect is what needed it.
+//       : The body is P3PmsgList::Drop's, with Truncate() doing the
+//         type-specific part -- it frees the element blocks through
+//         FreeElemDeep and then unchains the aExtra continuations.
+void
+P3PmsgVect::Drop ( )
+{
+    ASSERT(r_Object().IsVect());
+    if ( IsAttributed() )
+      r_Attr().Drop();
+    if ( IsDescendant() )
+      r_Desc().Drop();
+    if ( IsStacked() )
+      r_Stck().Drop();
+
+    P2PmsgField_DropName ( this );
+    P2PmsgField_DropData ( this );
+    Truncate ( );
+
+    // Isolate parent
+    VBLock *pVBLockParent = P2PmsgField_GetVBLockParent ( this );
+    if ( pVBLockParent )
+    {
+      if ( VBLock_IsAttr(pVBLockParent) )
+      {
+        VBLockAttr *pAttrParent = VBLock_pAttr(pVBLockParent);
+        P2PmsgAttr_UnLinkItem ( &m_oObject, pAttrParent, OBJ__VBLocknn );
+      }
+      else if ( VBLock_IsDesc(pVBLockParent) )
+      {
+        VBLockDesc *pDescParent = VBLock_pDesc(pVBLockParent);
+        P2PmsgDesc_UnLinkItem ( &m_oObject, pDescParent, OBJ__VBLocknn );
+      }
+      else
+        ASSERT(0);
+    }
+
+    // Tidy up, and
+    OBJ__Free ( OBJ__aVBLock );
+}
+
+//
 //  Allocate a fresh element item block and deep-copy oField into it.  The
 //  returned VBLock address is stored in the vect's aAlloc[] slot array.
 VBLaddr
