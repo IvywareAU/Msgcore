@@ -973,28 +973,25 @@ static void Test_StackDrop()
         TF_CHECK(oAgain.GetP2Pos() == posFirst);
     }
 
-    //  Drop has no recursion of its own any more: the Drop() it calls on the
-    //  generation ends with "if (IsStacked()) r_Stck().Drop()", so it re-enters
-    //  MsgStck::Drop for the next generation down and the chain unwinds itself.
-    //  This is what checks it reaches all of them and not just the head.
+    //  A stack more than one deep, which is where the ORDER of the frees
+    //  starts to matter. Drop releases the generations head first, and it has
+    //  to: they are pushed at ascending addresses, and the heap coalesces a
+    //  freed block only with its next physical neighbour. Deepest-first -- the
+    //  order an unwinding Drop() recursion would produce all by itself -- means
+    //  every block's neighbour is still allocated at the moment it is freed, so
+    //  nothing merges and only the highest of them is ever seen again.
     //
-    //  ASSERTED AS REACHABILITY, AND THIS CASE PASSES WITHOUT THE FIX -- said
-    //  plainly because the name would otherwise claim more than it checks. The
-    //  old Drop unlinked the whole chain correctly; what it did not do was free
-    //  it, and the case above is what measures that. This one guards the
-    //  traversal: that Drop still reaches every generation now that the walk is
-    //  the Drop() recursion rather than a loop of its own, and that the live
-    //  item comes through it unharmed.
+    //  Four rounds of push-push-push-Drop, reading the head generation's P2Pos:
     //
-    //  Address reuse is not asserted for three the way it is for one, and the
-    //  reason is the heap rather than this function: instrumented, all three
-    //  OBJ__Free calls run, the three blocks are contiguous 206-byte
-    //  allocations, and the next round still takes its first block from the END
-    //  of the coalesced span and then allocates fresh past it, leaving the rest
-    //  unused -- 206 bytes per generation below the head, every round. That is
-    //  a free-list characteristic and it deserves its own look; asserting reuse
-    //  here would be asserting the allocator's geometry rather than this fix.
-    TF_CASE("dropping a stack empties the whole chain")
+    //      deepest-first   949 1361 1773 2185     (+412 a round, and it is
+    //                                              linear -- two generations'
+    //                                              worth leaked every round)
+    //      head-first      949  949  949  949
+    //
+    //  So this case asserts that a round leaves the heap exactly as it found
+    //  it, which is the whole claim: every generation freed, and freed in an
+    //  order the allocator can actually take back.
+    TF_CASE("dropping a stack frees every generation, not just the head")
     {
         P2PmsgMgr mgr(VBLock_Addr64, 4096, 1u << 20);
         mgr.r_name() = L"Root";
@@ -1002,31 +999,37 @@ static void Test_StackDrop()
         mgr.r_Desc() += P3PmsgField(L"Host", DataBSTR08(L"payload"));
 
         P3PmsgField oHost(mgr.r_Desc().SelectObject(L"Host"));
+        P2Pos posRound0 = 0;
 
-        oHost.r_Stck().Push();
-        oHost.r_Stck().Push();
-        oHost.r_Stck().Push();
-        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^"  ).IsVoid());
-        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^^" ).IsVoid());
-        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^^^").IsVoid());
+        for (int nRound = 0; nRound < 4; nRound++)
+        {
+            oHost.r_Stck().Push();
+            oHost.r_Stck().Push();
+            oHost.r_Stck().Push();
 
-        oHost.r_Stck().Drop();
+            TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^"  ).IsVoid());
+            TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^^" ).IsVoid());
+            P3PmsgObject oHead = P3Pmsg_SelectObject(&oHost.r_Object(), L"^^^");
+            TF_CHECK(!oHead.IsVoid());
+            if (!oHead.IsVoid())
+            {
+                if (nRound == 0)
+                    posRound0 = oHead.GetP2Pos();
+                else
+                    TF_CHECK(oHead.GetP2Pos() == posRound0);   // no drift
+            }
 
-        //  Every generation gone, not merely the one the live item pointed at.
-        TF_CHECK(!oHost.IsStacked());
-        TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"^"  ).IsVoid());
-        TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"^^" ).IsVoid());
-        TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"^^^").IsVoid());
+            oHost.r_Stck().Drop();
 
-        //  And the live item is untouched by its own stack being dropped.
-        TF_CHECK(oHost == L"Host");
+            //  Every generation gone, not merely the one the live item pointed
+            //  at, and the live item itself untouched by it.
+            TF_CHECK(!oHost.IsStacked());
+            TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"^"  ).IsVoid());
+            TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"^^" ).IsVoid());
+            TF_CHECK(P3Pmsg_SelectObject(&oHost.r_Object(), L"^^^").IsVoid());
+            TF_CHECK(oHost == L"Host");
+        }
         oHost.AssertValid();
-
-        //  Pushing again still works on top of the emptied stack.
-        oHost.r_Stck().Push();
-        TF_CHECK(oHost.IsStacked());
-        TF_CHECK(!P3Pmsg_SelectObject(&oHost.r_Object(), L"^" ).IsVoid());
-        TF_CHECK( P3Pmsg_SelectObject(&oHost.r_Object(), L"^^").IsVoid());
     }
 
     //  Freed by the generation's OWN type. A pushed list is a list, and

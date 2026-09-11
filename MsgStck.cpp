@@ -519,11 +519,31 @@ MsgStck__AllocItem ( MsgStck *pThis, const P3PmsgField& oField )
 //         snapshot's P2Pos, Drop, push an identical item again, and the second
 //         snapshot landed 272 bytes further on instead of in the block the
 //         first one had vacated.
-//       : NO EXPLICIT RECURSION ANY MORE, and none is wanted: the Drop() below
-//         ends with "if (IsStacked()) r_Stck().Drop()", so it re-enters here for
-//         the next generation down and the chain unwinds itself. Unlinking
-//         BEFORE the free is what keeps that from looking at a block that has
-//         already gone.
+//       : HEAD FIRST, WHICH IS WHY THIS IS A LOOP AND NOT A RECURSION. Drop()
+//         ends with "if (IsStacked()) r_Stck().Drop()", so simply dropping the
+//         head would unwind the chain on its own -- deepest generation first.
+//         That is the one order this heap cannot reclaim. Generations are
+//         pushed at ascending addresses, and P2PmsgHeap_CollateIOMAGE merges a
+//         freed block only with its NEXT physical neighbour; there is no
+//         backward merge, because a VBHeap block carries no footer to find its
+//         predecessor by. Free deepest-first and every block's next neighbour
+//         is still allocated at the moment it is freed, so nothing coalesces:
+//         the list ends up holding N separate blocks, only the highest merges
+//         with the image tail, and that merged block then sits at the head of
+//         the free list and satisfies every subsequent request -- so the other
+//         N-1 are never looked at again. Free head-first and each block merges
+//         into the span above it that was freed a moment earlier, and the whole
+//         chain comes back.
+//         Measured, three generations, four rounds of push-push-push-Drop:
+//             deepest-first   949 1361 1773 2185   (+412 a round)
+//             head-first      949  949  949  949
+//         The loop therefore unlinks each generation before dropping it, which
+//         is also what stops Drop() recursing underneath us.
+//       : THIS IS ORDERING, NOT A HEAP FIX. Any caller that frees adjacent
+//         blocks low-to-high loses them the same way -- P3PmsgDesc::Truncate
+//         deletes child 0 repeatedly and drifts 824 bytes per truncate-refill
+//         round on five children, with no stack involved. Refer stack_paths.md
+//         section 8.
 //       : BY THE GENERATION'S OWN TYPE. A pushed list is a list, and
 //         P3PmsgField::Drop opens ASSERT(OBJ__IsField()) and frees the item
 //         block with no Truncate(), which would leak every element in it --
@@ -541,26 +561,33 @@ MsgStck::Drop ( )
     if ( !aStack )
       return;
 
-    // Unlink, then free
+    // Unlink, then free -- head first
     VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock), 0 );
 
     P2PmsgHANDLE hVBList = m_pP3PmsgField -> OBJ__hVBList;
-    VBLockItem  *pItem   = VBLock_pItem (
-                             (VBLock *)m_pP3PmsgField->r_Object().Msg2Phys(aStack) );
-    if ( VBLockItem_IsList(pItem) )
+    VBLaddr      aGen    = aStack;
+    while ( aGen )
     {
-      P3PmsgList oGen ( hVBList, aStack, 0 );
-      oGen.Drop ( );
-    }
-    else if ( VBLockItem_IsVect(pItem) )
-    {
-      P3PmsgVect oGen ( hVBList, aStack, 0 );
-      oGen.Drop ( );
-    }
-    else
-    {
-      P3PmsgField oGen ( hVBList, aStack, 0 );
-      oGen.Drop ( );
+      VBLock     *pGen  = (VBLock *)m_pP3PmsgField->r_Object().Msg2Phys(aGen);
+      VBLockItem *pItem = VBLock_pItem ( pGen );
+      VBLaddr     aNext = VBLockItem_GetStack ( pGen->oHdr.uVBLockDefs, pItem );
+      VBLockItem_SetStack ( pGen->oHdr.uVBLockDefs, pItem, 0 );
+      if ( VBLockItem_IsList(pItem) )
+      {
+        P3PmsgList oGen ( hVBList, aGen, 0 );
+        oGen.Drop ( );
+      }
+      else if ( VBLockItem_IsVect(pItem) )
+      {
+        P3PmsgVect oGen ( hVBList, aGen, 0 );
+        oGen.Drop ( );
+      }
+      else
+      {
+        P3PmsgField oGen ( hVBList, aGen, 0 );
+        oGen.Drop ( );
+      }
+      aGen = aNext;
     }
 }
 
