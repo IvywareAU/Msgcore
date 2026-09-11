@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §15 say how to
+> every line of output below was run against this tree; §6, §7 and §16 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -55,6 +55,8 @@ followed nowhere:
 | `P3Pmsg_SplitRootPath` | dropped a trailing `@` | **`.Root.Item@` answered `Item`, not its attributes (§12)** |
 | `RootPath2Object`, the walk itself | carried a `P3PmsgItem`, which only holds a field | **a list or a vector before the last component threw (§13)** |
 | `RootPath2Object`, a miss under one | never reached the name test | an ordinary miss came back as `"Invalid overloaded context"` (§13) |
+| `P3Pmsg_SplitRootPath`, inside the loop | knew about a bare `^`, not a bare `@` | **`.Root.Item@.Tag` was malformed where `@^.Tag` resolved (§14)** |
+| `P3Pmsg_SelectObjectRecurse`, attr arm | `ASSERT(0)` for a `@` on the collection | a debug assertion for a path only a caller could write (§14) |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
@@ -62,7 +64,7 @@ vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing the
 own half of that, §8), `dbfa789` (the half the tag could not reach, §8), `3f9ecfa`
 (collections, §9), `95f039c` (root paths carrying both, §10), `24c6a59` (the paths
 the library itself writes, §11), `d31f2c4` (the collection's own path, §12) and
-`8218904` (stepping off a container, §13).
+`8218904` (stepping off a container, §13) and `5d48e5a` (a bare `@` anywhere, §14).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -941,27 +943,77 @@ not in the snapshot's collection, and the component asking for it is spelled wit
 
 ### What did not change here
 
-A bare `@` is a component only at the **end** of a path. The clause §12 added is the one
-after the loop; inside it, a component one character long is still refused, so
-`.Store.BHP@.Currency` is malformed where `.Store.BHP@^.Currency` resolves. It is a
-redundant spelling — `@Currency` is the one everything writes — and making it legal is a
-change to the splitter, not to the walk.
+A bare `@` was still a component only at the **end** of a path, so
+`.Store.BHP@.Currency` stayed malformed while `.Store.BHP@^.Currency` — one step longer —
+resolved. That is the splitter's asymmetry rather than the walk's, and §14 is where it
+ends.
 
-## 14. What `^` still does not do
+## 14. A bare `@` was a component only at the end
+
+`^` and `@` are the two delimiters that carry no **name** of their own, and each names an
+object that has no other spelling: the pushed value, and the attribute collection. The
+splitter tests for that in two places — once inside its loop, once in the clause after it —
+and only the second of them knew about `@`.
+
+So a bare `@` was a component at the **end** of a path and nowhere else:
+
+```
+  .Store.BHP@             TRUE   [.BHP][@]
+  .Store.BHP@.Currency    FALSE  [.BHP]                   ← malformed
+  .Store.BHP@^.Currency   TRUE   [.BHP][@^][.Currency]
+```
+
+One step *longer* resolved — through the collection as it stood at the last push — while
+the shorter spelling of the same two steps was refused. The two clauses now ask one
+question, `P3Pmsg__IsBareComponent`, and a lone **descendant** delimiter stays malformed:
+`.` always introduces a name, and in `.Root.Item.@Tag` there isn't one.
+
+### Measured
+
+```
+                          before                      after
+  .Store.BHP@.Currency    THREW 'Malformed ...'       Currency pos=470   ← == @Currency
+  .Store.BHP@.            THREW 'Malformed ...'       (attr coll) pos=423
+  .Store@.Venue           THREW 'Malformed ...'       Venue pos=845      ← == .Store@Venue
+  .Store.BHP@.Nobody      THREW 'Malformed ...'       THREW 'Path to object does not exist'
+  .Store.RIO@.Currency    THREW 'Malformed ...'       (void)
+  .Store.BHP..Currency    THREW 'Malformed ...'       THREW 'Malformed object path'
+  .Store.BHP.@Currency    THREW 'Malformed ...'       THREW 'Malformed object path'
+```
+
+The miss rules are the component's own delimiter's, unchanged (§13): `.Nobody` throws because
+it is spelled with a `.`, and `.Store.RIO@.Currency` answers void because it is the **`@`**
+that misses — `RIO` has no collection at all.
+
+`.Store@.Venue` is worth its own line. It is the only root-path spelling that reaches one of
+the **root's** attributes through its collection, and until now the root's collection could
+only be named at the very end of a path, where there is nothing left to ask it for.
+
+### The assertion it uncovered
+
+Legalising `@` makes `Item@@Tag` spellable, so it needs an answer. A collection has no
+attributes of its own — it is not an item; a `VBLockAttr` carries `aParent` and its members
+and nothing else — so the answer is void. The selector's attribute arm raised `ASSERT(0)`
+first, which is a debug-build event for something only a caller could have written.
+
+That is §9's rule again, and the same shape as the never-created collection it found: what a
+caller spells is the caller's business, and only what the library itself could not have
+meant is an assertion. Nor is it a new path — `Item@^@Tag` splits cleanly without any of
+this, and asserted on its way to exactly this void. The probe's assertion count goes 1 to 0.
+
+## 15. What `^` still does not do
 
 - **A descendant collection has no path.** There is no `P3PmsgDesc` overload of
   `P3Pmsg_GetPath`, and no spelling for one: a trailing `.` is dropped, and it cannot stop
   being dropped, because `.` is the root delimiter too and `.Root.` has always meant the
   root. The attribute collection got a path (§12) because `@` is unambiguous at the end of a
-  path and `.` is not. `Item@^` reaches a pushed attribute collection; the descendant one is
-  reachable only by handing the collection to `P3Pmsg_SelectObject` directly, as
-  `Test_CollectionStack` does.
-- **A root path cannot spell a bare `@` part way along.** `.Root.Item@.Tag` is malformed,
-  because the splitter refuses a one-character component anywhere but at the end (§13).
-  `@Tag` is the spelling everything writes and `@^.Tag` resolves, so nothing is unreachable
-  by it; the asymmetry is the splitter's, and fixing it is the splitter's change to make.
+  path and `.` is not, and §14 is where that distinction stopped being about the end of a
+  path at all: `@` stands alone *anywhere* because it introduces no name, and `.` stands
+  alone nowhere because it always does. `Item@^` reaches a pushed attribute collection; the
+  descendant one is reachable only by handing the collection to `P3Pmsg_SelectObject`
+  directly, as `Test_CollectionStack` does.
 
-## 15. Reproducing this document
+## 16. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
