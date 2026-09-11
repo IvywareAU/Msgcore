@@ -2229,6 +2229,154 @@ static void Test_P2Pos2Path()
 }
 
 // ---------------------------------------------------------------------------
+// '.' with no NAME after it is bare wherever it stands
+// ---------------------------------------------------------------------------
+static void Test_BareDotCommutes()
+{
+    //  §9's rule is that '^' commutes with '@' and with '.'. It did for '@':
+    //  "Item@^" and "Item^@" both name the attribute collection inside the
+    //  snapshot. For '.' only one direction worked -- "Item^." named the
+    //  snapshot's descendant collection and "Item.^" named something else.
+    //
+    //  Three places read "a '.' at the END of the path" where the rule is "a
+    //  '.' with no NAME after it": the root walk's strip, the selector's
+    //  wrapper, and the field arm of the recurse. The splitter absorbs a
+    //  following '^' into a component (it does the same for "@^"), so
+    //  ".Store.BHP.^" reaches the walk as ".^" and was stripped to "^".
+    TF_CASE("'.^' names the snapshot's descendant collection, as '^.' does")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Desc(P3PmsgField::AttrCMD_Create);
+        oInst.r_Desc() += P3PmsgField(L"Last");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        oLive.r_Stck().Push();
+        oLive.r_Desc() += P3PmsgField(L"Close");        // live only
+
+        P3PmsgField oSnap = oLive.SelectObject(L"^");
+        TF_CHECK(!oSnap.IsVoid());
+        const P2Pos posSnapDesc = oSnap.r_Desc().r_Object().GetP2Pos();
+        TF_CHECK(posSnapDesc != 0);
+
+        //  The root path. It used to answer the snapshot ITEM -- two levels
+        //  from the object "^." answers by the same reasoning.
+        P3PmsgObject oRoot = mgr.RootPath2Object(L".Store.BHP.^");
+        TF_CHECK(oRoot.IsDesc());
+        TF_CHECK(oRoot.GetP2Pos() == posSnapDesc);
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP^.").GetP2Pos() == posSnapDesc);
+
+        //  The object path. It used to be void: the wrapper read the leading
+        //  '.' as "this component names the object you are standing on",
+        //  ParseObjectPath stopped on the '^' with an empty name, and the
+        //  empty name was matched against "BHP".
+        P3PmsgObject oFrom = oLive.r_Object();
+        P3PmsgObject oSel  = P3Pmsg_SelectObject(&oFrom, L".^");
+        TF_CHECK(oSel.IsDesc());
+        TF_CHECK(oSel.GetP2Pos() == posSnapDesc);
+        TF_CHECK(P3Pmsg_SelectObject(&oFrom, L"^.").GetP2Pos() == posSnapDesc);
+
+        //  And the collection the snapshot carries is the one taken AT the
+        //  push, which is what makes this worth naming at all: Close went in
+        //  afterwards and is not in it.
+        TF_CHECK(!P3Pmsg_SelectObject(&oSel, L"Last").IsVoid());
+        TF_CHECK(P3Pmsg_SelectObject(&oSel, L"Close").IsVoid());
+    }
+
+    //  A root path and an object path are two spellings of one question. The
+    //  walk strips a name-carrying '.' off each component and hands the rest
+    //  to P3Pmsg_SelectObject, so the two agree by construction -- except
+    //  where a bare '.' was not recognised as bare, and then the walk answered
+    //  and the object path did not.
+    TF_CASE("a root path and an object path agree on every bare-'.' spelling")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        oInst.r_Desc(P3PmsgField::AttrCMD_Create);
+        oInst.r_Desc() += P3PmsgField(L"Last");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        oLive.r_Stck().Push();
+        oLive.r_Desc() += P3PmsgField(L"Close");
+
+        P3PmsgObject oFrom = oLive.r_Object();
+
+        //  Every suffix begins with a delimiter, so ".Store.BHP" + suffix is a
+        //  continuation of the path and not a longer item name.
+        static LPCWSTR aSuffix[] = {
+            L".", L"@", L"^", L".^", L"^.", L"@^", L"^@",
+            L"..Last", L".^.Last", L"^.Last", L"..Close", L"@Currency",
+            L"@^Currency", L"^@Currency",
+        };
+
+        for (size_t i = 0; i < sizeof(aSuffix) / sizeof(aSuffix[0]); ++i)
+        {
+            const CString strPath = CString(L".Store.BHP") + aSuffix[i];
+            P3PmsgObject oRoot = mgr.RootPath2Object(strPath);
+            P3PmsgObject oSel  = P3Pmsg_SelectObject(&oFrom, aSuffix[i]);
+            TF_CHECK(!oRoot.IsVoid());
+            TF_CHECK(!oSel.IsVoid());
+            TF_CHECK(oRoot.GetP2Pos() == oSel.GetP2Pos());
+        }
+
+        //  ".Last" is the one spelling that legitimately differs, and it is
+        //  not this section's business: a leading '.' on an OBJECT path asks
+        //  "is the object I am standing on called this", which BHP is not. The
+        //  walk strips a name-carrying '.' before selecting, so the same
+        //  characters descend there. Pinned so the difference stays deliberate.
+        TF_CHECK(!mgr.RootPath2Object(L".Store.BHP.Last").IsVoid());
+        TF_CHECK(P3Pmsg_SelectObject(&oFrom, L".Last").IsVoid());
+    }
+
+    //  Legalising a bare '.' part way along makes more spellings well-formed,
+    //  and each needs a defined answer. A collection is not an item: it has
+    //  neither a descendant collection nor an attribute one of its own, which
+    //  is what "Item@." and "Item@@" already answered (§15). The '.' spellings
+    //  now answer the same way -- and by the same route, rather than by two.
+    TF_CASE("a collection still has no collection of its own, by either spelling")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        oInst.r_Desc(P3PmsgField::AttrCMD_Create);
+        oInst.r_Desc() += P3PmsgField(L"Last");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        oLive.r_Stck().Push();
+        P3PmsgObject oFrom = oLive.r_Object();
+
+        static LPCWSTR aVoid[] = { L"..", L".@", L"@.", L"@@", L"^^", L".^." };
+        for (size_t i = 0; i < sizeof(aVoid) / sizeof(aVoid[0]); ++i)
+        {
+            TF_CHECK(mgr.RootPath2Object(CString(L".Store.BHP") + aVoid[i]).IsVoid());
+            TF_CHECK(P3Pmsg_SelectObject(&oFrom, aVoid[i]).IsVoid());
+        }
+
+        //  ".^." used to answer the snapshot's descendant collection through
+        //  the root path -- but only because ".^" meant the snapshot ITEM, so
+        //  the trailing '.' was asking an ITEM for its collection. With ".^"
+        //  naming the collection, the trailing '.' asks a COLLECTION for one,
+        //  and that is the void every line above reports. The object is not
+        //  lost: it is what ".^" and "^." now both answer.
+        const P2Pos posSnapDesc = mgr.RootPath2Object(L".Store.BHP^.").GetP2Pos();
+        TF_CHECK(posSnapDesc != 0);
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP.^").GetP2Pos() == posSnapDesc);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3Pmsg_SplitRootPath : a bare '@' is a component wherever it stands
 // ---------------------------------------------------------------------------
 static void Test_BareAttrComponent()
@@ -3841,6 +3989,7 @@ void RunMsgcoreSuite()
     Test_BareAttrComponent();
     Test_DescCollectionPath();
     Test_P2Pos2Path();
+    Test_BareDotCommutes();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();

@@ -6967,18 +6967,35 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
     if ( pObject->IsField() || pObject->IsList() || pObject->IsVect() )
     {
       P3PmsgField oField = *pObject;
-      //  '.' with nothing after it names the DESCENDANT collection, exactly as
+      //  '.' with no NAME after it names the DESCENDANT collection, exactly as
       //  '@' with nothing after it names the attribute one below. Both used to
       //  re-enter with an empty path, look for a name that was not there and
       //  answer void (§15).
+      //
+      //  "No name after it" is not the same as "nothing after it", and the
+      //  difference is this arm's half of §17. The '@' arm below hands the
+      //  REST of the path to the attribute collection, which is why "Item@^"
+      //  reaches the collection's snapshot. This one handed the rest back to
+      //  the ITEM, so "Item.^" re-entered here and took the '^' arm -- the
+      //  item's own snapshot, not the collection's. Two spellings a single
+      //  step apart, meaning objects two levels apart, and only one of them
+      //  the one §9 predicts.
+      //
+      //  So a following DELIMITER goes to the collection and a following NAME
+      //  goes back to the item. The second is not a detour: "Item.Last" wants
+      //  a descendant by name, and the field arm's own tail already looks one
+      //  up -- r_Desc().r_Curs().Goto -- so both routes land on the same
+      //  object and the shorter one is left alone.
       if ( *lpszObjectPath == T_DescDelim )
       {
-        if ( *++lpszObjectPath == 0 )
+        if ( P3Pmsg_IsPathDelimiter ( ++lpszObjectPath ) )
         {
           P3PmsgObject oDescColl = oField.r_Desc().r_Object();
           if ( oDescColl.GetVBLocknn() == 0 )
             return P3PmsgObject();     // No descendants; selection path broken
-          return oDescColl;
+          if ( *lpszObjectPath == 0 )
+            return oDescColl;
+          return P3Pmsg_SelectObjectRecurse ( &oDescColl, lpszObjectPath );
         }
         return P3Pmsg_SelectObjectRecurse ( &oField.r_Object(), lpszObjectPath );
         //lpszObjectPath = ParseObjectPath ( ++lpszObjectPath, nsObjectname, ARRAYSIZE(nsObjectname) );
@@ -7210,7 +7227,18 @@ P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath )
     //  instruction, naming the descendant collection (§15). Sent through the
     //  matching below it was compared against the item's real name, missed,
     //  and came back void.
-    if ( *lpszObjectPath != T_DescDelim || lpszObjectPath[1] == 0 )
+    //
+    //  AND THE SAME IS TRUE OF ANY '.' WITH NO NAME AFTER IT, not only one at
+    //  the end of the path. ".^" is a bare '.' and then a '^'; the test here
+    //  was "is the path longer than one character", so ".^" took the matching
+    //  route, ParseObjectPath stopped on the '^' with an empty name, and the
+    //  empty name was compared against the item's real one. Void, for the one
+    //  spelling §9's commuting rule most obviously predicts (§17).
+    //
+    //  P3Pmsg_IsPathDelimiter answers TRUE for the terminator as well as for
+    //  the five delimiters, so it is both halves of that question at once.
+    if ( *lpszObjectPath != T_DescDelim ||
+         P3Pmsg_IsPathDelimiter ( lpszObjectPath + 1 ) )
       return P3Pmsg_SelectObjectRecurse ( pObject, lpszObjectPath );
     lpszObjectPath++;
     TNAME nsObjectname[MAX_TNAME_SIZE] = {0};

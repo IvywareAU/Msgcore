@@ -956,7 +956,18 @@ P2PmsgMgr::RootPath2Object ( LPCWSTR lpszObjectPath )
         //  exactly as it is for '@' and '^', which is why those two were never
         //  stripped. Stripped anyway, a bare '.' became the empty string, and
         //  P3Pmsg_SelectObject looked for a descendant with no name.
-        if ( lpszItemName[1] != 0 &&
+        //
+        //  A NAME, and not merely SOMETHING. The test used to be "not the end of
+        //  the component", which is the same thing only where the component is
+        //  '.' and nothing else. The splitter seeds a component with the
+        //  delimiter that introduces it and absorbs a following '^' (it does the
+        //  same for "@^", §10), so ".Store.BHP.^" arrives here as ".^" -- a bare
+        //  '.' with the stack delimiter after it. Stripped to "^", it selected
+        //  the ITEM's snapshot, where "@^" one line of reasoning away selects the
+        //  attribute COLLECTION's. §9's rule is that '^' commutes with '@' and
+        //  with '.'; "^." already answered the snapshot's descendant collection
+        //  and ".^" answered something else entirely (§17).
+        if ( !P3Pmsg_IsPathDelimiter ( lpszItemName + 1 ) &&
              ( lpszItemName[0] == T_DescDelim ||
                lpszItemName[0] == T_BackSlash ||
                lpszItemName[0] == T_ForeSlash    ) )
