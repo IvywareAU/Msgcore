@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-12. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §24 say how to
+> every line of output below was run against this tree; §6, §7 and §25 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -86,6 +86,7 @@ followed nowhere:
 | `RehomeInlineItem`, its first guard | "already on a heap" — the heap, not the block | **an inline item with a heap was never rehomed (§22)** |
 | `P3PmsgObject`'s copy constructor, and `Connect` | shared when there was a heap | **a copy took an address INSIDE the source object, and outlived it (§22)** |
 | `AllocVBLock`, making an object its first heap | left the item block behind | **the state that made all three wrong, created once and never closed (§22)** |
+| The value arm of that same copy constructor, and of `Connect` | "copy the block" — the block, not the value | **two standalone values named ONE payload, and the first to retype freed it (§23)** |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
@@ -97,7 +98,7 @@ the library itself writes, §11), `d31f2c4` (the collection's own path, §12) an
 `2a03161` (the descendant collection, and the rule stated once, §15) and `0888659`
 (one arm per block kind, §16) and `c0409cb` (a bare `.` wherever it stands, §17) and `2de26ac`
 (the root marker only where a path is rooted, §18) and `48ff002` (a floating item is one
-object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21) and `da22f93` (where the block is, not whether there is a heap, §22).
+object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21) and `da22f93` (where the block is, not whether there is a heap, §22) and `f77bb97` (copying the value and not the address of one, §23).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -1780,7 +1781,105 @@ and a fourth case, `a handle outlives the frame that built it`, raises three int
 assertions — `MsgVBHeap.cpp(1396)`, `P2Pmsg.cpp(2853)`, `P2PmsgVBLock.cpp(647)` — and
 then **hangs the runner**, so the run does not finish at all.
 
-## 23. What is left
+## 23. A value copy copied the block, not what the block pointed at
+
+§22 left the copy constructor's value arm looking right: the block is duplicated with a
+memcpy and the copy addresses ITS OWN array rather than the source's. That is a value copy
+only while the whole value fits in the block.
+
+**A value that outgrows its block does not stay in it.** `P2PmsgObject_NewVBLockData` puts
+the payload in a SECOND block on the heap and leaves a CHAIN POINTER behind in the first;
+`P3PmsgName_ResizeName` does the same for a name. So from the first growth on, what the
+memcpy copies is an address:
+
+```
+  source chain   0x1e2df912dd0
+  copy   chain   0x1e2df912dd0
+  one block?     ** YES **
+  source payload 0x000001E2DF912DD9
+  copy   payload 0x000001E2DF912DD9
+  wrote through the copy; the source reads it back? ** YES -- ONE PAYLOAD **
+```
+
+**Which is the same mistake §22 fixed one level up, and not the same defect.** §22's copy
+addressed the SOURCE OBJECT and dangled the moment the source died. This addresses a heap
+that both of them hold open — the handle is AddRef'd before the memcpy — so it stays
+readable, and nothing faults. What it does instead is alias: a write through either is
+seen by the other, and the first of the two to retype hands the block back to the heap
+while the other still chains to it. `P2PmsgObject_NewVBLockData` walks the chain and
+`Free()`s what it finds, which is exactly how a value gets retyped.
+
+### The heap is meant to be shared; the block is not
+
+`PrivatiseInlineChain` runs where the two callers memcpy. It walks whichever chain the
+inline block carries — `VBLock_Data` or `VBLock_Name`, the only two kinds of inline block
+that are not items — and gives this object its own copy of every link.
+
+- **On the heap they already share, not a new one.** The handle was AddRef'd by the caller
+  before this runs and outlives either object on its own, so the payload stays where every
+  accessor already resolves it. Making a second heap would have been a second answer to a
+  question the AddRef had already answered.
+- **The whole chain, not its first link.** Chaining is usually a single step —
+  `NewVBLockData` collapses what it finds before adding one — but every reader in the file
+  loops, so this loops.
+- **Items do not come here.** An inline ITEM is rehomed out of the object before either
+  caller reaches its value arm (§22), and an object whose block is already on a heap is
+  sharing that block deliberately: that is what a handle IS.
+
+### The measurement
+
+```
+  -- a grown VALUE, copied --
+     the source still chains somewhere            ok
+     the copy chains somewhere too                ok
+     and it is not the source's block             ok
+     the payload is the same payload              ok
+     the source reads what it always did          ok
+
+  -- a value grown twice, then copied --          ok / ok / ok
+  -- the copy outlives the source --              ok / ok / ok
+  -- a grown NAME, copied --                      ok / ok / ok
+
+  failures=0 asserts=0
+```
+
+Unshared is only half of what a value copy owes. The other half is the byte-for-byte row
+in each of those four sections — `the payload is the same payload`, and its equivalent in
+the three the listing abbreviates — and a fix that merely stopped sharing would pass every
+`not the source's block` row and fail all four of those.
+
+Nine solutions in both configurations: **0 errors**. The suite 199 cases static and 194
+through the DLL; `MscsUnitTests` 125; C4; the golden image byte-identical at 4104 bytes;
+§17's agreement sweep 29 agree 0 differ; §18, §19 and §22 unchanged; Chartboard 0 errors and
+its four drivers 17, 13, 24 and 15 checks, none failing.
+
+Against the unfixed library the suite builds — nothing new is asked of the library, which
+is the difference from §22 — and four cases fail:
+
+```
+  FAIL [a grown value copies its payload, not the address of one]
+  FAIL [assignment gives the copy its own payload too]
+  FAIL [a value grown twice copies what it ended up with]
+  FAIL [the copy keeps its payload after the source is gone]
+```
+
+### What reaches it
+
+Not much, and that has not changed. `P3PmsgData`'s own copy constructor is a deep one and
+does not go through `P3PmsgObject`'s; `P3PmsgName` never copies its object at all. The arm
+is reached by copying a value's `P3PmsgObject` directly, which is what `p_Object()` is for
+and what the cases above do. The defect was recorded, and recorded as unreached, in the
+*what is left* list that followed §22. It is fixed here on the same terms §22's was: the
+arm exists, it is the arm that says what a value copy means in this library, and it was
+not copying the value.
+
+Five of the seven cases reach below the exported surface — where a value keeps its payload
+is a fact about the block, and the block navigation is internal, declared in the library's
+headers but not marked `Msgcore_EXT`. Those five build in the static configuration only,
+which is the whole of the 199/194 difference above. The alternative was to export three
+functions for a test.
+
+## 24. What is left
 
 - **`IsInline` says where an item is, not whose it is.** §22's table above has the one row
   where that matters: a duplicate that has since grown answers `false` and still reaches
@@ -1788,13 +1887,12 @@ then **hangs the runner**, so the run does not finish at all.
   that closes it is §21's `==`. A type that carried the distinction in its own right would
   be a different library.
 
-- **A `P3PmsgData` that has grown is still copied shallowly.** The copy constructor's
-  value arm duplicates the inline block and AddRefs the heap the block's payload lives
-  on, so two standalone values can name one payload. That is no longer a DANGLE — which
-  is what §22 fixed — but it is not a deep copy either. Nothing in this tree reaches it:
-  `P3PmsgData`'s own copy constructor is a deep one and does not go through
-  `P3PmsgObject`'s, so the arm is only reachable by handing a value's object to
-  `P3PmsgField ( const P3PmsgObject& )` directly. Recorded, not chased.
+- **A value copy walks the chain; a value copy of a value copy walks it again.** §23
+  duplicates every chained block at every copy, which is what a value copy means and also
+  what it costs: copying a grown value is now an allocation and a memcpy per link rather
+  than a pointer assignment. One link is the usual case and the cases above measure no
+  more than that. If a caller is ever found copying grown values in a loop, the answer is
+  to hand it a handle — `r_Object()` — and not to make the value copy shallow again.
 
 - **`P2PSafePtr` carries the same shape and was not touched.** It declares
   `operator SafePtrType*()` and `operator bool()` together, so `int n = ptr` compiles
@@ -1804,10 +1902,10 @@ then **hangs the runner**, so the run does not finish at all.
   Msgcore object, so it is recorded here and left alone.
 
 Nothing else from this investigation is outstanding. That is not a claim that the grammar
-is without defect — only that every case these twenty-two sections measured has an answer,
+is without defect — only that every case these twenty-three sections measured has an answer,
 and that the answer is pinned by a test.
 
-## 24. Reproducing this document
+## 25. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
