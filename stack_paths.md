@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-12. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §36 say how to
+> every line of output below was run against this tree; §6, §7 and §40 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -3358,91 +3358,870 @@ members and this section has done for six. Doing it as a side effect of a `^`
 investigation would be the same mistake in the other direction. What this section owes the
 next reader is the measurement, and the measurement is above.
 
-## 35. What is left
+## 35. The gate did not fail to silence the assertion -- it caused it
 
-- **`check_asserts.ps1` fails, and its baseline has been stale since `4d39d0d` -- the same
-  commit §33 found `exports-cxx-win32.manifest` frozen at.** Three ceilings were banked
-  that day; §29 re-measured one, §33 re-measured the second, and this is the third.
-  `callwrap` has risen 245 to 248 and `predicate` 192 to 195 across the thirty-six commits
-  that have touched a non-test source since, while `marker` has FALLEN 216 to 208 and the
-  fall was never banked -- which the file's own header says is the worse half, because "the
-  stale ceiling silently re-admits everything between the two numbers". Nothing in §31 to
-  §34 adds an ASSERT anywhere: the counts are identical against a pristine worktree of
-  `4e897f7`, which is how this was told apart from our own work. It is not re-banked here,
-  because `-Regenerate` would bank six rises nobody has looked at and retire a notice that
-  is doing its job -- the same reason §34 declined to tighten the drift matcher. Each of the
-  six wants the argument the register's item 19 asks for: if the condition matters in
-  Release, throw; if it does not, do not assert it either.
+**§32 recorded four images that assert on their way to being refused, and read the defect
+one way round.** It looked like an assertion the gate had failed to suppress: a developer aid
+on the trusted path, reached by accident from the untrusted one, firing about a structure the
+loader was a moment from rejecting by name. It is the other way round. Every check INSIDE
+`P2PmsgHeap_AssertVBlocksBSTRio` is already gate-aware -- `VBHEAP_ASSERT0` and `VBHEAP_DIAG`
+(`MsgVBHeap.cpp:1687`, `:1690`) stay silent inside a gate and feed `bResult` instead -- so
+within the gate the walk said nothing, exactly as designed, and handed its verdict to one
+ungated `ASSERT` on its return value. Outside a gate that same walk REPAIRS the image's key
+block, answers true, and the assertion never fires. The gate is what made it fire: it did not
+leave noise in place, it created noise, on precisely the images it was built to reject.
 
-- **The untrusted BSTRio load path asserts on its way to refusing.** §32 found it while
-  walking the fuzz corpus: `P2PmsgHeap_CreateBSTRio` ends in
-  `ASSERT(P2PmsgHeap_AssertVBlocksBSTRio(pHandle))` (`MsgVBHeap.cpp:3609`), and the
-  untrusted overload calls that function before running the same walk again as its real
-  gate. Four of the nineteen images in hand fire it -- `f11_collate_nogrow.dat`,
-  `f2_walk_oob.dat`, `c4_bstrio_honest.dat`, `c4_f2_walk_oob.dat` -- and every one of them
-  is then refused correctly and by name. So the defect is the assertion and the doubled
-  walk, not the outcome: a Debug consumer handed a corrupt image stops in a dialog on a
-  structure the library was about to reject. It is §30's shape on the load path. It is not
-  closed here because suppressing an assertion inside a gate, with
-  `P2PmsgHeap_UntrustedGate` in the middle of it, wants its own teeth rather than a change
-  made in passing. The IOMAGE twin (`MsgVBHeap.cpp:3330`, `:3438`) has the same two call
-  sites and has not been measured.
+### The four entry points, measured rather than recalled
 
-- **`check_api_drift.ps1` scores 43 of its 116 bindings by a prefix fallback, and 28 of
-  those at a bare accessor root.** §34 measured it and the check now prints both numbers on
-  every run. `P3PmsgList::GetHeadPos -> msgcore_list_get_count` is not a binding, and
-  neither are the other 27. The honest bound count is nearer 88, so the UNTRIAGED backlog
-  is LARGER than the 159 the same line prints. Tightening the matcher turns 28 silent
-  passes into 28 separate questions about the C API in one commit, which is the work §29
-  declined for two members and §34 did for six; it is a session about the C API and not
-  about `^`.
+Two arms, three overloads each, and only one of the six had the defect. Each arm has a
+builder that takes sizes (`MsgVBHeap.cpp:3018`, `:3368`), a length-validated entry point for
+untrusted bytes (`:3078`, `:3443`) and a single-argument delegate the second calls (`:3177`,
+`:3553`). On both arms the untrusted overload opens a `P2PmsgHeap_UntrustedGate` (`:3116`,
+`:3517`), calls the delegate, and then runs the walk itself as the real gate, throwing on a
+false answer (`:3155`, `:3535`). Five of the six ASSERT sites were already gate-aware or
+unreachable from a gate; the sixth, the last line of `P2PmsgHeap_CreateBSTRio(VBListBSTRio*)`
+at `:3609`, was not.
 
-- **`P3PmsgField::IsSole` and `IsInline` are not on the flat surface, and §29's triage
-  reason said one of them was.** That sentence is corrected in `api-drift.allow` and the
-  members are two of §34's 28. Whether the surface SHOULD carry them is now an open
-  question rather than a settled premise: `msgcore_field_is_sole(MsgFieldHandle)` would be
-  signature-identical to the nine `msgcore_field_is_*` predicates already there, and adding
-  it is an addition to the supported ABI, which bumps `Msgcore_version.h` in the same
-  commit. That is a versioning decision and is left to one.
+The gate opens BEFORE the delegate on both arms, not around the walks that follow it, and
+that position is what put the delegate's assertion inside it. §39 named the IOMAGE twin as
+`MsgVBHeap.cpp:3330` and `:3438` and neither is it: `:3330` sits in the commented-out block
+between `CreateIOMAGE(pIOmage)` and `CreateSYS`, and `:3438` is the BSTRio BUILDER, already
+guarded. The twin's real call sites are `:3287` and `:3288` and have carried the guard all
+along -- the entry was right that the arm was unmeasured and wrong about where to look.
 
-- **`P3PmsgList::Drop` is decided nowhere and cannot be seen.** It is the same member as
-  `P3PmsgVect::Drop` under the same reason §34 wrote, and it carries no allowlist line on
-  purpose, because the matcher scores it bound against `msgcore_list_drop_head` and a line
-  would be reported as redundant. Its reason is written into the comment block above the
-  `Drop` group, ready to be promoted to a rule line the day the entry above this one is
-  closed.
+### Measuring the twin, with a control for the guard itself
+
+Reading a guard does not establish that it does anything, so §40's probe grew a second
+phase: every image that gets past the untrusted entry point's length and classification
+gates is opened AGAIN through the trusted single-argument overload, with no gate open, and
+the assertions counted separately. That turns "the guard is present" into "the guard
+suppresses N assertions on this file".
+
+```
+TRUSTED-DELEGATE: tests\out\c4_f3_iomage_walk.iom
+  asserts trapped by the trusted delegate: 11
+  AssertValid*(handle)=true  AssertVBlocks*(handle)=false  (+10 asserts)
+```
+
+Eleven. Through the untrusted entry point the same file reports `asserts on this file: 0`
+and `IOMAGE block structure is corrupt`. The IOMAGE guard is load-bearing on exactly the
+image that would otherwise exercise it: that arm does not have the defect, it has the fix.
+The BSTRio arm is the same shape with the guard missing -- the F3 lesson running the other
+way, the pattern fixed on one branch and the other left.
+
+### The fix, and the call sites that decide how far it goes
+
+One line, matched to the twin (`MsgVBHeap.cpp:3634`):
+
+```cpp
+    if ( !P2PmsgHeap_InUntrustedGate() )
+      ASSERT(P2PmsgHeap_AssertVBlocksBSTRio(pHandle));
+```
+
+The assertion is KEPT, and the distinction the entry asked to be shown rather than asserted
+is real, though not for the reason it sounded like. There is no live trusted caller of
+`P2PmsgHeap_CreateBSTRio(VBListBSTRio*)` in this repository at all: the only in-tree call is
+`MsgVBHeap.cpp:3519`, the untrusted overload's own delegation, and the one in
+`P2PmsgMgr.cpp:340` sits inside the `Load` that lines 290-371 comment out. The overload is
+on the header surface (`MsgVBHeap.h:132`), so external callers may hold one, and for them
+the walk is what it always was -- a bug in the caller, worth stopping on. Removing the
+assertion would take that away from every consumer to fix a defect that exists only inside
+the gate. Gating it takes it away from nobody.
+
+**And the doubled walk goes with it.** Inside a gate the delegate no longer walks at all, so
+the load walks the image once instead of twice, and the surviving walk at `:3535` is the
+only STRUCTURAL gate on that path -- worth saying plainly, because `:3564` reads like a
+second one and is not. `P2PmsgHeap_AssertValidBSTRio(pBSTRio)` there passes the raw image
+buffer through a parameter typed `P2PmsgHANDLE`; the function casts it to `VBListHANDLE*`
+and early-returns `true` when the byte at the `uVBListType` offset is not
+`P2PmsgHeap_BSTRio`. That is the type confusion the IOMAGE twin had removed for the same
+reason at `MsgVBHeap.cpp:4983`, still here. Measured rather than inferred: it answered `true`
+for all twelve BSTRio images in hand, the four corrupt ones included.
+
+### Before and after, over the same nineteen images
+
+The corpus of §32, one pristine `git worktree` of `46a63f8` against one carrying only this
+change, so that nothing else in the tree could be the difference. The whole diff of the
+per-file outcomes is five hunks, of which the first four are this hunk four times over, at
+lines 9, 12, 30 and 39 -- `f11_collate_nogrow.dat`, `f2_walk_oob.dat`,
+`c4_bstrio_honest.dat`, `c4_f2_walk_oob.dat`, which is §39's four:
+
+```
+9c9
+<   asserts on this file: 1
+---
+>   asserts on this file: 0
+[12c12, 30c30, 39c39 identical]
+66c66
+< PHASE 1 (untrusted entry points) asserts trapped = 4
+---
+> PHASE 1 (untrusted entry points) asserts trapped = 0
+```
+
+Nothing else changed at all. Every refusal message, every block count, every chain verdict,
+every one of the eleven files refused before a walk can start: identical. All four are still
+refused, still by name, still with `BSTRio block structure is corrupt`. The trusted phase is
+identical too, at 115 assertions either way; the only line that moves in it is the
+assertion's own, `3609` to `3635`, because the note now above it is longer than the line it
+explains.
+
+### The mechanism, in six lines
+
+The sweep proves the outcome; it cannot show WHY the gate was the cause, because the corpus
+files are corrupt several ways at once. One image and one counter isolate it -- save a real
+store, add one to `oKeys.nAllocEntries`, leave the header, the declared size and all three
+root offsets exactly as the writer left them, so every gate ahead of the block walk passes
+and the walk is what decides:
+
+```
+############ BEFORE (pristine 46a63f8) ############
+[1] honest image      : accepted=1  why=''  asserts=0
+[2] nAllocEntries+1   : accepted=0  why='BSTRio block structure is corrupt'  asserts=1
+    first: ...\MsgVBHeap.cpp(3609) : Assertion failed!
+[3] same, TRUSTED 1-arg: accepted=1  why=''  asserts=1
+    first: ...\MsgVBHeap.cpp(2087) : Assertion failed!
+
+############ AFTER (46a63f8 + the fix) ############
+[1] honest image      : accepted=1  why=''  asserts=0
+[2] nAllocEntries+1   : accepted=0  why='BSTRio block structure is corrupt'  asserts=0
+[3] same, TRUSTED 1-arg: accepted=1  why=''  asserts=1
+    first: ...\MsgVBHeap.cpp(2087) : Assertion failed!
+```
+
+Line [3] is the whole argument. The SAME image through the trusted overload is ACCEPTED, in
+both builds, and asserts at `:2087` -- `VBHEAP_DIAG(...nAllocEntries==nAllocEntries)`, the
+diagnostic that then repairs the counter and lets the walk answer true, so `:3609`'s
+assertion passes and never fires. Open a gate and that repair is refused, `bResult` goes
+false, and the ungated assertion on the return value fires in place of the diagnostics the
+gate correctly silenced. A corrupt image was louder inside the gate than outside it. And [3]
+is unchanged across the fix, which is the other half: the developer aid the trusted path is
+entitled to is exactly as it was.
+
+### Pinned
+
+`Test_UntrustedBSTRioGate` (`tests/MsgcoreSuite.cpp:5692`) is that experiment as two cases:
+the honest image must still load -- the way a fix of this shape goes wrong is by becoming a
+blanket refusal -- and the corrupt one must be refused, by that message, with zero
+assertions. It counts them through a `_CrtSetReportHook2` pushed in front of
+`TestFramework`'s own trap and returns FALSE, so the framework still fails the case by
+itself; the counting hook is there to NAME the line, not to catch what is already caught.
+Static link only, for the reason `Test_ImageAddressBounds` gives beside it: no
+`P2PmsgHeap_*` symbol is on the exported surface.
+
+It fails without the fix. The same suite sources, linked against the pristine `46a63f8`
+archive:
+
+```
+  - a corrupt image is refused BY NAME and without a single assertion
+      ASSERT [a corrupt image ...]  ...\wt-46a63f8\MsgVBHeap.cpp(3609) : Assertion failed!
+      FAIL [a corrupt image ...]  s_nGateAsserts == 0
+  cases   : 251  (1 with failures)
+  checks  : 1377  (2 failed)
+  result  : FAIL
+```
+
+One case, two checks, and the failure names the line. Against the fixed archive both link
+modes are clean -- `static` 251 cases / 1377 checks, `dll` 240 / 1308, both PASS, the DLL
+run reporting the case as static-link-only rather than silently skipping it.
+
+### What is not closed
+
+The `:3564` type confusion. It is measured and it is a no-op, so the "Corrupted BSTRio heap"
+refusal it appears to provide has never once been the thing that refused an image; the
+structural verdict on this path comes entirely from `:3535`. Repairing it is not a tidy-up
+-- it would introduce a refusal where there is none today, ahead of the walk, and change
+which message names a bad image. That is a question about `P2PmsgHeap_AssertValidBSTRio`'s
+contract and wants the argument §29 and §34 wanted for members like it.
+
+## 36. The one reference a store holds on itself
+
+§29 walked what a field owns and §31 closed the three members that walk stopped at.
+What-is-left carried one more, and it was the only one phrased as an absence rather than a
+member: `P2PmsgMgr` is not descended into. It derives from `P3PmsgItem` and inherits
+`P3PmsgField::HeapHolders` unchanged, so any sub-objects of its own are uncounted -- an
+undercount, which leaves FALSE, which promises nothing. Nobody had measured what a manager
+owns.
+
+**Measured here, and the answer comes in two halves: a manager owns no sub-object a field
+does not, and the one reference it adds on top is not a view of anything.** The first half
+closes the entry as written. The second is what the entry was actually standing on, and it
+is a decision rather than a gap.
+
+### Every member, and what it holds
+
+`P3PmsgItem` is a typedef for `P3PmsgField` (`P2Pmsg.h:893`), so a manager IS a field. It
+arrives with `m_oObject`, `m_pP3PmsgAttr`, `m_pP3PmsgDesc` and `m_pMsgStck`, all four of
+which §29's override already walks and all four of which the rows below show it reaching
+through a manager. What `P2PmsgMgr` declares of its own is nineteen members
+(`P2PmsgMgr.h:336-355`), and not one of them is a `P3PmsgObject` or holds one:
+
+- `m_hFile`, a Win32 file handle; `m_strFilename`, a `CString`; `m_oGUID`; `m_dwSharedMode`;
+  and `m_oCSectionMgr`, a `CRITICAL_SECTION`. None of them names a block, and none of them
+  is on a heap.
+- `m_uiWM_APP_TrigINSERT`, `...UPDATE` and `...DELETE`, three window message numbers. **The
+  trigger registry is not in the manager at all**, which is worth saying because the class
+  comment advertises a trigger system and a registry of armed nodes would be exactly the
+  kind of member this section is looking for. It lives on the heap handle:
+  `CreateTrigger` forwards straight to `P2PmsgHeap_CreateTrigger ( m_hMgr, ... )`
+  (`P2PmsgMgr.cpp:1083-1098`), `DropTriggers` to its twin (`:1269-1280`), and every other
+  arm of it is commented out. An armed trigger adds no holder here.
+- six callback function pointers and four `PINT_PTR` keys, which is the paging registration
+  and its one-deep push and pop.
+- and `m_hMgr`, which is the rest of this section.
+
+Nothing in `P2PmsgMgr.cpp` news a `P3Pmsg` sub-object and caches it. The only `new` in the
+file is `Factory`'s `new P2PmsgMgr` (`:569`, `:597`), which is a manager rather than a
+member, and `SafeDSetPaging` holds a `P3PmsgItem*` (`:1524-1527`) that is somebody else's
+item borrowed for the life of a stack guard. So the inherited walk is already complete over
+every view a manager owns. That is a negative answer of the kind §31 found for
+`P3PmsgVect::m_pP3PmsgData[]`, and it is worth having for the same reason: the entry
+recorded a hole in the walk, and the walk has none.
+
+### The reference that is left over
+
+Every one of the four constructors ends the same way -- `m_hMgr = P2PmsgHeap_CreateBSTRio(...)`
+and then `Attacheap`, which allocates the root item and `Connect`s the inherited object on
+that handle (`P2PmsgMgr.cpp:38-39`, `:47-48`, `:56-57`, `:66-67`, `:150`). The create mints
+the handle at `nRefCount = 1` (`MsgVBHeap.cpp:3400`); the `Connect` AddRefs it a second time
+by §29's rule. `~P2PmsgMgr` closes the first (`:74-76`) and `~P3PmsgObject` closes the
+second. **So a manager holds its own heap exactly twice and `HeapHolders` accounts for one
+of them**, which is why `refs` is exactly `mine + 1` on every row of a manager nobody else
+is holding, whatever else the manager has grown.
+
+It is owned outright, too, by §26's test. No constructor and no setter takes a handle from
+outside; `Load` creates its own from the file image (`:235`, `:261`); and the defragmenting
+arm of `Save`, the one place a manager adopts a handle another manager made, AddRefs it on
+the way in (`:416-419`) so the donor's `~P2PmsgMgr` closes its own reference and not this
+one. Both of §29's questions therefore answer yes: it holds this heap, and it is mine.
+
+### Why it is not subtracted anyway
+
+**Because `HeapHolders` counts views, and this is not one.** The rule the walk rests on is
+an object rule: every path that gives a `P3PmsgObject` a non-zero `m_hVBList` AddRefs it, so
+a live object whose handle is this handle IS one reference, and `refs - mine` is the number
+of OTHER VIEWS -- other names for blocks, each of which a write could be made through.
+`m_hMgr` is not a `P3PmsgObject`, was never `Connect`ed and names no block. Counting it does
+not overcount the arithmetic; it changes what the equality means, from "every view of this
+heap is one of mine" to "every reference on this heap is one of mine, view or not".
+
+**And the block it would report the guarantee for is the one block on the heap whose
+address is a function of the handle.** `P2PmsgHeap_Connect` reads the store root straight
+off the handle (`MsgVBHeap.cpp:5040-5049`, `:5031-5037`), and that root is the manager's own
+item -- measured, not assumed: a bare manager's `GetP2Pos()` is 48, `P2PmsgHeap_Connect(h)`
+is 48, and `P2PmsgHeap_IsRoot` agrees. Everywhere else on the heap the count's premise
+holds, that an outsider cannot name a block without a counted reference to reach it
+through. For the store root it does not, and a raw handle held without an AddRef is already
+outside the count by `P3PmsgObject::IsSole`'s own NOTES (`P2Pmsg.cpp:3370-3373`).
+
+So the undercount stays, deliberately, and `!mgr.IsSole()` still reads as it always has --
+including the row this investigation pinned in §26, `tests/MsgcoreSuite.cpp:3207`. What
+changes is that the shortfall is now known to be exactly one, known to be the handle, and
+pinned by cases rather than left as an unmeasured absence. The NOTES block on `m_hMgr`
+records the argument where the member is declared.
+
+### Measured
+
+Six cases and thirty-nine checks, twenty-five of which survive into DLL mode. The `refs=`
+column is static-only for §31's reason -- `P2PmsgHeap_RefCount` is not exported -- but
+`mine=` is not, because `HeapHolders` is a public member of a whole-class exported class, so
+the numbers that carry the argument are checked either way:
+
+```
+  - a manager's walk reaches every view it owns
+      a manager nobody has touched                 refs=2  mine=1  sole=false
+      ... with a descendant collection             refs=3  mine=2  sole=false
+      ... and that collection walked               refs=4  mine=3  sole=false
+  - the reference a manager's walk does not make is its own handle
+  - a manager's attributes, stack and snapshot are walked like a field's
+      a manager with an attribute collection       refs=3  mine=2  sole=false
+      ... and a push                               refs=4  mine=3  sole=false
+      ... and the snapshot read                    refs=5  mine=4  sole=false
+  - a manager whose root a stranger names is still not sole
+      a manager whose root a stranger names        refs=3  mine=1  sole=false
+  - a manager whose child a stranger holds is still not sole
+      a manager whose child a stranger holds       refs=5  mine=3  sole=false
+  - a copy of a manager is a second store, not a second view
+      the original                                 refs=4  mine=3  sole=false
+      the copy                                     refs=3  mine=2  sole=false
+```
+
+The first and third cases are the walk being complete: every step adds one holder and
+`mine` follows it -- the `P3PmsgDesc` the manager made, the cursor that collection keeps for
+itself, the `P3PmsgAttr`, and the field a read of the stack news on this heap, which is
+§29's last row reached through a manager. The shortfall never grows past one.
+
+The two stranger rows are the ones that must not move, and they are where the shortfall
+doubles: `refs=3 mine=1` for a second name on the manager's own root, `refs=5 mine=3` for a
+handle on a child. The count falls short by precisely the stranger's holding on top of the
+handle, which is what leaves the answer false. The last case is the copy constructor, which
+makes its own heap (`P2PmsgMgr.cpp:56`) and copies the tree into it: two stores, two
+handles, and neither manager a holder of the other's heap.
+
+### Teeth, and they point the other way
+
+There is no behaviour change here to break, so the case that pins this decision has to fail
+against the decision being reversed rather than against the code being restored. Add the
+four-line `P2PmsgMgr::HeapHolders` override that subtracts `m_hMgr`, rebuild, and **seven
+cases fail on twenty-seven checks** -- the six above on twenty-six, and one that was already
+in the suite:
+
+```
+  - nothing in a tree is sole
+      FAIL [nothing in a tree is sole]  !mgr.IsSole()   MsgcoreSuite.cpp:3207
+  - a manager's walk reaches every view it owns
+      a manager nobody has touched                 refs=2  mine=2  sole=true
+      ... with a descendant collection             refs=3  mine=3  sole=true
+      ... and that collection walked               refs=4  mine=4  sole=true
+  - a manager whose root a stranger names is still not sole
+      a manager whose root a stranger names        refs=3  mine=2  sole=false
+  - a manager whose child a stranger holds is still not sole
+      a manager whose child a stranger holds       refs=5  mine=4  sole=false
+```
+
+That listing is the whole argument in four rows. A store with a tree under it reads
+`sole=true`, and the row §26 pinned -- the one whose title is "nothing in a tree is sole" --
+goes red on `!mgr.IsSole()`. The two stranger rows still read false, because a stranger
+still defeats the count either way; they fail on the shortfall number rather than on the
+guarantee, exactly as §31's must-not-move vect row failed on its opening `TF_CHECK`. The
+guarantee is not what a subtraction here would break. What it would break is the claim that
+`IsSole`'s TRUE is about views, and it would make the store the one object that answers a
+different question from everything inside it.
+
+**The exported surface does not move.** No member is added and none is removed: the library
+change is a NOTES block above `m_hMgr` in `P2PmsgMgr.h` and nothing else, so
+`exports-cxx-x64.manifest`, `exports-cxx-win32.manifest` and the flat C ABI manifest are all
+byte-identical, and `api-drift.allow` gains no line. That is the shape of this entry -- a
+measurement that found the existing behaviour already right, which is a close and not a fix.
+What-is-left keeps one sentence in place of the entry: a manager holds its heap once more
+than its walk claims, on purpose, and the reason is written where the member is.
+
+## 37. Twenty-eight silent passes, and the two questions underneath them
+
+§34 measured the drift check's prefix fallback and declined to fix it, in as many words:
+tightening it "turns 28 silent passes into 28 new failures in one commit, every one of them
+a separate question about the C API", and doing that inside a `^` investigation would be
+the wrong session. This is the right session. The matcher is tightened, the check went red
+with thirty-five members on it, every one now carries a written reason, and the three
+entries §39 was holding -- the matcher, `P3PmsgList::Drop`, and `IsSole` with `IsInline` --
+close together, because they were always one entry. **The honest bound count is 81, not
+116, and not the 88 §39 guessed.**
+
+### The fallback needed a rule and had a heuristic
+
+The old fallback is three lines, quoted in §34. It roots a C++ member at the first
+snake-cased segment and takes whatever the surface lists first:
+
+```powershell
+$root = $target + ($snake -split '_')[0]
+foreach ($n in $surfaceNames) {
+    if ($n -eq $root -or $n.StartsWith($root + '_')) { $hit = $n; break }
+}
+```
+
+The shape it exists for is real and no exact comparison can find it: `DeclareItem` is one
+C++ name (`P2Pmsg.h:814`) that the flat surface spells out as **twenty** functions --
+`msgcore_field_declare_int`, `_declare_double`, `_declare_blob`, on through the type list
+and their `_u8` twins -- because C has no overloads. What went wrong is that three other
+shapes are indistinguishable from that one through a first-segment prefix, and `break` on
+the first hit made all three look like it. The tightening is `Test-RootCandidates`
+(`tools/ci/check_api_drift.ps1:313`): three tests, applied to the candidate SET rather
+than to the first name that matched.
+
+**Test one: a surface name equal to the root is a truncation, not an overload.** By the
+time the fallback runs the exact test has failed, so the C++ name carries segments the root
+does not -- and a function named exactly the root carries none of them either.
+`P2PmsgMgr::RootPath2Object` rooted at `root` and matched `msgcore_mgr_root`
+(`Msgcore_c.h:541`), which returns the manager's root field and resolves no path at all.
+That arm could only ever fire for a multi-segment name, where it is always this mistake.
+
+**Test two: an accessor verb is the family's verb, not this member's name.** A root of
+`get` / `set` / `is` / `put` / `has` with more name behind it matches every accessor in the
+family and distinguishes nothing. This is §34's 28, and the old code already knew about it
+-- it computed `$bareVerb`, printed the count, and scored the match anyway. `IsInline`,
+`IsSole` and `IsDirty` all rooted at `is` and all scored against `msgcore_field_is_null`.
+
+**Test three: a function that is already somebody's is not evidence for somebody else.**
+Two ways a candidate is spoken for. It is the exact counterpart of a different scanned
+member -- `msgcore_list_drop_head` is `DropHead`'s (`MsgList.h:78`), so it cannot also be
+whole-object `Drop`'s. Or it is the UTF-8 twin of the function beside it:
+`msgcore_attr_select_item_u8` is `msgcore_attr_select_item` spelled for `char*`. Without the
+second half, `P3PmsgAttr::Select` would score against a `_u8` name once `SelectItem`,
+`SelectList` and `SelectVect` had taken the three real `select_*` functions.
+
+The order matters, because it makes the refusal count mean something: a member with nothing
+under its root is an ordinary miss rather than a refusal, and running test two first would
+put every `P3PmsgBSTR` member in the tally. Survivors are then ranked by how many of the
+C++ name's own segments each spells, so `AddListTail` now reports
+`msgcore_list_add_tail_int` rather than `_add_head_int` -- no verdict moves, but what the
+run says the evidence WAS does.
+
+### The numbers, before and after
+
+Before, against a clean tree at `4e897f7` with §34's two lines in place:
+
+```
+Scanned 288 public members over 1 pair(s); 116 bound, 172 allowlisted.
+  159 of the allowlist entries are UNTRIAGED -- banked, not decided.
+  43 of the 116 bound matched by prefix fallback, 28 of those at a bare accessor root.
+
+OK -- every upstream member has a binding, or an allowlisted reason not to.
+```
+
+After the matcher change and before any triage -- red on thirty-five, with the refusals
+splitting exactly as the three tests predict:
+
+```
+Scanned 288 public members over 1 pair(s); 81 bound, 172 allowlisted.
+  8 of the 81 bound matched by prefix fallback; 35 more were refused by it.
+
+35 upstream members reach no binding:
+
+   28 root is a bare accessor verb
+    6 every function under the root already binds another member
+    1 only a truncation of the name matches the root
+```
+
+The 28 is §34's 28, member for member, which is the closest thing to a control this change
+has: the rewrite was not steered at that list and lands on it exactly. The eight that
+survive are the shape the fallback was written for -- `DeclareItem` three times,
+`AddListHead`, `AddListTail`, `P3PmsgCurs::Goto`, `P3PmsgCurs::Item` -- and one that is
+not, which the end of this section is about.
+
+### Thirty-five members, four arguments, and three that are bound after all
+
+The reasons are in `tools/ci/api-drift.allow:300` onwards. What is worth recording is that
+thirty-five members did not need thirty-five arguments -- grouping them is what §34 did for
+the four `Drop`s and the two identity operators.
+
+**A list position is a raw arena offset, and the ABI cannot hand one out.** `GetHeadPos`,
+`GetTailPos`, `GetNext`, `GetPrev`, `GetTail`. `VBLaddr` is `#define VBLaddr UINT_PTR`
+(`Msgcore.h:49`), so it fails twice: rule 2 of `Msgcore_c.h` invalidates the value on the
+next allocation, with none of the re-resolution route a p2pos has, and the type would make
+the flat ABI pointer-width-dependent -- §33's `x86` split arriving in the supported surface.
+The surface walks by ordinal and by cursor, both re-validated per call.
+
+**The arena's internals are not the ABI, in three different ways.** `GetVBLockType` takes
+an MFC `POSITION` (`MsgList.h:125`, `MsgVect.h:101`) and answers with the block type code
+§40's image scanner reads out of `uVBLockDefs`, while `GetVBLockListSize` and
+`GetVBLockVectSize` answer with the block's byte size -- where the surface asks about
+CONTENT instead, `msgcore_list_get_type_at` and `msgcore_vect_get_type`. The four
+`GetP2Pmsg*Hdl` and `GetP2PmsgHandle` getters hand out `P2PmsgFieldHdl`, three bare
+`UINT_PTR`s (`P2PmsgVBLock.h:276-281`), beside an opaque `MsgFieldHandle`: two handle
+vocabularies in an ABI with one set of rules for handles. And `GetAccess`, `SetAccess` and
+`GetPermissions` return bits nobody on that side can name -- the access byte's vocabulary
+(`AttrField_HIDDEN`, `_NOCOPY`, `_SORT`, `_TOUCH`, `_EXPAND`, `P2PmsgVBLock.h:283-289`)
+sits in a header `Msgcore_c.h` does not include, and the permission byte has none at all.
+
+**The dirty flag belongs to the C++ object, not to the item.** `P3PmsgField::IsDirty` is
+`m_bFieldDirty || P3PmsgData::IsDirty() || P3PmsgName::IsDirty()` (`P2Pmsg.cpp:4293-4300`)
+and the vect's adds `m_bVectDirty` -- every term an in-memory flag on the wrapper, set by
+writes made through THAT wrapper, so two flat handles onto one item are two objects with
+two flags. `msgcore_mgr_is_dirty` is the question that outlives a handle.
+
+**Two calls, not one, is the shape the whole handle group is written in.** That covers
+`P2PmsgMgr::IsField` and `IsAttributed`, keyed on a `P2Pos` and answered by
+`msgcore_mgr_p2pos2field` then a field predicate; `GetPath`, answered by
+`msgcore_field_get_p2pos` plus `msgcore_mgr_p2pos2path`; `P3PmsgDesc::GetField` and its attr
+twin, whose answer the caller already holds, since `msgcore_desc_from_field` is the only way
+in; and `Select` and `SelectObject` on both collections, where the by-value/by-reference
+distinction separating `Select` from `SelectItem` has no counterpart a C caller can observe.
+
+**Three of the thirty-five are bound, and the matcher cannot see it.** `GetP2Pos` is
+`msgcore_field_get_p2pos`, quoted by rule 2 itself at `Msgcore_c.h:108-109`; it misses
+because `ConvertTo-Snake` splits `GetP2Pos` into `get_p2_pos` where the surface spells
+`get_p2pos`. `PageRegistration`'s two overloads (`P2PmsgMgr.h:211-215`) are
+`msgcore_mgr_set_paging_sinks` and `msgcore_mgr_set_populate_sink`
+(`Msgcore_c.h:1027-1032`), a deliberate rename the C header spends fifteen lines
+justifying. Both are the third of the three ways out the check prints, and their lines
+exist so the next reader is not told a bound member is unbound. The third case is
+`P3PmsgVect::IsName`, declared at `MsgVect.h:145` beside `IsData`, `IsField`, `IsList` and
+`IsVect`, which are defined at `MsgVect.cpp:1165`, `:1187`, `:1198` and `:1208` and bind
+exactly. **`IsName` has no body anywhere in the repository** -- a defect in `MsgVect.cpp`,
+recorded as one.
+
+### `P3PmsgList::Drop` can be seen now, and carries its line
+
+§39's third entry was that `Drop` on the list is decided nowhere and cannot be seen: the
+same member as `P3PmsgVect::Drop` under the reason §34 wrote, unable to carry an allowlist
+line, because the fallback scored it bound against `msgcore_list_drop_head` and the check
+would have reported the line as redundant and told the next reader to delete it. Test three
+removes exactly that. `msgcore_list_drop_head` and `_drop_tail` are `DropHead`'s and
+`DropTail`'s (`MsgList.h:78,88`); they are spoken for, and the whole-object drop now says
+it reaches no binding. §34's parked comment is a rule line under the `Drop` group.
+
+### `IsSole` and `IsInline`: not carried, and deliberately not closed
+
+These two are why §29's `HeapHolders` reason said a flat caller "wants the answer and has
+it". It does not. There is no `msgcore_field_is_sole` and no `msgcore_field_is_inline`, and
+none of the nine `msgcore_field_is_*` predicates answers either question; both scored bound
+through the `is` root and both are among §34's 28. The premise §34 reopened stays open ON
+PURPOSE, with the argument written out both ways in `api-drift.allow`.
+
+**For.** `msgcore_field_is_sole ( MsgFieldHandle )` would be signature-identical to the
+nine predicates already there, it needs no type the surface lacks, and its TRUE is the one
+fact a flat caller cannot reconstruct from anything else on the surface: p2pos answers
+identity (§21), not exclusivity, and there is no flat route to `P2PmsgHeap_RefCount`. A
+host deciding whether it may write in place has exactly this question and no way to ask it.
+
+**Against.** It is an addition to the supported ABI: `Msgcore_c.h` is the 282-function
+surface the README calls supported, a new export bumps `Msgcore_version.h` in the same
+commit, and that is a release decision and not a matcher's. The second half matters more.
+`IsSole`'s FALSE still promises nothing -- §26's asymmetry, unmoved by §29 and §31 -- so
+the export would be load-bearing in one direction and advisory in the other, and the header
+would have to say so at length. `IsInline` is the same shape and weaker: its FALSE is
+explicitly not a guarantee (§24), and it describes where storage sits rather than what the
+caller may do. Both are triaged as not-carried, which records today's state.
+
+### What the tightened matcher still cannot do
+
+**One of the eight surviving fallback matches is still not a binding.**
+`P3PmsgField::SelectObject` scores against `msgcore_field_select_list`: the root is
+`select`, `msgcore_field_select_item` is `SelectItem`'s, and `select_list` and `select_vect`
+have no exact C++ counterpart on `P3PmsgField`, so they are free and the rule takes one.
+Telling two nouns apart under one verb is beyond a name comparison and the three tests do
+not pretend otherwise. The split stays printed so the residue stays countable.
+
+**And `Sizeof` has never been scanned, on any class.** The extractor's keyword guard
+(`check_api_drift.ps1:176-179`) drops a candidate named in a C++ keyword list, and
+PowerShell's `-notcontains` is case-insensitive, so `Sizeof` goes out with `sizeof`. Eight
+`Sizeof` declarations across the nine scanned headers have never been asked about, and one
+has an exact binding waiting -- `P2PmsgMgr::Sizeof` (`P2PmsgMgr.h:298`) against
+`msgcore_mgr_sizeof` -- so the honest count is really 82. That is the same KIND of error as
+the one above, which is why it is named: the check's own extractor is the last place
+anybody looks.
+
+Where the count stands: 172 allowlist entries became 207, all thirty-five new ones TRIAGED,
+and UNTRIAGED is unchanged at 159 because nothing was banked here. What moved is the
+denominator it should be read against, which is what §39 predicted.
+
+```
+Scanned 288 public members over 1 pair(s); 81 bound, 207 allowlisted.
+  159 of the allowlist entries are UNTRIAGED -- banked, not decided.
+  8 of the 81 bound matched by prefix fallback; 35 more were refused by it.
+
+OK -- every upstream member has a binding, or an allowlisted reason not to.
+```
+
+## 38. The ceiling that stopped nothing, and the six in it that are not assertions
+
+**`check_asserts.ps1` has been failing since `d2763ce` on 2026-09-11, and the form it
+failed on is not the form that matters here.** The baseline was banked at `4d39d0d`, the
+same commit §33 found `exports-cxx-win32.manifest` frozen at; §29 re-measured the first of
+that day's three ceilings and §33 the second, and this is the third. It finds the file's own
+header right about which half is worse: `callwrap` rose 245 to 248 and `predicate` 192 to
+195, both of which CI would have named had anyone run it, while `marker` FELL 216 to 208 --
+and in that same range five genuinely new `ASSERT(0)` sites went into the tree without one
+line of output, because the ceiling above them was never lowered. The fall is not the
+notice. The fall is the hole.
+
+### The baseline is the tree it was banked from, exactly
+
+`tools/ci/assert-baseline.txt` has two commits in its whole history: the initial import, and
+`4d39d0d` on 2026-09-08. A pristine worktree of that commit answers the script with the
+file's own three figures and nothing else, which makes this a stale-baseline finding and not
+a disagreement about what to count:
+
+```
+$ pwsh tools/ci/check_asserts.ps1          # git worktree of 4d39d0d
+  callwrap   245          $ cat tools/ci/assert-baseline.txt
+  marker     216          callwrap 245
+  predicate  192          marker 216
+  TOTAL      653          predicate 192
+```
+
+Thirty-seven commits have touched a non-test source since -- thirty-six when §39 wrote
+that sentence, `34fb92c` having landed in between without moving a count. Against a
+pristine worktree of `46a63f8` the script answers 248 / 208 / 195, bit for bit what the
+working tree answered before this session touched it, which is how the drift was told
+apart from our own: nothing in §31 to §34 adds an ASSERT anywhere.
+
+### When the gate went red, and what it never said
+
+The counts replay at every commit in the range, the script's own classifier run over
+`git grep` at each revision:
+
+```
+Commit  callwrap marker      Commit  callwrap marker
+4d39d0d      245    216      0888659      246    207
+b6ae7c7      245    213      48ff002      247    207
+72e8f88      245    212      f77bb97      248    207
+d2763ce      246    211      f600c52      248    208
+d31f2c4      246    210      46a63f8      248    208
+5d48e5a      246    209
+2a03161      246    208      max marker across the range: 216
+```
+
+`callwrap` crossed at `d2763ce` -- §7's commit, push and pop a list or a vector -- and has
+never come back under, so the gate has failed on every commit since and nobody ran it. But
+the `marker` column is the one to read. It never once rises above 216. It falls to 207 by
+`0888659` and climbs back to 208 at `f600c52`, and that climb is a real new `ASSERT(0)` at
+`P2PmsgVBLock.cpp:1498` -- a rise, of exactly the kind this script exists to report,
+reported nowhere, because the ceiling above it was nine sites away. Four more went the same
+way: `MsgStck.cpp:244` and `:345` at `d2763ce`, a new type-rejection guard and not a
+respelling of the four stubs that commit deleted; `MsgVect.cpp:620`, the `else` arm of
+`P3PmsgVect::Drop`'s parent isolation; and `P2Pmsg.cpp:7561`, a new `else` arm in the
+`P3Pmsg_GetPath` block `2a03161` added. Five new sites of the form item 19 names, and the
+gate's entire output on the subject was `marker fell from 216 to 208 -- bank it`. That is
+what "the stale ceiling silently re-admits everything between the two numbers" means when it
+stops being an abstraction: the gap is eight wide, and five have gone through it.
+
+### Where the eight went
+
+Not suppressed -- deleted, by the path-grammar work of §13 to §18, because each was a claim
+of unreachability the grammar fixes made false and then answered properly. `b6ae7c7` took
+three out of `P2Pmsg.cpp` when `^` started being followed, `72e8f88` one when a list became
+a resolvable component, `d31f2c4` and `5d48e5a` one each, and `2a03161` two -- its own
+message saying why: all four of `@.`, `.@`, `..` and `@@` are well-formed questions naming
+nothing, "void, where three of them used to ASSERT(0) first". `d2763ce` took four out of
+`MsgStck::Push` and `Pop` by implementing the list and vect arms that had been stubs, and
+`0888659` the `else ASSERT(0);` off `P2PmsgMgr.cpp`. Fourteen removals against six added
+lines, five of them new sites: net eight, every removal a marker that was a lie.
+
+### The six rises, attributed and decided
+
+Three `callwrap` and three `predicate` net -- five predicates added, two retired -- and
+every line below is a `git blame` at `46a63f8`, not an inference:
+
+```
+48ff0029 P2Pmsg.cpp:2902    ASSERT(nSizeofHdr>0&&nVBLockSize>nSizeofHdr);
+48ff0029 P2Pmsg.cpp:2911    ASSERT(P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock));
+f77bb970 P2Pmsg.cpp:2930    ASSERT(nSizeofHdr>0&&nVBLockSize>nSizeofHdr);
+f77bb970 P2Pmsg.cpp:2936    ASSERT(P2PmsgHeap_AssertValidAlloc(hVBList,aCopy));
+c8f1af6a P2Pmsg.cpp:3563    ASSERT(OBJ__hVBList==nullptr);
+dbfa789e MsgVBHeap.cpp:4418 ASSERT(!bFirstFit);
+dbfa789e MsgVBHeap.cpp:4593 ASSERT(!bFirstFit);
+d2763cee MsgVect.cpp:593    ASSERT(r_Object().IsVect());
+```
+
+`P2Pmsg.cpp:2902` and `:2930` are the same line in two functions and the argument's easy
+end. `VBLsize` is `#define VBLsize UINT_PTR` (`Msgcore.h:53`), so `nVBLockSize -
+nSizeofHdr` on the next line does not go negative when the test fails, it goes enormous,
+and goes straight to `P2PmsgHeap_Alloc` and then a `memcpy` of `nVBLockSize` bytes. In
+`P2PmsgObject_CopyHeapVBLock` the size is read out of the block's own header, so on a heap
+opened from an image it is whatever the image said. Item 19's first half applies: both
+throw now, the `EVERR->MODULE->...->Throw()` idiom already at `P2Pmsg.cpp:2715`.
+
+`MsgVect.cpp:593` is item 19 stated by its own neighbours. The comment above
+`P3PmsgVect::Drop` explains that a vect used to fall through to `P3PmsgField::Drop`, "which
+opens with ASSERT(OBJ__IsField()) -- false for a vect", and leaked every element block
+anyway. The assertion did not stop it, because an assertion is not in the binary that did
+the dropping -- and the new function answered that by writing the same assertion one level
+down. Nor is it decoration: `Truncate()` below reads the element slot array through
+`VBLock_pVect` and frees what it finds, arbitrary bytes on a non-vect block. It throws now.
+
+`P2Pmsg.cpp:3563` is item 19's second half. `ASSERT(OBJ__hVBList==nullptr)` sat in one of six
+`P3PmsgField` constructors that all call `RenderThisSafe` and none of which asserts it, and
+nothing in either build branches on the answer -- `*this = rhs` runs regardless. It was a
+note from §21's session, asserting what the comment above it already says; it is prose now.
+
+The two `ASSERT(P2PmsgHeap_AssertValidAlloc(...))` are NOT changed, and the reason is
+worth more than the change. That function is not a predicate: its SYS arm repairs the block
+it judges -- `pVBLock->oHdr.uVBLockDefs|=VBLock_Linked` at `MsgVBHeap.cpp:1390` -- and so
+does its BSTRio arm, whose comment says "The repair below sets a flag bit IN THE IMAGE" and
+skips it inside `P2PmsgHeap_UntrustedGate`. `VBLock_Init` (`P2PmsgVBLock.cpp:327`) sets
+`VBLock_Alloc` and not `VBLock_Linked`, so that repair is live code on a fresh block, and
+wrapped in `ASSERT(...)` it is not a lost check but a lost WRITE -- the two builds leave
+different bytes behind. Promoting the call out of the assertion fixes that by running the
+repair in Release, an image write and a decision about the untrusted gate rather than a
+tidy-up in passing. What settles it is splitting a pure `P2PmsgHeap_IsValidAlloc` out of
+the repairing one, in `MsgVBHeap.cpp`.
+
+The two `ASSERT(!bFirstFit)` are `MsgVBHeap.cpp` as well, and the clearest of the eight.
+The condition already throws, four lines below each:
+`EVERR->MODULE->AFP(aVBLockFree)->Message(L"...the chosen free block did not...")`. The
+assertion adds a Debug dialog immediately before a correct, named refusal -- §35's shape
+exactly, asserting on the way to refusing, and reached only on the second pass, which is
+the pass the comment above it calls unreachable by any heap this allocator built. **Both
+are deleted rather than converted**, because the throw is already there and converting
+would have written the same refusal twice. The comment block at each site now says why
+there is no assertion on the retry flag, so that restoring one is a decision rather than an
+oversight (`MsgVBHeap.cpp:4430-4440`, `:4605-4615`).
+
+### Six of the `predicate` count are not assertions at all
+
+One thing the re-measure turned up has nothing to do with staleness. PowerShell's `-match`
+is case-insensitive unless spelled `-cmatch`, so `\b(?:ASSERT|P2PASSERT)\s*\(` also
+matches `->Assert()`:
+
+```
+MsgVBHeap.cpp:2525  ->Message("Attempt to collate non-free entry")->Assert()->Throw();
+MsgVBHeap.cpp:2545  ->Message("Internal address corruption")->Assert()->Cancel();
+MsgVBHeap.cpp:2625  ->Message("Attempt to collate non-free entry")->Assert()->Throw();
+MsgVBHeap.cpp:2644  ->Message("Internal address corruption")->Assert()->Cancel();
+MsgVBHeap.cpp:3916  ->Message("Attempt to free non-allocated entry")->Assert()->Throw();
+MsgVBHeap.cpp:3973  ->Message("Attempt to free non-allocated entry")->Assert()->Throw();
+```
+
+The text after the paren is `)->Throw();`, neither `0)` nor an identifier, so all six land
+in `predicate`. They are the opposite of what the script is against: every one is on a
+branch ending in `->Throw()` or `->Cancel()`, which is item 19's own prescription. And
+`P2Pevent::Assert` is `{ ASSERT(0); return this; }` (`Msgexception.h:353`), already counted
+once as the `marker` it is -- so the six are a second count of one site. Not fixed here,
+for §34's reason and the script header's, which now says so: `-cmatch` would drop the
+number by six in the same breath as the re-bank, and two corrections landing in one figure
+is how a baseline stops meaning one thing.
+
+### What the figures should be
+
+Three changes, built clean on `Debug|x64`, suite passing in both link modes -- 251 cases
+and 1377 checks static, 240 and 1308 dll -- and measured live at 03:52 on 2026-09-12 in a
+tree also carrying other work in `MsgVBHeap.cpp`, `P2PmsgMgr.h` and `tests/`:
+
+```
+  callwrap   247        marker   208        predicate  190
+```
+
+`callwrap` 248 to 247 by the `MsgVect.cpp` conversion; `predicate` 195 down through its
+banked 192 to **190**, because deleting the two `ASSERT(!bFirstFit)` carried it two BELOW
+the figure banked at `4d39d0d`; `marker` untouched at 208. `predicate 190` and not 184,
+because the six `->Assert()` false positives are a separate correction with its own reason
+and its own commit.
+
+**Two of the three numbers are banked downward and the third is banked UP, which wants
+saying out loud.** `callwrap` sits two above `4d39d0d`, and those two are named:
+`P2Pmsg.cpp:2911` and `:2936`, the `AssertValidAlloc` pair. A rise banked without an
+argument is the thing this file exists to prevent, which is why What-is-left refused to
+re-bank at all while the argument was missing. It is not missing now -- the pair is the one
+case of the eight where promoting the call OUT of the assertion is the change that needs
+justifying, not leaving it in -- so the ceiling moves, and the two sites it moved for are
+written down here and in the commit that moved it.
+
+The gate goes green with that bank, for the first time since `d2763ce` made it red on
+2026-09-11:
+
+```
+  callwrap at baseline (247).
+  marker at baseline (208).
+  predicate at baseline (190).
+
+OK -- no ASSERT-family form has grown.
+```
+
+Two of the eight sites remain open, both in `MsgVBHeap.cpp`, and both are the same one
+question: `P2Pmsg.cpp:2911` and `:2936` want a pure `P2PmsgHeap_IsValidAlloc` split out of
+the repairing one before anything can be promoted out of an `ASSERT`.
+
+## 39. What is left
+
+Eight entries stood here. Four are closed by §35 to §38, and one of the four took two
+others with it, because those two existed only as artefacts of the measurement that was
+wrong. What replaces them is mostly new, and most of it was found by closing the old.
+
+- **`msgcore_field_is_sole` is a decision nobody has made, and the argument for making it
+  is now written.** §37 measured the premise §29 was resting on and it was false: there is
+  no such export, and `IsSole` only appeared bound because a fallback matched `is`. The
+  case for adding it is that exclusivity is the one fact a flat caller cannot reconstruct
+  from anything else on the surface -- `msgcore_field_get_p2pos` answers identity, not
+  exclusivity, and there is no flat route to `P2PmsgHeap_RefCount` -- and the signature
+  would be identical to nine `msgcore_field_is_*` predicates already exported, so it costs
+  no new type. The case against is not whether it should exist but what the header would
+  have to promise: TRUE is a guarantee and FALSE is not the opposite one, so the export is
+  load-bearing in one direction and advisory in the other, and `Msgcore_c.h` would have to
+  say so in as many words or callers will read FALSE as "someone else is looking". It is an
+  addition to a surface frozen through 1.x and bumps `Msgcore_version.h` in the same
+  commit, which makes it a versioning decision and leaves it to one. `IsInline` is NOT the
+  same case and should not travel with it: its FALSE is explicitly not a guarantee (§24),
+  and it describes storage placement, which is the line §37's allowlist declines to cross
+  twice over.
+
+- **`P2PmsgHeap_AssertValidBSTRio` is handed the raw image buffer through a
+  `P2PmsgHANDLE` parameter.** §35 found it at `MsgVBHeap.cpp:3564` while measuring the
+  gate: it is the same type confusion that was removed from the IOMAGE twin at `:4983`,
+  and it is still here. Measured rather than inferred -- it answers `true` for all twelve
+  BSTRio images in hand, the four corrupt ones included, and its "Corrupted BSTRio heap"
+  throw has never fired on anything. Fixing it introduces a refusal where there is none
+  today, ahead of the walk, and changes which message names a bad image. That is a
+  question about what `P2PmsgHeap_AssertValidBSTRio` is contracted to do rather than about
+  the gate §35 closed, so it is left whole rather than half-answered.
+
+- **`P2PmsgHeap_AssertValidAlloc` repairs, and its name says it tests.** §38 traced the two
+  `callwrap` sites that remain above `4d39d0d` -- `P2Pmsg.cpp:2911` and `:2936` -- to a
+  function whose SYS arm writes `pVBLock->oHdr.uVBLockDefs |= VBLock_Linked`
+  (`MsgVBHeap.cpp:1390`) and whose BSTRio arm says in its own comment that the repair sets
+  a flag bit IN THE IMAGE. `VBLock_Init` sets `Alloc` and not `Linked`
+  (`P2PmsgVBLock.cpp:327`), so the repair is live code on a fresh block. Wrapped in
+  `ASSERT(...)` it is not a lost check but a lost WRITE: **Debug and Release leave
+  different bytes in the block.** That is why the pair was left in, and why §38 banked a
+  ceiling upward rather than promote the call out -- promoting it runs an image write in
+  Release and decides something about the untrusted gate in passing. What settles it is
+  splitting a pure `P2PmsgHeap_IsValidAlloc` out of the repairing one; after that the
+  promotion is four lines.
+
+- **Six of the `predicate` count are not assertions, and one site is counted twice.**
+  PowerShell's `-match` is case-insensitive unless spelled `-cmatch`, so the script's
+  ASSERT pattern also matches `->Assert()`. The six are `P2Pevent`'s fluent builder on
+  branches ending in `->Throw()` or `->Cancel()` -- item 19's own prescription, counted as
+  violations of it -- and `P2Pevent::Assert` is `{ ASSERT(0); return this; }`
+  (`Msgexception.h:353`), already counted once as the `marker` it is. The banked
+  `predicate` figure has been six high since the file was written. It is not corrected
+  here, because `-cmatch` would drop the number by six in the same breath as §38's
+  re-bank, and two corrections landing in one figure is how a baseline stops meaning one
+  thing.
+
+- **`P3PmsgVect::IsName` is declared and defined nowhere.** §37 found it while triaging:
+  `MsgVect.h:145` declares it, its four siblings are defined at `MsgVect.cpp:1165`,
+  `:1187`, `:1198` and `:1208`, and `P2Pmsg.cpp:3412`'s `IsName` is a different member on a
+  different class. There is no caller anywhere in the tree, which is the only reason the
+  DLL links; any consumer that wrote one would meet `LNK2019` against a member the header
+  offers it. Two closes are available and both change the header surface of an exported
+  class -- define it in four lines against `VBLock_IsName`, in `IsData`'s shape, or delete
+  a declaration that has never had a working caller. Nobody has decided which.
+
+- **159 allowlist entries are still UNTRIAGED, and now they are the real 159.** §37 put the
+  honest bound count at 81 rather than 116, so the backlog is measured against a
+  denominator that no longer flatters it. Two `SetPermissions` lines were deliberately left
+  UNTRIAGED although they share `GetAccess`'s argument, so that the figure §38 and this
+  section quote would not move out from under them; the allowlist says so in the file. And
+  three members ARE bound where the matcher cannot see it -- `GetP2Pos` is
+  `msgcore_field_get_p2pos`, which the snake-caser spells `get_p2_pos`, and
+  `PageRegistration`'s two overloads are `msgcore_mgr_set_paging_sinks` and
+  `_set_populate_sink`. Their lines say that, rather than claiming a reason that is not the
+  real one.
+
+- **Whether a store should ever be able to report itself sole.** §36 measured `P2PmsgMgr`
+  member by member and found exactly one holder the walk does not make: `m_hMgr`, the
+  manager's own handle, giving `refs == mine + 1` on every manager row. Subtracting it is
+  arithmetically exact rather than an overcount, and it is four lines. It was declined
+  because `HeapHolders` counts VIEWS -- `m_hMgr` is no `P3PmsgObject`, was never
+  `Connect`ed and names no block, so `refs - mine` would stop meaning "other views hold
+  this" -- and because the subtraction flips `!mgr.IsSole()` at `MsgcoreSuite.cpp:3207`,
+  making a store with a tree under it read `sole=true`. That row was handed to §36 as a
+  constraint rather than as a question. It is a question: a store that holds only itself IS
+  the only holder, and the reason to refuse the answer is about what the predicate means,
+  not about the arithmetic. Nobody has argued it either way at length.
 
 - **A vect's `m_pP3PmsgData[]` is walked and holds nothing.** §31 measured it as an array
   of nullptrs for its whole life, because both sites that would fill it -- the vect's own
-  `GetNext` and `GetTail` -- are commented out, and one of them is still spelled
-  `P3PmsgList::GetTail` inside `MsgVect.cpp`. Whether a vect should have list-style data
-  cursors at all is a question about the vect's API. The walk costs three null tests and
-  is there so that restoring those readers cannot make `IsSole` wrong in the unsafe
-  direction without anybody noticing.
-
-- **`P2PmsgMgr` is not descended into.** It derives from `P3PmsgItem` and inherits
-  `P3PmsgField::HeapHolders` unchanged, so any sub-objects of its own are uncounted. That
-  is an undercount, which leaves FALSE, which promises nothing -- §26's safe direction --
-  and every existing `!mgr.IsSole()` row still passes. Nobody has measured what a manager
-  owns.
+  `GetNext` and `GetTail` -- are commented out, and two of the dead blocks are still
+  spelled `P3PmsgList::` inside `MsgVect.cpp` (`:237`, `:250`). Whether a vect should have
+  list-style data cursors at all is a question about the vect's API, and answering it by
+  deleting members of an exported class would change the layout silently for anything
+  already compiled against the header. The walk costs three null tests and is there so that
+  restoring those readers cannot make `IsSole` wrong in the unsafe direction without
+  anybody noticing.
 
 - **The per-BLOCK reference count is still a different library.** §26 set this out and
   nothing since has moved it: `VBListHANDLE` has no lock of any kind, only `nRefCount` is
-  atomic, `P2PmsgHeap_Close` says in its own comment that AddRef and Close race across pump
-  threads, and two writes to `m_aVBLock` take no reference at all. `IsSole`'s TRUE is a
-  guarantee and its FALSE still is not the opposite one; §31 narrowed what FALSE is about
-  and did not change that.
+  atomic and its declaration says why (`MsgVBHeap.cpp:806`, "AddRef/Close race across pump
+  threads"), `P2PmsgHeap_Close` repeats it in its own comment, and two writes to
+  `m_aVBLock` take no reference at all. `IsSole`'s TRUE is a guarantee and its FALSE still
+  is not the opposite one; §31 narrowed what FALSE is about and §36 measured that a manager
+  adds nothing to it, and neither changed that. Closing this means putting a lock on
+  `VBListHANDLE`, which is a redesign of the storage layer and not an entry in an
+  investigation of `^`.
 
 - **No image in hand carries a chain longer than one link, and that is the answer rather
   than a gap.** §32 asked all nineteen and none does. What would still be worth having is a
   legacy image from outside this repository, since the format argument -- not the file --
-  is what §30 rests on. The measurement is repeatable: the probe is in §36.
+  is what §30 rests on, and an image this tree builds only re-measures this tree's builder.
+  The measurement is repeatable: the probe is in §40.
 
 Nothing else from this investigation is outstanding. That is not a claim that the grammar
-is without defect -- only that every case these thirty-four sections measured has an
-answer, and that the answer is pinned by a test.
+is without defect -- only that every case these thirty-eight sections measured has an
+answer, and that the answer is pinned by a test or by a gate that runs on every push.
 
-## 36. Reproducing this document
+
+## 40. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
@@ -3604,8 +4383,10 @@ verbatim, writes its own three-link image as argument one — the positive contr
 which zero findings prove nothing — and then opens each remaining file with
 `P2PmsgHeap_Create*` and walks the arena with the library's own `VBLock_Hdr_u_SizeNN`,
 `VBLock_IsData`, `VBLockData_IsChained` and `VBLockData_GetChain2Next`. Install a
-`_CrtSetReportHook` that counts and returns, as `TestFramework` does, or the four
-assertions §35's first entry names will stop the run in a dialog.
+`_CrtSetReportHook` that counts and returns, as `TestFramework` does. Before §35 the four
+assertions What-is-left named would otherwise stop the run in a dialog; they no longer
+fire, but the probe's trusted-delegate phase still trips 115 of them by design, and
+counting is what makes that phase a control rather than a crash.
 
 Eleven of the nineteen are refused by the heap-open, which is those files working: most of
 the corpus is malformed on purpose. Reading them needs a scanner that parses the arena
@@ -3618,3 +4399,59 @@ block at offset 8; and BSTRio, whose `oDefs` is the complement pair, whose size 
 `oSize.aSize1`, and whose first block is at `offsetof(cTag)`, 48. `P2PmsgMgr::Load` tests
 BSTRio FIRST, and it has to: the IOMAGE complement test also accepts a BSTRio `oDefs` word,
 so the other order misreads a BSTRio image as an IOMAGE one.
+
+### The gate differential of §35
+
+The four-image result is a differential, and a differential needs two trees. Add a pristine
+worktree and one carrying only the change:
+
+```
+git worktree add <scratch>/wt-46a63f8 46a63f8
+git worktree add <scratch>/wt-bstrio  46a63f8
+```
+
+Build `DebugLib` in each, and pass `/p:WDMSCS_LIB=<that worktree>\lib` when you do.
+`WDMSCS_LIB` is an environment variable at User scope naming the shared
+`MSCS\lib`, and `Directory.Build.props` lets it win over the standalone default, so without
+the override a worktree stages its library over the main tree's and the two arms of the
+differential quietly become one. Link each probe against its own tree's
+`out\x64\DebugLib`, not against the staged copy. The cheap way to prove you did: the
+`__FILE__` baked into each library shows its own worktree path in the trapped assertion
+messages, so the before arm reports `wt-46a63f8\MsgVBHeap.cpp(3609)` and the after arm
+does not report it at all.
+
+The probe is §32's image walker with one phase added -- re-open each image through the
+trusted single-argument delegate, outside any gate -- which is what turns "the guard is
+present" into "the guard does something". Count assertions with `_CrtSetReportHook` rather
+than letting them raise; the trusted phase trips 115 by design and the run has to survive
+them to be a control.
+
+The one-line mechanism is smaller than the corpus and shows the same thing. Save a store,
+add one to `oKeys.nAllocEntries`, and open the image twice: through the untrusted overload
+it is refused by name, with an assertion before the fix and none after; through the trusted
+overload it is ACCEPTED in both builds, asserting at `MsgVBHeap.cpp:2087`, because outside
+a gate the walk repairs the counter and then answers true.
+
+### The matcher measurement of §37
+
+`check_api_drift.ps1 -ShowBound` names every binding, every fallback match and, since §37,
+every candidate the fallback refused and the test that refused it. The three tests are
+worth re-running separately against the 43 the old matcher passed, because the interesting
+property is not the new total but which members change side: 28 of the 43 are §34's 28,
+member for member, and §34 arrived at that list by hand months of reading apart from the
+rule that now reproduces it.
+
+### The assert replay of §38
+
+The category counts are source-text counts, so they can be replayed over history without
+building anything. Walk the range with the script's own classifiers:
+
+```
+git rev-list --reverse 4d39d0d..HEAD
+```
+
+and at each commit run the three patterns over the tracked sources, excluding `Platform/`
+and `tests/`. That is what establishes the two facts the bare numbers do not carry:
+`callwrap` crossed its ceiling at `d2763ce` and the gate has been red on every commit
+since, and `marker` never once rose above 216 across the whole range -- it fell to 207 and
+came back to 208, and the rise was reported nowhere, because a ceiling only fails upward.
