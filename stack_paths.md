@@ -2,7 +2,7 @@
 
 > Status: current as of 2026-09-11. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
-> every line of output below was run against this tree; §6, §7 and §21 say how to
+> every line of output below was run against this tree; §6, §7 and §22 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
 
 ## 1. Summary
@@ -73,6 +73,12 @@ followed nowhere:
 | `P3PmsgObject`'s copy constructor | `memcpy`'d an inline block into the copy | **a handle on a floating item was a DUPLICATE of it (§19)** |
 | `P3PmsgObject::Connect` | created the heap and placed nothing on it | **a handle addressed the source's own storage, and dangled (§19)** |
 | `P3PmsgObject::Connect`, the `ASSERT` under it | a condition the guard above excluded | every path that reached that arm asserted (§19) |
+| `P3PmsgObject::operator bool` | `m_hVBList!=0`, where `IsVoid` asks for a block | the two contradicted each other, and §19 made the answer move (§20) |
+| `P3PmsgField::IsVoid` | `m_hVBList==0` | **a floating item reported that it denotes nothing (§20)** |
+| `P3PmsgField::operator bool` | "is it populated", via `r_data()` | **evaluating it on a failed lookup FAULTED (§20)** |
+| `P3PmsgList` / `P3PmsgVect::operator bool` | `IsVoid()` | **true exactly when there was no list (§20)** |
+| `CListCtrl_Ext`, the column guard | tested the ROW, not the ITEM | **a missing column reached `r_data()` on a void field (§20)** |
+| `P3PmsgField`'s copy constructor, its second arm | guarded on a member zeroed the line above | a handle copy that never ran, in a class that copies by value (§20) |
 
 Fixed by `b6ae7c7` (the selector), `e22c271` (the root-path walk), `72e8f88` (lists and
 vectors in a path, §6), `d2763ce` (pushing them, §7), `099417d` (releasing them, §7) and
@@ -84,7 +90,7 @@ the library itself writes, §11), `d31f2c4` (the collection's own path, §12) an
 `2a03161` (the descendant collection, and the rule stated once, §15) and `0888659`
 (one arm per block kind, §16) and `c0409cb` (a bare `.` wherever it stands, §17) and `2de26ac`
 (the root marker only where a path is rooted, §18) and `48ff002` (a floating item is one
-object, §19).
+object, §19) and `c8f1af6` (one question, one answer, §20).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -1413,22 +1419,132 @@ across copies in the same breath.
 Nothing on the insertion path takes a `P3PmsgObject` by value, so nothing rehomes. The
 move is lazy by construction — an item that is never shared never leaves its object.
 
-## 20. What is left
+## 20. "Is there anything here?" had four answers
 
-- **`P3PmsgField` copies as a value; `P3PmsgObject` now copies as a handle.**
-  `P3PmsgField oB = oA` runs `RenderThisSafe` and then a member-wise deep copy — name,
-  data, attributes, descendants — so it is a second item, and always was.
-  `P3PmsgObject oB = oA.r_Object()` is a handle on the first. Both are defensible and both
-  are now internally consistent, but they are one keystroke apart at the call site and
-  nothing there says which you asked for. Changing either would change what a copy means
-  for every caller in this tree and in Chartboard, which is a larger question than any of
-  the sections above asked.
+§19 left one thing recorded: a `P3PmsgField` copies as a value, a `P3PmsgObject` copies
+as a handle, and nothing at the call site says which you asked for. The question that
+follows from it is what a caller CAN ask. Measuring that found the same defect one level
+down — **the question has two spellings on every class in this family, and they
+disagreed**:
+
+| class | `IsVoid()` | `operator bool` |
+|---|---|---|
+| `P3PmsgObject` | `m_hVBList==0 && m_aVBLock==0` — denotes nothing | `m_hVBList!=0` — is on a heap |
+| `P3PmsgField` | `m_hVBList==0` — is on a heap | has a name or non-null data — is populated |
+| `P3PmsgAttr` / `P3PmsgDesc` | — | delegates to the object's |
+| `P3PmsgList` / `P3PmsgVect` | the field's | **`IsVoid()` — the answer inverted** |
+
+Four meanings for one question. Asked of a floating item, two said yes and two said no,
+and which two depended on which class you happened to be holding:
+
+```
+  default-constructed   field: IsVoid=yes bool=no   |  object: IsVoid=no  bool=no
+  floating, named       field: IsVoid=yes bool=yes  |  object: IsVoid=no  bool=no
+  in a tree             field: IsVoid=no  bool=yes  |  object: IsVoid=no  bool=yes
+  a value copy of it    field: IsVoid=yes bool=yes  |  object: IsVoid=no  bool=no
+```
+
+Read the second row twice. `oField.IsVoid()` says there is nothing here and `if (oField)`
+says there is, in the same breath, about the same item.
+
+**§19 is what made this urgent rather than untidy.** An inline item is now rehomed onto a
+heap the first time it is shared, so every answer spelled *"is there a heap"* changes when
+somebody takes a copy of the handle:
+
+```
+  before sharing : field IsVoid=yes  object bool=no
+  after  sharing : field IsVoid=no   object bool=yes
+```
+
+Nothing about the item changed; it is still called `Floater`. Asking a question must not
+be what decides its answer, and that is the argument the rest of this section rests on.
+
+So: **`IsVoid()` means "denotes no item" on every class, and `operator bool` is exactly
+`!IsVoid()` on every class.** `P3PmsgObject::IsVoid` already asked that — it has since
+2025-02-18 — and is untouched; the other five now follow it. All four rows above now read
+the same across all four columns.
+
+**Nothing that exists changes behaviour.** Every caller of `P3PmsgObject::operator bool`
+in this tree and in Chartboard — six of them, found by deleting it and building
+everything — reads it as *"did I get anything?"*: `P3PmsgAttr` and `P3PmsgDesc` delegate
+to it, `GetParent` walks are guarded by it, and a `RootPath2Object` miss is detected with
+it. Each is handed either a tree object or a void one, the two states where the old
+answer and the new one agree. `P3PmsgList` and `P3PmsgVect` have no caller at all, which
+is why an inverted answer had gone unnoticed.
+
+### The one caller of the field's, and it was a bug
+
+`P3PmsgField::operator bool` had exactly one caller in the solution, in `CListCtrl_Ext`,
+which walks a row's columns and looks each one up by its header text:
+
+```cpp
+    P3PmsgItem oItem = oItemRow.r_Desc().SelectObject(lpszColumnText);
+    if ( !oItemRow )
+      continue;
+    oCListCtrl.SetItemText ( nItem, nSubItem, oItem.r_data().ToString() );
+```
+
+It tests `oItemRow` where it means `oItem` — one token, and the row is the loop invariant
+that is never void here — so the guard could not fire and a column the row does not carry
+fell through to `r_data()` on a void field.
+
+The guard as written could not have helped either, which is the part worth keeping. The
+old `operator bool` answered *"is it populated"* by reaching through to `r_data()`, so
+evaluating it on a field over a failed lookup **faults**:
+
+```
+  lookup missed: object IsVoid=yes
+  field over it: IsVoid=yes   asserts=0
+  about to evaluate `if ( oMissField )` ...
+                                            <-- exit 3
+```
+
+Against the fixed library the same probe prints `... it returned false`. Only the line
+after it — `r_data()` on a void field, reached by deliberately ignoring the guard — still
+faults, which is what the guard is for.
+
+### The other half of §19's note is stated, not changed
+
+`P3PmsgField`'s copy constructor carried an arm that `AddRef`'d rhs's heap and shared its
+block — a HANDLE copy — behind `if ( !OBJ__hVBList )`, testing a member of THIS field that
+`RenderThisSafe` had zeroed on the line above. `Connecta(0,...)` returns early when the
+handle it is given already matches, so the guard was true on every call and the arm below
+it never ran.
+
+It is removed rather than repaired. Reviving it would flip every field copy in this tree
+and in Chartboard from a value to an alias, silently, which is a decision and not a bug
+fix. What the class does is now what the class says:
+
+```
+  P3PmsgField oB = oA;               a copy of the item
+  P3PmsgField oB = oA.r_Object();    the item
+```
+
+The library writes the second wherever it means to write through — all seven such sites
+in the solution do, `P3PmsgRefactor_DataType` and `P2Pmsg_UpgradeMove` among them —
+because a collection hands back its own cursor and the next `SelectItem` moves it:
+
+```
+  bound to AAA: name='AAA' pos=259
+  after selecting BBB, the SAME reference reads 'BBB' pos=423
+```
+
+Three meanings, then, for one expression, and the suite now pins all three.
+
+## 21. What is left
+
+- **A `P3PmsgField` cannot say whether it is a copy or a handle.** It can now say whether
+  it denotes anything, which is the question every caller in this solution was actually
+  asking, and `r_Object()` says which one you are ASKING for. But given a
+  `P3PmsgField&` parameter, nothing tells the callee whether writing through it reaches
+  the caller's item. Both spellings are correct for what they do and both are used
+  deliberately; a type that distinguished them would be a different library.
 
 Nothing else from this investigation is outstanding. That is not a claim that the grammar
-is without defect — only that every case these nineteen sections measured has an answer,
+is without defect — only that every case these twenty sections measured has an answer,
 and that the answer is pinned by a test.
 
-## 21. Reproducing this document
+## 22. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 
