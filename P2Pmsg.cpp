@@ -7003,11 +7003,20 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
         ASSERT(0);
         return P3PmsgObject();
       }
+      //  A COLLECTION HAS NO ATTRIBUTES OF ITS OWN. It is not an item: a
+      //  VBLockAttr carries aParent and its members, and nothing else. So
+      //  "Item@@Tag" names nothing -- but it is a well-formed question, and
+      //  the answer to one of those is the empty object, not an assertion.
+      //  Same reasoning as the never-created collection above: what a caller
+      //  spells is the caller's business, and only what the library itself
+      //  could not have meant is a debug-build event.
+      //
+      //  Reachable before any of this: "Item@^@Tag" splits cleanly -- "@^" is
+      //  the collection at the last push (§9) -- and arrived here to assert
+      //  and then return exactly this. §14 legalises the shorter spelling,
+      //  which is what made it worth writing down.
       if ( *lpszObjectPath == T_AttrDelim )
-      {
-        ASSERT(0);
-        return P3PmsgObject();
-      }
+        return P3PmsgObject();         // Selection path broken
       //  '^' ON THE COLLECTION ITSELF. An attribute collection has no stack of
       //  its own -- aStack is a VBLockItem field and this block is a
       //  VBLockAttr -- which is why this used to answer "broken path". It is
@@ -7279,6 +7288,23 @@ P3Pmsg_IsPathDelimiter ( LPCWSTR lpszObjectPath )
    return FALSE;
 }
 
+//  The two delimiters that stand as a WHOLE component, carrying no name of
+//  their own because neither needs one: '^' names the pushed value of whatever
+//  is to its left, '@' the attribute COLLECTION. Each of those is an object
+//  with no other spelling, and the collection is the one P3Pmsg_GetPath emits
+//  a path for (§12).
+//
+//  The descendant delimiters always introduce a name, so a component that is
+//  nothing but a '.' -- or a '\' or a '/' -- is an empty name and stays
+//  malformed. ".Root.Item.@Tag" is refused for that reason and ".Root.Item@Tag"
+//  is the spelling; it is only the LONE delimiter that this is about.
+static bool
+P3Pmsg__IsBareComponent ( const CString& strItemname )
+{
+    return strItemname.GetLength() == 1 &&
+           ( strItemname[0] == T_StckDelim || strItemname[0] == T_AttrDelim );
+}
+
 //
 //  Splits passed full P3PmsgObject path into its functional components
 //  NOTES: Full path format Rootname[/|\|@|^]Componentname[/|\|@|^]etc
@@ -7338,13 +7364,17 @@ P3Pmsg_SplitRootPath ( LPCWSTR lpszObjectPath, CString& strRootname
         strItemname += *lpszWorkingPath++;
       }
       //  A component that is nothing but its delimiter carries an empty NAME,
-      //  and for the descendant delimiters that is still malformed. '^'
-      //  introduces no name at all -- it names the pushed item itself -- so it
-      //  is the one delimiter that stands as a whole component, and refusing
-      //  it here failed the entire path.
-      const bool bStckOnly = strItemname.GetLength() == 1 &&
-                             strItemname[0] == T_StckDelim;
-      if ( strItemname.GetLength() <= 1 && !bStckOnly )
+      //  and for the descendant delimiters that is still malformed. '^' and
+      //  '@' introduce no name at all -- refer P3Pmsg__IsBareComponent -- so
+      //  they are the two that stand as a whole component, and refusing either
+      //  here failed the entire path.
+      //
+      //  '@' was let through by the clause AFTER this loop and not by this
+      //  one, so a bare '@' was a component only at the END of a path:
+      //  ".Root.Item@" resolved and ".Root.Item@.Tag" was malformed, though
+      //  ".Root.Item@^.Tag" -- one step longer, through the collection at the
+      //  last push -- resolved. The two clauses now ask the same question.
+      if ( strItemname.GetLength() <= 1 && !P3Pmsg__IsBareComponent(strItemname) )
         return FALSE;
 //vvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 if(strItemname.CompareNoCase(L".pya")==0||
@@ -7377,8 +7407,7 @@ strItemname=strLast;
     //  "@Currency", has a name after the delimiter and never came through
     //  here. So the drop was protecting a round-trip that could not happen,
     //  and keeping the component is what makes one.
-    if ( strItemname.GetLength() == 1 && ( strItemname[0] == T_StckDelim ||
-                                           strItemname[0] == T_AttrDelim    ) )
+    if ( P3Pmsg__IsBareComponent(strItemname) )
       oCListItems.AddTail ( strItemname );
     return TRUE;
 }

@@ -1916,6 +1916,125 @@ static void Test_AttrCollectionPath()
 }
 
 // ---------------------------------------------------------------------------
+// P3Pmsg_SplitRootPath : a bare '@' is a component wherever it stands
+// ---------------------------------------------------------------------------
+static void Test_BareAttrComponent()
+{
+    //  '^' and '@' are the two delimiters that carry no name of their own, and
+    //  each names an object with no other spelling -- the pushed value, and the
+    //  attribute COLLECTION. §12 let a bare '@' through, but by the clause
+    //  AFTER the splitter's loop, not the test inside it: so it was a component
+    //  only at the END of a path. ".Root.Item@" resolved; ".Root.Item@.Tag" was
+    //  malformed -- while ".Root.Item@^.Tag", one step longer and through the
+    //  collection as it stood at the last push, resolved (§13). The two clauses
+    //  now ask the same question.
+    TF_CASE("a bare '@' splits as a component part way along a path")
+    {
+        CString        strRoot;
+        CList<CString> oItems;
+
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root.Item@.Tag", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 3);
+        if (oItems.GetCount() == 3)
+        {
+            POSITION pos = oItems.GetHeadPosition();
+            TF_CHECK(oItems.GetNext(pos) == L".Item");
+            TF_CHECK(oItems.GetNext(pos) == L"@");
+            TF_CHECK(oItems.GetNext(pos) == L".Tag");
+        }
+
+        //  At the end it still splits the way §12 made it.
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root.Item@", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 2);
+
+        //  A lone DESCENDANT delimiter is an empty name and stays malformed --
+        //  that is the half of the rule which does not change.
+        TF_CHECK(!P3Pmsg_SplitRootPath(L".Root.Item..Tag", strRoot, oItems));
+        TF_CHECK(!P3Pmsg_SplitRootPath(L".Root.Item.@Tag", strRoot, oItems));
+    }
+
+    //  And it answers the same object the short spelling does. "@Tag" carries
+    //  its name after the delimiter and has always been one component; "@.Tag"
+    //  is the collection and then a name looked up inside it, which is two --
+    //  the same two steps "@^.Tag" takes through the snapshot's collection.
+    TF_CASE("'@.Tag' and '@Tag' answer the same attribute")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        mgr.r_Desc() += oInst;
+        mgr.r_Desc() += P3PmsgField(L"RIO");            // no attributes at all
+
+        P3PmsgObject oShort = mgr.RootPath2Object(L".Store.BHP@Currency");
+        P3PmsgObject oLong  = mgr.RootPath2Object(L".Store.BHP@.Currency");
+        TF_CHECK(!oShort.IsVoid());
+        TF_CHECK(!oLong.IsVoid());
+        if (!oShort.IsVoid() && !oLong.IsVoid())
+            TF_CHECK(oShort.GetP2Pos() == oLong.GetP2Pos());
+
+        //  A trailing '.' after the collection is dropped, as every trailing
+        //  '.' is, so this is the collection itself.
+        P3PmsgObject oColl = mgr.RootPath2Object(L".Store.BHP@.");
+        TF_CHECK(oColl.IsAttr());
+
+        //  The root has a collection of its own, and this is the only root-path
+        //  spelling that goes through it.
+        mgr.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Venue");
+        P3PmsgObject oRootAttr = mgr.RootPath2Object(L".Store@.Venue");
+        TF_CHECK(!oRootAttr.IsVoid());
+        P3PmsgObject oRootShort = mgr.RootPath2Object(L".Store@Venue");
+        if (!oRootAttr.IsVoid() && !oRootShort.IsVoid())
+            TF_CHECK(oRootAttr.GetP2Pos() == oRootShort.GetP2Pos());
+
+        //  The miss rules are the component's own delimiter's, as ever: a '.'
+        //  component that finds nothing throws, an '@' one answers void. Here
+        //  it is the '@' that misses -- RIO has no collection at all.
+        bool bThrewName = false;
+        try   { mgr.RootPath2Object(L".Store.BHP@.Nobody"); }
+        catch (P2Pevent* pEVT) { bThrewName = true; pEVT->Cancel(false); }
+        TF_CHECK(bThrewName);
+
+        TF_CHECK(mgr.RootPath2Object(L".Store.RIO@.Currency").IsVoid());
+    }
+
+    //  A COLLECTION HAS NO ATTRIBUTES OF ITS OWN -- it is not an item. So
+    //  "Item@@Tag" names nothing. It is still a well-formed question, and the
+    //  answer to one of those is the empty object: the selector's attribute arm
+    //  used to ASSERT(0) first, which is a debug-build event for something only
+    //  a caller could have spelled.
+    //
+    //  Not a new path. "Item@^@Tag" splits cleanly without any of this -- "@^"
+    //  is the collection at the last push (§9) -- and asserted on the way to
+    //  the same void. Legalising the shorter spelling is what made it worth
+    //  fixing rather than noting.
+    TF_CASE("asking a collection for an attribute is a miss, not an assertion")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+
+        P3PmsgField oInst(L"BHP");
+        oInst.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Currency");
+        mgr.r_Desc() += oInst;
+
+        P3PmsgField oLive = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oLive.IsVoid());
+        oLive.r_Stck().Push();
+
+        //  Each of these runs the arm; a raised assertion is a failed test.
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP@@Currency").IsVoid());
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP@@").IsVoid());
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP@^@Currency").IsVoid());
+
+        //  The spellings that DO name something still do.
+        TF_CHECK(!mgr.RootPath2Object(L".Store.BHP@Currency").IsVoid());
+        TF_CHECK(!mgr.RootPath2Object(L".Store.BHP@^.Currency").IsVoid());
+        TF_CHECK(mgr.RootPath2Object(L".Store.BHP@").IsAttr());
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P2PmsgMgr::RootPath2Object : a non-field reached part way along the walk
 // ---------------------------------------------------------------------------
 static void Test_RootPathContainers()
@@ -3402,6 +3521,7 @@ void RunMsgcoreSuite()
     Test_GeneratedStackPath();
     Test_AttrCollectionPath();
     Test_RootPathContainers();
+    Test_BareAttrComponent();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();
