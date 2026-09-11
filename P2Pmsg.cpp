@@ -7130,7 +7130,14 @@ P3Pmsg_SplitRootPath ( LPCWSTR lpszObjectPath, CString& strRootname
     {
       while ( !P3Pmsg_IsPathDelimiter(lpszWorkingPath) )
         strItemname += *lpszWorkingPath++;
-      if ( strItemname.GetLength() <= 1 )
+      //  A component that is nothing but its delimiter carries an empty NAME,
+      //  and for the descendant delimiters that is still malformed. '^'
+      //  introduces no name at all -- it names the pushed item itself -- so it
+      //  is the one delimiter that stands as a whole component, and refusing
+      //  it here failed the entire path.
+      const bool bStckOnly = strItemname.GetLength() == 1 &&
+                             strItemname[0] == T_StckDelim;
+      if ( strItemname.GetLength() <= 1 && !bStckOnly )
         return FALSE;
 //vvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 if(strItemname.CompareNoCase(L".pya")==0||
@@ -7146,6 +7153,15 @@ strItemname=strLast;
       if ( lpszWorkingPath[0] )
         strItemname = *lpszWorkingPath++;
     }
+    //  The loop takes a trailing delimiter into strItemname and then exits on
+    //  the terminator without adding it. For '.' that discarded nothing -- a
+    //  trailing '.' is an empty name, refused above wherever it is not last --
+    //  but for '^' it discarded the whole request: ".Root.Item^" asks for the
+    //  value Item held before its last push, and it came back as the component
+    //  list for ".Root.Item", which is Item itself. A wrong object, silently,
+    //  and the shortest way to spell the question.
+    if ( strItemname.GetLength() == 1 && strItemname[0] == T_StckDelim )
+      oCListItems.AddTail ( strItemname );
     return TRUE;
 }
 //

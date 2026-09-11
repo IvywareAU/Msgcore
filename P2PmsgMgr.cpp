@@ -822,7 +822,29 @@ P2PmsgMgr::RootPath2Object ( LPCWSTR lpszObjectPath )
       {
         CString strItem = oCListItems.GetNext(posItems);
         LPCWSTR lpszItemName = strItem;
-        if ( P3Pmsg_IsPathDelimiter(lpszItemName) )
+        //  Only the DESCENDANT delimiters come off, and they have to: a path
+        //  handed to P3Pmsg_SelectObject with a leading '.' means "this
+        //  component names the object you are standing on", and it is matched
+        //  against the PARENT's own name (P2Pmsg.cpp, P3Pmsg_SelectObject), so
+        //  ".Child" asked of the parent matches nothing. Stripped, it is a
+        //  plain name and the field arm looks it up among the descendants,
+        //  which is what a step of this walk means.
+        //
+        //  '@' and '^' must SURVIVE, because for those two the delimiter IS
+        //  the instruction and the name after it is read somewhere else:
+        //  "@Tag" is the attribute Tag, "^" is the item as it stood before the
+        //  last push, "^Kid" is that item's child. Stripped, all three became
+        //  plain names and were looked up among the descendants -- so an
+        //  attribute or a pushed value was answered with whatever child
+        //  happened to share its name, or, far more often, with nothing.
+        //  Every component of either kind was silently the wrong question.
+        //
+        //  Spelled out rather than asking P3Pmsg_IsPathDelimiter, which
+        //  answers TRUE for the terminator as well: an empty component
+        //  stepped the pointer PAST its own end.
+        if ( lpszItemName[0] == T_DescDelim ||
+             lpszItemName[0] == T_BackSlash ||
+             lpszItemName[0] == T_ForeSlash    )
           lpszItemName++;
 
         // Requested path item may or may not exist at this stage
@@ -856,7 +878,25 @@ P2PmsgMgr::RootPath2Object ( LPCWSTR lpszObjectPath )
 
         // Select the current item
         // NOTES: Last item in list is the requested item
-        oItemParent = oItemParent.SelectObject(lpszItemName);
+        //      : A component that resolves to nothing ENDS the walk, and the
+        //        empty object is the answer -- "IsEmpty flags failed search",
+        //        as the contract above says. It cannot be assigned into
+        //        oItemParent and tested afterwards, because
+        //        P3PmsgField::operator=(const P3PmsgObject&) refuses anything
+        //        that is not a field and THROWS ("Invalid overloaded context"),
+        //        so an ordinary miss came out of here as a raised event rather
+        //        than an empty answer. Nor can the walk simply stop and hand
+        //        back what it has: oItemParent still holds the PARENT, which
+        //        would answer a failed search with the wrong object.
+        //      : Only the descendant components above throw for a miss, which
+        //        is deliberate and unchanged -- those get the populate callback
+        //        and then "Path to object does not exist". An '@' or a '^' that
+        //        finds nothing is an ordinary answer: an item that was never
+        //        pushed has no snapshot.
+        P3PmsgObject oSelected = oItemParent.SelectObject(lpszItemName);
+        if ( oSelected.IsVoid() )
+          return P3PmsgObject();
+        oItemParent = oSelected;
       }
       return oItemParent.r_Object();
     }

@@ -890,6 +890,109 @@ static void Test_Stack()
 }
 
 // ---------------------------------------------------------------------------
+// P2PmsgMgr : root paths -- ".Root.Item@Attr", ".Root.Item^"
+// ---------------------------------------------------------------------------
+static void Test_RootPath()
+{
+    //  RootPath2Object splits a full path into components, each carrying the
+    //  delimiter that introduced it, and walks them. It used to strip that
+    //  delimiter off EVERY component before looking it up, which is right for
+    //  '.' -- P3Pmsg_SelectObject reads a leading dot as naming the object you
+    //  are standing on -- and wrong for the other two, where the delimiter is
+    //  the whole instruction. So every '@' and '^' component was looked up as
+    //  a plain descendant name.
+    TF_CASE("a root path reaches an attribute through '@'")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Root";
+        P3PmsgField oChild(L"Alpha");
+        oChild.r_Attr(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"Tag");
+        mgr.r_Desc() += oChild;
+
+        //  The descendant walk still works - that is the half that was right.
+        TF_CHECK(!mgr.RootPath2Object(L".Root.Alpha").IsVoid());
+
+        //  The attribute is NOT a child named "Tag", and before the fix that
+        //  is exactly what was asked for.
+        TF_CHECK(!mgr.RootPath2Object(L".Root.Alpha@Tag").IsVoid());
+    }
+
+    //  '^' is the harder half, because the component is the delimiter ALONE.
+    //  P3Pmsg_SplitRootPath refused a component with no name after it, and
+    //  dropped one that ended the path -- so ".Root.Beta^" came back as the
+    //  component list for ".Root.Beta" and answered with the live item. The
+    //  wrong object, silently, for the shortest way to spell the question.
+    TF_CASE("a root path reaches a pushed value through '^'")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Root";
+        mgr.r_Desc() += P3PmsgField(L"Beta");
+
+        //  PushBack deep-copies, so the live child has to come back out of the
+        //  tree before it can be pushed.
+        P3PmsgField oBeta = mgr.RootPath2Object(L".Root.Beta");
+        TF_CHECK(!oBeta.IsVoid());
+        oBeta.r_Desc(P3PmsgField::AttrCMD_Create);
+        oBeta.r_Desc() += P3PmsgField(L"Early");
+        oBeta.r_Stck().Push();
+        oBeta.r_Desc() += P3PmsgField(L"Late");
+
+        TF_CHECK(!mgr.RootPath2Object(L".Root.Beta^").IsVoid());
+        TF_CHECK(!mgr.RootPath2Object(L".Root.Beta^.Early").IsVoid());
+        TF_CHECK(!mgr.RootPath2Object(L".Root.Beta^Early").IsVoid());
+
+        //  "Late" was added after the push, so the live item has it ...
+        TF_CHECK(!mgr.RootPath2Object(L".Root.Beta.Late").IsVoid());
+
+        //  ... and the snapshot the path just selected is a different object
+        //  from the live one.
+        P3PmsgObject oSnap = mgr.RootPath2Object(L".Root.Beta^");
+        TF_CHECK(!(oSnap == oBeta.r_Object()));
+    }
+
+    //  An item that was never pushed has no snapshot. That is an ordinary
+    //  answer, not a missing path: only the descendant components throw for a
+    //  miss, and the walk must stop on the empty object rather than ask the
+    //  next component of it -- which walks a void P3PmsgObject into
+    //  P3Pmsg_SelectObjectRecurse and trips the ASSERT(0) at its tail.
+    TF_CASE("'^' on an unpushed item ends the walk empty")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Root";
+        mgr.r_Desc() += P3PmsgField(L"Plain");
+
+        TF_CHECK(mgr.RootPath2Object(L".Root.Plain^").IsVoid());
+        TF_CHECK(mgr.RootPath2Object(L".Root.Plain^.Kid").IsVoid());
+    }
+
+    //  The splitter's rejection of a nameless component still stands for the
+    //  delimiters that DO introduce a name, and a path with no components at
+    //  all is still the root.
+    TF_CASE("a nameless descendant component is still malformed")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Root";
+        mgr.r_Desc() += P3PmsgField(L"Alpha");
+
+        CString        strRoot;
+        CList<CString> oItems;
+        TF_CHECK(!P3Pmsg_SplitRootPath(L".Root..Alpha", strRoot, oItems));
+
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root", strRoot, oItems));
+        TF_CHECK(strRoot == L"Root");
+        TF_CHECK(oItems.GetCount() == 0);
+
+        //  A trailing '.' is still dropped, as it always was.
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root.", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 0);
+
+        //  A trailing '^' is NOT, and that is the change.
+        TF_CHECK(P3Pmsg_SplitRootPath(L".Root.Alpha^", strRoot, oItems));
+        TF_CHECK(oItems.GetCount() == 2);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P2Pevent : fluent event / exception builder
 // ---------------------------------------------------------------------------
 static void Test_Event()
@@ -1621,6 +1724,7 @@ void RunMsgcoreSuite()
     Test_Curs_GotoKeyLifetime();
     Test_VBLockItem_UnknownType();
     Test_Stack();
+    Test_RootPath();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();
