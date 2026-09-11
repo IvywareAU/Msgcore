@@ -932,6 +932,34 @@ const VBLock    soVBLock = { 0 };
 //  that a corrupt free list otherwise produces. See P2PmsgHeap_AllocBSTRio.
 static const int kMaxAllocResizes = 2;
 
+//  How many blocks that ALREADY FIT the request the allocator will look at
+//  before settling for the best of them.
+//
+//  This allocator was first-fit from the head of a LIFO free list, and the two
+//  together are worse than either: a freed block goes to the head, so the head
+//  is whichever block was freed last, and first-fit takes it whatever its size.
+//  Free an 800-byte block and then a 50-byte one, ask for 50, and the 800 is
+//  split -- the 50 sits on the list untouched, and the next 800-byte request
+//  cannot be served by what is left of the block that used to serve it. The
+//  boundary tag (refer the note above VBHeap_FootMagic) repairs the case where
+//  two such blocks are ADJACENT, by merging them back into one. It cannot
+//  repair this one: live data sits between them and no merge is possible, so
+//  the only repair left is to choose better among the blocks that exist.
+//
+//  BOUNDED, because "best fit" across a whole free list is a walk of the whole
+//  free list on every single allocation, and this list can be long. Eight is
+//  chosen against the list's own order rather than as a round number: the list
+//  is LIFO, so the blocks nearest the head are the most recently freed, which
+//  in a container being emptied and refilled -- the workload that produced the
+//  824-bytes-a-round drift this and the boundary tag were found by -- are
+//  exactly the blocks about to be asked for again. A walk of the whole list
+//  would spend most of its time on the part least likely to help.
+//
+//  Blocks too small to serve the request do NOT count against this budget:
+//  they were walked past before this change and are walked past after it. What
+//  is budgeted is only the walking this change ADDS.
+static const VBLsize kMaxFitWalk = 8;
+
 ///////////////////////////////////////////////////////////////////////
 //  VBHeap private operations
 //  NOTES: Used to expose VBHeap size etc
@@ -4229,6 +4257,11 @@ ASSERT(VBHeap_IsFree(pVBLock));
 ASSERT(VBHeap_IsAddr(pVBLock,pHandle->uAddrType));
 ASSERT(VBHeap_IsAlloc(pVBLock));
 ASSERT(VBHeap_IsLinked(pVBLock));
+      //  Still first-fit, unlike the two live arms, and deliberately so: the
+      //  closer-fit walk is an IMPROVEMENT, so a revived copy of this function
+      //  would merely allocate the way the library used to. F11b's bound is a
+      //  SAFETY property and had to be carried here for the reason its note
+      //  gives; a better choice of block does not.
       if ( VBHeap_Sizenn(pVBLock) < nSizeof )
       {
         aVBLockFree = VBHeap_GetNext ( pVBLock, 0 );
@@ -4278,10 +4311,15 @@ P2PmsgHeap_AllocIOMAGE ( P2PmsgHANDLE hVBList, VBLsize& nSizeof )
     // NOTES: Normal behaviour is to simply allocate and fall
     //        through.  Re-sizing is the exception
 //P2PmsgHeap_AssertValidBSTRio(hVBHeap);
-    int     nResizes = 0;              // F10; see AllocBSTRio
-    VBLsize nWalked  = 0;              // F11b; see AllocBSTRio
+    int     nResizes  = 0;             // F10; see AllocBSTRio
+    VBLsize nWalked   = 0;             // F11b; see AllocBSTRio
+    bool    bFirstFit = false;         // see the re-check below, and kMaxFitWalk
     const VBLsize nMaxFree = P2PmsgHeap_MaxBlocks ( hVBList );
 TOP:nWalked = 0;                       // per pass -- the walk restarts at the head
+    //  Closer fit, reset per pass. Refer kMaxFitWalk.
+    VBLaddr aVBLockBest = 0;
+    VBLsize nSizeofBest = 0;
+    VBLsize nFits       = 0;
     VBLaddr aVBLockFree = VBHeapRoot_GetFree(pHandle->u.IOMAGE.pRoot);
 //TOP:VBLaddr aVBLockFree = pHandle->u.BSTRio.pBSTRio->oKeys.aFree;
     while ( aVBLockFree )
@@ -4304,10 +4342,68 @@ ASSERT(VBHeap_IsAddr(pVBLock,pHandle->uAddrType));
 ASSERT(VBHeap_IsAlloc(pVBLock));
 ASSERT(VBHeap_IsLinked(pVBLock));
 ASSERT(VBHeap_IsAddr(pVBLock,pHandle->uAddrType));
-      if ( VBHeap_Sizenn(pVBLock) < nSizeof )
+      const VBLsize nSizeofFree = VBHeap_Sizenn ( pVBLock );
+      if ( nSizeofFree < nSizeof )
       {
         aVBLockFree = VBHeap_GetNext ( pVBLock, 0 );
         continue;
+      }
+
+      //  CLOSER FIT. A block that cannot be split is taken at once: the
+      //  remainder would be too small to be a free block, so SplitAlloc hands
+      //  the whole of it over (refer its "VBLock adoption" branch) and nothing
+      //  further along the list can better no waste at all.
+      if ( bFirstFit ||
+           nSizeofFree - nSizeof < VBList_VBHeapMin(pVBLock->oHdr.uVBLockDefs) )
+      {
+        aVBLockBest = aVBLockFree;
+        break;
+      }
+      if ( aVBLockBest == 0 || nSizeofFree < nSizeofBest )
+      {
+        aVBLockBest = aVBLockFree;
+        nSizeofBest = nSizeofFree;
+      }
+      if ( ++nFits >= kMaxFitWalk )
+        break;
+      aVBLockFree = VBHeap_GetNext ( pVBLock, 0 );
+    }
+
+    if ( aVBLockBest )
+    {
+      //  THE CHOSEN BLOCK IS RE-CHECKED, because the walk that chose it also
+      //  collates, and collating absorbs the block that physically FOLLOWS the
+      //  one collated. The free list is in no address order, so a block visited
+      //  late in the walk can sit immediately before a block chosen early in
+      //  it, and swallow it. An absorbed block has its defs byte zeroed (refer
+      //  the assignment in P2PmsgHeap_CollateIOMAGE), so the predicates below
+      //  catch it rather than allocating from the middle of another block.
+      //
+      //  The answer is one more pass with bFirstFit set, which takes the first
+      //  block that fits the moment it finds it. THAT pass cannot go stale --
+      //  nothing is collated between finding the block and allocating it -- so
+      //  the retry is taken at most once, and the throw below cannot be reached
+      //  by any heap this allocator built.
+      aVBLockFree = aVBLockBest;
+      pVBLock     = VBList2PhysVBHeap ( hVBList, aVBLockFree );
+      if ( pVBLock == nullptr                         ||
+           !VBHeap_IsAddr(pVBLock,pHandle->uAddrType) ||
+           !VBHeap_IsAlloc(pVBLock)                   ||
+           !VBHeap_IsLinked(pVBLock)                  ||
+           !VBHeap_IsFree(pVBLock)                    ||
+           VBHeap_Sizenn(pVBLock) < nSizeof              )
+      {
+        ASSERT(!bFirstFit);
+        if ( !bFirstFit )
+        {
+          bFirstFit = true;
+          goto TOP;
+        }
+        EVERR->MODULE->AFP(aVBLockFree)
+             ->Message(L"P2PmsgHeap_AllocIOMAGE: the chosen free block did not"
+                      L" survive the walk -- free list does not describe this"
+                      L" image" )
+             ->Throw();
       }
 
       // Allocated
@@ -4397,10 +4493,15 @@ P2PmsgHeap_AllocBSTRio ( P2PmsgHANDLE hVBList, VBLsize& nSizeof )
     //  and a cycle must revisit one. Same argument and same helper as the
     //  free-list walk in P2PmsgHeap_AssertValidIOMAGE -- this is that guard
     //  applied to the allocator, not a new idea.
-    int     nResizes = 0;
-    VBLsize nWalked  = 0;
+    int     nResizes  = 0;
+    VBLsize nWalked   = 0;
+    bool    bFirstFit = false;         // see the re-check below, and kMaxFitWalk
     const VBLsize nMaxFree = P2PmsgHeap_MaxBlocks ( hVBList );
 TOP:nWalked = 0;                       // per pass -- the walk restarts at the head
+    //  Closer fit, reset per pass. Refer kMaxFitWalk.
+    VBLaddr aVBLockBest = 0;
+    VBLsize nSizeofBest = 0;
+    VBLsize nFits       = 0;
     VBLaddr aVBLockFree = pHandle->u.BSTRio.pBSTRio->oKeys.aFree;
     while ( aVBLockFree )
     {
@@ -4416,10 +4517,68 @@ ASSERT(VBHeap_IsFree(pVBLock));
 ASSERT(VBHeap_IsAddr(pVBLock,pHandle->uAddrType));
 ASSERT(VBHeap_IsAlloc(pVBLock));
 ASSERT(VBHeap_IsLinked(pVBLock));
-      if ( VBHeap_Sizenn(pVBLock) < nSizeof )
+      const VBLsize nSizeofFree = VBHeap_Sizenn ( pVBLock );
+      if ( nSizeofFree < nSizeof )
       {
         aVBLockFree = VBHeap_GetNext ( pVBLock, 0 );
         continue;
+      }
+
+      //  CLOSER FIT. A block that cannot be split is taken at once: the
+      //  remainder would be too small to be a free block, so SplitAlloc hands
+      //  the whole of it over (refer its "VBLock adoption" branch) and nothing
+      //  further along the list can better no waste at all.
+      if ( bFirstFit ||
+           nSizeofFree - nSizeof < VBList_VBHeapMin(pVBLock->oHdr.uVBLockDefs) )
+      {
+        aVBLockBest = aVBLockFree;
+        break;
+      }
+      if ( aVBLockBest == 0 || nSizeofFree < nSizeofBest )
+      {
+        aVBLockBest = aVBLockFree;
+        nSizeofBest = nSizeofFree;
+      }
+      if ( ++nFits >= kMaxFitWalk )
+        break;
+      aVBLockFree = VBHeap_GetNext ( pVBLock, 0 );
+    }
+
+    if ( aVBLockBest )
+    {
+      //  THE CHOSEN BLOCK IS RE-CHECKED, because the walk that chose it also
+      //  collates, and collating absorbs the block that physically FOLLOWS the
+      //  one collated. The free list is in no address order, so a block visited
+      //  late in the walk can sit immediately before a block chosen early in
+      //  it, and swallow it. An absorbed block has its defs byte zeroed (refer
+      //  the assignment in P2PmsgHeap_CollateBSTRio), so the predicates below
+      //  catch it rather than allocating from the middle of another block.
+      //
+      //  The answer is one more pass with bFirstFit set, which takes the first
+      //  block that fits the moment it finds it. THAT pass cannot go stale --
+      //  nothing is collated between finding the block and allocating it -- so
+      //  the retry is taken at most once, and the throw below cannot be reached
+      //  by any heap this allocator built.
+      aVBLockFree = aVBLockBest;
+      pVBLock     = VBList2PhysVBHeap ( hVBList, aVBLockFree );
+      if ( pVBLock == nullptr                         ||
+           !VBHeap_IsAddr(pVBLock,pHandle->uAddrType) ||
+           !VBHeap_IsAlloc(pVBLock)                   ||
+           !VBHeap_IsLinked(pVBLock)                  ||
+           !VBHeap_IsFree(pVBLock)                    ||
+           VBHeap_Sizenn(pVBLock) < nSizeof              )
+      {
+        ASSERT(!bFirstFit);
+        if ( !bFirstFit )
+        {
+          bFirstFit = true;
+          goto TOP;
+        }
+        EVERR->MODULE->AFP(aVBLockFree)
+             ->Message(L"P2PmsgHeap_AllocBSTRio: the chosen free block did not"
+                      L" survive the walk -- free list does not describe this"
+                      L" image" )
+             ->Throw();
       }
 
       // Allocated

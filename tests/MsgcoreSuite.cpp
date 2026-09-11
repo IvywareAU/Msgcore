@@ -2366,6 +2366,250 @@ static void Test_ImageAddressBounds()
 #endif
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// VBHeap : the closer-fit search
+// ---------------------------------------------------------------------------
+static void Test_HeapCloserFit()
+{
+    //  The allocator was first-fit from the head of a LIFO free list. A freed
+    //  block goes to the head, so the head is whichever block was freed last,
+    //  and first-fit took it whatever its size: free a big block and then a
+    //  small one, ask for something small, and the BIG one was split. The small
+    //  block stayed on the list, and the next big request could no longer be
+    //  served by what was left of the block that used to serve it.
+    //
+    //  The boundary tag (Test_HeapCoalesce) cannot help here: these blocks are
+    //  not adjacent -- live data sits between them -- so there is nothing to
+    //  merge. The only repair is to choose better among the blocks there are.
+    //
+    //  Measured on the case below, before and after:
+    //
+    //      Big = 331, Sml = 1125, both then freed
+    //                          before      after
+    //      a small request      331         1125     <- splits Big / takes Sml
+    //      a big request        1517         331     <- fresh ground / takes Big
+    //
+    //  1517 is the cost in one line: a heap that had two free blocks and could
+    //  use neither for what they were made for.
+    TF_CASE("an allocation takes the block that fits, not the first that will do")
+    {
+        wchar_t szBig[201];
+        for (int i = 0; i < 200; i++) szBig[i] = L'x';
+        szBig[200] = 0;
+
+        P2PmsgMgr mgr(VBLock_Addr64, 4096, 1u << 20);
+        mgr.r_name() = L"Root";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create);
+
+        //  Pad keeps Big and Sml apart, so freeing both cannot merge them and
+        //  this stays a test of CHOICE rather than of coalescing.
+        mgr.r_Desc() += P3PmsgField(L"Big",  DataBSTR16(szBig));
+        mgr.r_Desc() += P3PmsgField(L"Pad",  DataBSTR16(L"pad"));
+        mgr.r_Desc() += P3PmsgField(L"Sml",  DataBSTR16(L"s"));
+        mgr.r_Desc() += P3PmsgField(L"Tail", DataBSTR16(L"t"));
+
+        P3PmsgObject oBig = mgr.r_Desc().SelectObject(L"Big");
+        P3PmsgObject oSml = mgr.r_Desc().SelectObject(L"Sml");
+        TF_CHECK(!oBig.IsVoid());
+        TF_CHECK(!oSml.IsVoid());
+        const P2Pos posBig = oBig.IsVoid() ? 0 : oBig.GetP2Pos();
+        const P2Pos posSml = oSml.IsVoid() ? 0 : oSml.GetP2Pos();
+        TF_CHECK(posBig != posSml);
+
+        //  Sml first, so that Big is the one left at the head of the list --
+        //  which is the arrangement first-fit gets wrong.
+        mgr.r_Desc().r_Curs().Goto(L"Sml");
+        mgr.r_Desc().r_Curs().Delete();
+        mgr.r_Desc().r_Curs().Goto(L"Big");
+        mgr.r_Desc().r_Curs().Delete();
+
+        mgr.r_Desc() += P3PmsgField(L"New1", DataBSTR16(L"s"));
+        P3PmsgObject oNew1 = mgr.r_Desc().SelectObject(L"New1");
+        TF_CHECK(!oNew1.IsVoid());
+        if (!oNew1.IsVoid())
+            TF_CHECK(oNew1.GetP2Pos() == posSml);      // not posBig
+
+        mgr.r_Desc() += P3PmsgField(L"New2", DataBSTR16(szBig));
+        P3PmsgObject oNew2 = mgr.r_Desc().SelectObject(L"New2");
+        TF_CHECK(!oNew2.IsVoid());
+        if (!oNew2.IsVoid())
+            TF_CHECK(oNew2.GetP2Pos() == posBig);      // Big's block, whole
+
+        mgr.AssertValid();
+    }
+
+    //  The same thing on a free list with more than one block of each size, so
+    //  the walk has to pick rather than merely notice. Eight blocks is also
+    //  kMaxFitWalk exactly: the budget must be enough to see the whole of a
+    //  list this size, or the last of the eight would never be chosen.
+    //
+    //  Before the closer fit, the four small requests each split one of the big
+    //  blocks, and the four big requests that followed then had nowhere to go
+    //  but fresh ground -- so the "every block came back" check below is the
+    //  one that fails.
+    TF_CASE("a scattered free list hands every block back")
+    {
+        wchar_t szBig[201];
+        for (int i = 0; i < 200; i++) szBig[i] = L'x';
+        szBig[200] = 0;
+
+        P2PmsgMgr mgr(VBLock_Addr64, 4096, 1u << 20);
+        mgr.r_name() = L"Root";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create);
+
+        //  Interleaved with pads, so no two of the blocks that get freed are
+        //  ever physically adjacent.
+        for (int i = 0; i < 4; i++)
+        {
+            wchar_t sz[32];
+            swprintf_s(sz, 32, L"PadA%d", i);
+            mgr.r_Desc() += P3PmsgField(sz, DataBSTR16(L"p"));
+            swprintf_s(sz, 32, L"Big%d", i);
+            mgr.r_Desc() += P3PmsgField(sz, DataBSTR16(szBig));
+            swprintf_s(sz, 32, L"PadB%d", i);
+            mgr.r_Desc() += P3PmsgField(sz, DataBSTR16(L"p"));
+            swprintf_s(sz, 32, L"Sml%d", i);
+            mgr.r_Desc() += P3PmsgField(sz, DataBSTR16(L"s"));
+        }
+        mgr.r_Desc() += P3PmsgField(L"Tail", DataBSTR16(L"t"));
+
+        P2Pos posWas[8] = { 0 };
+        for (int i = 0; i < 4; i++)
+        {
+            wchar_t sz[32];
+            swprintf_s(sz, 32, L"Big%d", i);
+            P3PmsgObject oBig = mgr.r_Desc().SelectObject(sz);
+            TF_CHECK(!oBig.IsVoid());
+            posWas[i] = oBig.IsVoid() ? 0 : oBig.GetP2Pos();
+            swprintf_s(sz, 32, L"Sml%d", i);
+            P3PmsgObject oSml = mgr.r_Desc().SelectObject(sz);
+            TF_CHECK(!oSml.IsVoid());
+            posWas[4 + i] = oSml.IsVoid() ? 0 : oSml.GetP2Pos();
+        }
+
+        //  Smalls first, then bigs, so the head of the list ends up big.
+        for (int i = 0; i < 4; i++)
+        {
+            wchar_t sz[32];
+            swprintf_s(sz, 32, L"Sml%d", i);
+            mgr.r_Desc().r_Curs().Goto(sz);
+            mgr.r_Desc().r_Curs().Delete();
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            wchar_t sz[32];
+            swprintf_s(sz, 32, L"Big%d", i);
+            mgr.r_Desc().r_Curs().Goto(sz);
+            mgr.r_Desc().r_Curs().Delete();
+        }
+
+        //  Ask for the smalls first: that is the order that used to shred the
+        //  big blocks.
+        for (int i = 0; i < 4; i++)
+        {
+            wchar_t sz[32];
+            swprintf_s(sz, 32, L"NewS%d", i);
+            mgr.r_Desc() += P3PmsgField(sz, DataBSTR16(L"s"));
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            wchar_t sz[32];
+            swprintf_s(sz, 32, L"NewB%d", i);
+            mgr.r_Desc() += P3PmsgField(sz, DataBSTR16(szBig));
+        }
+
+        //  Every one of the eight came out of a block that was already there.
+        for (int i = 0; i < 8; i++)
+        {
+            wchar_t sz[32];
+            swprintf_s(sz, 32, i < 4 ? L"NewS%d" : L"NewB%d", i < 4 ? i : i - 4);
+            P3PmsgObject oNew = mgr.r_Desc().SelectObject(sz);
+            TF_CHECK(!oNew.IsVoid());
+            if (oNew.IsVoid())
+                continue;
+            const P2Pos pos = oNew.GetP2Pos();
+            bool bReused = false;
+            for (int k = 0; k < 8; k++)
+                if (posWas[k] == pos)
+                    bReused = true;
+            TF_CHECK(bReused);
+        }
+        mgr.AssertValid();
+    }
+
+    //  The closer fit walks further than first-fit did, and it walks while
+    //  COLLATING -- which is how a block it has already chosen can be swallowed
+    //  by one it visits later (refer the re-check in P2PmsgHeap_AllocIOMAGE).
+    //  That path is not reachable on demand from out here, so this does the
+    //  next best thing: a lot of frees in a lot of orders, each leaving a free
+    //  list long enough to be walked and collated, with the heap asked to
+    //  validate itself and to survive a round trip at the end of it.
+    TF_CASE("churn over a long free list keeps the heap valid")
+    {
+        wchar_t szDir[MAX_PATH]  = { 0 };
+        wchar_t szPath[MAX_PATH] = { 0 };
+        GetTempPathW(MAX_PATH, szDir);
+        swprintf_s(szPath, MAX_PATH, L"%smscs_closer_fit.p2p", szDir);
+
+        try
+        {
+            P2PmsgMgr mgr(VBLock_Addr64, 4096, 1u << 20);
+            mgr.r_name() = L"Root";
+            mgr.r_Desc(P3PmsgField::AttrCMD_Create);
+
+            for (int nRound = 0; nRound < 6; nRound++)
+            {
+                for (int i = 0; i < 12; i++)
+                {
+                    wchar_t sz[32];
+                    wchar_t szData[64];
+                    swprintf_s(sz, 32, L"Kid%d", i);
+                    //  Twelve different sizes, so the walk has something to
+                    //  choose between rather than a list of equals.
+                    for (int k = 0; k < (i * 5) + 1; k++)
+                        szData[k] = L'd';
+                    szData[(i * 5) + 1] = 0;
+                    mgr.r_Desc() += P3PmsgField(sz, DataBSTR16(szData));
+                }
+                //  Every third one, then every second of what is left: the
+                //  free list ends up long, mixed and in no address order.
+                for (int i = 0; i < 12; i += 3)
+                {
+                    wchar_t sz[32];
+                    swprintf_s(sz, 32, L"Kid%d", i);
+                    mgr.r_Desc().r_Curs().Goto(sz);
+                    mgr.r_Desc().r_Curs().Delete();
+                }
+                for (int i = 11; i > 0; i -= 2)
+                {
+                    wchar_t sz[32];
+                    swprintf_s(sz, 32, L"Kid%d", i);
+                    if (!mgr.r_Desc().Exists(sz))
+                        continue;
+                    mgr.r_Desc().r_Curs().Goto(sz);
+                    mgr.r_Desc().r_Curs().Delete();
+                }
+                mgr.AssertValid();
+                mgr.r_Desc().Truncate();
+            }
+
+            mgr.r_Desc() += P3PmsgField(L"Survivor", DataBSTR16(L"still here"));
+            mgr.Save(szPath);
+            mgr.AssertValid();
+
+            P2PmsgMgr oBack(szPath);
+            TF_CHECK(oBack.r_Desc().Exists(L"Survivor"));
+            oBack.AssertValid();
+        }
+        catch (P2Pevent* pEVT)
+        {
+            tf_fail(__FILE__, __LINE__, "unexpected P2Pevent during closer-fit churn");
+            pEVT->Cancel(false);
+        }
+        _wremove(szPath);
+    }
+}
+
 void RunMsgcoreSuite()
 {
     Test_Data_TypedValues();
@@ -2383,6 +2627,7 @@ void RunMsgcoreSuite()
     Test_StackContainers();
     Test_VectDrop();
     Test_HeapCoalesce();
+    Test_HeapCloserFit();
     Test_StackDrop();
     Test_RootPath();
     Test_ListPath();
