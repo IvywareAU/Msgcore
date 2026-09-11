@@ -2492,6 +2492,127 @@ static void Test_RootedLeadingDot()
 }
 
 // ---------------------------------------------------------------------------
+// A floating item is one object, however many handles name it
+// ---------------------------------------------------------------------------
+static void Test_FloatingIdentity()
+{
+    //  A floating item's VBLock is built INSIDE the P3PmsgObject that carries
+    //  it, so the object was the storage and a copy of the object was a second
+    //  block rather than a second handle on one. Everything below follows from
+    //  that, and all of it is fixed by moving the block onto a heap of its own
+    //  the first time it is shared.
+    TF_CASE("a floating item's P2Pos is one number through every handle")
+    {
+        P3PmsgField  oFloat(L"Floater");
+        P3PmsgObject oA = oFloat.r_Object();
+        P3PmsgObject oB = oFloat.r_Object();
+        P3PmsgObject oC(oA);
+
+        TF_CHECK(oFloat.GetP2Pos() != 0);
+        TF_CHECK(oA.GetP2Pos() == oFloat.GetP2Pos());
+        TF_CHECK(oB.GetP2Pos() == oFloat.GetP2Pos());
+        TF_CHECK(oC.GetP2Pos() == oFloat.GetP2Pos());
+
+        //  And the same answer twice, which was already true and is the half
+        //  §19 reported as working.
+        TF_CHECK(oA.GetP2Pos() == oA.GetP2Pos());
+    }
+
+    //  The number was the symptom. This is what it meant: the handle was a
+    //  snapshot, so a write through it went somewhere else.
+    TF_CASE("a write through a handle reaches the item")
+    {
+        P3PmsgField  oFloat(L"Floater");
+        P3PmsgObject oSel = oFloat.r_Object();
+        P3PmsgField  oSelF = oSel;
+        oSelF.r_name() = L"Renamed";
+        TF_CHECK(oFloat.r_name().c_wcsicmp(L"Renamed") == 0);
+    }
+
+    //  §19's own case. P3Pmsg_GetPath emits ".Floater" for a floating item
+    //  (its first comment calls that a root), and selecting it answers the
+    //  item -- not a duplicate of it.
+    TF_CASE("a floating item selects to itself by its own path")
+    {
+        P3PmsgField  oFloat(L"Floater");
+        const CString strPath = P3Pmsg_GetPath(&oFloat);
+        TF_CHECK(strPath == L".Floater");
+
+        P3PmsgObject oSelf = oFloat.r_Object();
+        P3PmsgObject oBack = P3Pmsg_SelectObject(&oSelf, strPath);
+        TF_CHECK(!oBack.IsVoid());
+        TF_CHECK(oBack.GetP2Pos() == oFloat.GetP2Pos());
+    }
+
+    //  The hazard behind the number, and the one that does not announce
+    //  itself. A handle taken from a floating item pointed into that object's
+    //  own storage, so it outlived nothing: Connect created a heap, left
+    //  m_aVBLock addressing the source, and a SYS heap resolves an address by
+    //  returning it -- which reads the dead object's memory and looks right.
+    TF_CASE("the block outlives the object that built it")
+    {
+        P3PmsgObject oKept;
+        {
+            P3PmsgField oFloat(L"Ephemeral");
+            oKept = oFloat.r_Object();
+        }
+        TF_CHECK(!oKept.IsVoid());
+        P3PmsgField oKeptF = oKept;
+        TF_CHECK(oKeptF.r_name().c_wcsicmp(L"Ephemeral") == 0);
+    }
+
+    //  The other side of the rule, and a guard rather than a pin: these two
+    //  pass against the unfixed library as well. Only an ITEM is rehomed. A
+    //  standalone block that is not one is a VALUE -- P3PmsgData and
+    //  P3PmsgName are built that way on purpose -- and copying a value still
+    //  produces a second value.
+    TF_CASE("a standalone value block is still copied as a value")
+    {
+        P3PmsgData oD1((int)42);
+        P3PmsgData oD2(oD1);
+        TF_CHECK(oD2.c_int() == 42);
+        oD2 = P3PmsgData((int)99);
+        TF_CHECK(oD2.c_int() == 99);
+        TF_CHECK(oD1.c_int() == 42);        // the original is not the copy
+    }
+
+    //  And an item in a tree never had the problem: its block is on the
+    //  message heap and a copy of the handle shares it.
+    TF_CASE("an item in a tree is unaffected")
+    {
+        P2PmsgMgr mgr;
+        mgr.r_name() = L"Store";
+        mgr.r_Desc(P3PmsgField::AttrCMD_Create) += P3PmsgField(L"BHP");
+
+        P3PmsgField  oTree = mgr.RootPath2Object(L".Store.BHP");
+        TF_CHECK(!oTree.IsVoid());
+        P3PmsgObject oCpy(oTree.r_Object());
+        TF_CHECK(oCpy.GetP2Pos() == oTree.GetP2Pos());
+    }
+
+    //  A floating item that already had a heap -- any collection or push gives
+    //  it one, through AllocVBLock -- keeps working, and keeps its number.
+    //  This is the invariant the rehome relies on: an item with no heap can
+    //  have no collections, so no back-pointer needs fixing up when it moves.
+    TF_CASE("a floating item with descendants keeps one identity")
+    {
+        P3PmsgField oFloat(L"Floater");
+        oFloat.r_Desc(P3PmsgField::AttrCMD_Create);
+        oFloat.r_Desc() += P3PmsgField(L"Kid");
+
+        const P2Pos pos = oFloat.GetP2Pos();
+        P3PmsgObject oSelf = oFloat.r_Object();
+        TF_CHECK(oSelf.GetP2Pos() == pos);
+
+        P3PmsgObject oKid = P3Pmsg_SelectObject(&oSelf, L"Kid");
+        TF_CHECK(!oKid.IsVoid());
+        P3PmsgField oKidF = oKid;
+        TF_CHECK(oKidF.r_name().c_wcsicmp(L"Kid") == 0);
+        TF_CHECK(oFloat.GetP2Pos() == pos);   // asking did not move it
+    }
+}
+
+// ---------------------------------------------------------------------------
 // P3Pmsg_SplitRootPath : a bare '@' is a component wherever it stands
 // ---------------------------------------------------------------------------
 static void Test_BareAttrComponent()
@@ -4106,6 +4227,7 @@ void RunMsgcoreSuite()
     Test_P2Pos2Path();
     Test_BareDotCommutes();
     Test_RootedLeadingDot();
+    Test_FloatingIdentity();
     Test_Event();
     // Test_DateNormalisation() -- not ported; see the note at its former site.
     Test_VariantWideString();

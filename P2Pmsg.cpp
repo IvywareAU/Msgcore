@@ -2458,6 +2458,19 @@ ASSERT(0);
 //         take the inline-copy branch.
 P3PmsgObject::P3PmsgObject ( const P3PmsgObject& rhs )
 {
+    //  AN ITEM IS REHOMED BEFORE IT IS SHARED, and this is the only place a
+    //  floating one is ever asked for by value -- P3Pmsg_SelectObject and every
+    //  other "here is the object you asked for" returns one. Without it the
+    //  answer is a DUPLICATE of the floating item rather than the item: its
+    //  P2Pos differs and a write through it does not reach the original.
+    //  RehomeInlineItem does nothing to a value block, so P3PmsgData and
+    //  P3PmsgName still take the inline-copy branch below (refer its NOTES).
+    //  Casting away const to do it is what Connect already does, one arm down,
+    //  and for the same reason: the two handles can only name one block if the
+    //  block moves out of the object that built it.
+    if ( rhs.m_hVBList == 0 && rhs.m_nVBLockSize != 0 )
+      ((P3PmsgObject&)rhs).RehomeInlineItem ( );
+
     m_uVBLock     = rhs.m_uVBLock;
     m_aVBLock     = rhs.m_aVBLock;
     m_xVBLock     = rhs.m_xVBLock;
@@ -2526,15 +2539,32 @@ P3PmsgObject::Connect ( const P3PmsgObject& oObject )
     }
     // Cannot share heap that does not exist
     // NOTES: Create heap and place data on heap
+    //      : Which is what this arm said and did not do. It created the heap
+    //        and left m_aVBLock pointing into the SOURCE's inline storage,
+    //        then copied that pointer below as though it were an address on
+    //        the new heap. A SYS heap addresses by raw pointer, so the result
+    //        reads correctly and dangles the moment the source goes out of
+    //        scope. The ASSERT beneath it said so -- "It's a bug should this
+    //        occur", on a condition the guard above has already excluded, so
+    //        every path that reached here asserted.
+    //      : RehomeInlineItem is the "place data on heap" half. It answers 0
+    //        for a block that is not an item, and a value block is duplicated
+    //        instead -- the same thing the copy constructor does with one, so
+    //        that `oA = oB` and `P3PmsgObject oA = oB` agree. They are
+    //        deliberately kept in step; refer the copy constructor's NOTES.
     if ( oObject.m_hVBList == 0 )
     {
       P3PmsgObject& oObj = (P3PmsgObject&)oObject;
-      oObj.m_hVBList = P2PmsgHeap_CreateSYS ( VBLock_Addrxx
-                                        , g_nVBListCreateHeap_SizeMax );
-      oObj.m_uVBLock = P2PmsgHeap_Addrnn ( oObj.m_hVBList );
-      // It's a bug should this occur
-      // TODO: Code around this issue
-      ASSERT(oObject.m_nVBLockSize==0);
+      if ( oObj.RehomeInlineItem ( ) == 0 )
+      {
+        Nullify ( );
+        m_uVBLock     = oObject.m_uVBLock;
+        m_aVBLock     = (VBLaddr)&m_oVBLock[0];
+        m_xVBLock     = 0;
+        m_nVBLockSize = oObject.m_nVBLockSize;
+        memcpy ( m_oVBLock, (void*)&oObject.m_oVBLock[0], sizeof(m_oVBLock) );
+        return;
+      }
     }
 
     P2PmsgHANDLE hVBListClose = m_hVBList;
@@ -2677,6 +2707,72 @@ P3PmsgObject::AllocVBLock ( UCHAR uVBLockType, VBLsize nVBLockSize, bool /*bZero
       m_uVBLock = P2PmsgHeap_Addrnn ( m_hVBList );
     }
     return P2PmsgHeap_Alloc ( m_hVBList, uVBLockType, nVBLockSize );
+}
+//
+//  Moves an inline ITEM block onto a heap of its own
+//  NOTES: A floating item's VBLock is built inside the P3PmsgObject that
+//         carries it -- RenderThisSafe inits it in m_oVBLock and Connecta's
+//         it with no heap at all. So the object IS the storage, and a copy of
+//         the object is a second block rather than a second handle on one:
+//         GetP2Pos differs, and a write through one is not seen by the other.
+//         An item in a tree does neither, because its block is on the heap and
+//         the copy shares it.
+//       : That is only tenable while the block is never shared and never
+//         outlives its object, and both of those fail. Connect says so in its
+//         own comment -- "Cannot share heap that does not exist. NOTES: Create
+//         heap and place data on heap" -- and then creates the heap without
+//         placing anything on it, leaving m_aVBLock pointing into the SOURCE's
+//         storage. It carries an ASSERT calling that a bug and a TODO to code
+//         around it. This is the code around it.
+//       : ONLY AN ITEM. A standalone VBLock that is NOT an item is a value --
+//         P3PmsgData and P3PmsgName use ConnectVBLock for exactly that, and
+//         the copy constructor duplicating one is what a value copy means.
+//         Items are objects with identity; values are not. The discriminator
+//         is the block header, which every block has (refer §16 of
+//         stack_paths.md for why the header and not VBLock_pItem).
+//       : NOTHING CAN POINT AT THE BLOCK YET. A collection or a push is
+//         allocated through AllocVBLock, which creates the heap when there is
+//         none -- so an item with no heap has no attributes, no descendants
+//         and no stack, and there are no back-pointers to fix up. The m_hVBList
+//         test at the top is that invariant, not an optimisation.
+//       : The block is copied whole. P2PmsgHeap_Alloc adds the header size to
+//         the request and VBLock_Init stamps only uVBLockDefs and the size, so
+//         asking for nVBLockSize less the header yields a block of exactly
+//         nVBLockSize whose header the copy then reproduces -- including
+//         Linked and Alloc, which the inline block already carries and which
+//         are true of the heap block as well.
+//
+//  Returns:     VBLaddr
+//               Address of the block on its new heap, or 0 if this object does
+//               not carry an inline item -- in which case the caller keeps
+//               whatever it was doing before.
+VBLaddr
+P3PmsgObject::RehomeInlineItem ( )
+{
+    if ( m_hVBList )
+      return 0;                          // Already on a heap
+    if ( m_nVBLockSize == 0                       ||
+         m_aVBLock != (VBLaddr)&m_oVBLock[0]         )
+      return 0;                          // Not the inline block
+    if ( !VBLock_IsItem ( (VBLock *)&m_oVBLock[0] ) )
+      return 0;                          // A value, not an object
+
+    const VBLsize nVBLockSize = m_nVBLockSize;
+    m_hVBList = P2PmsgHeap_CreateSYS ( m_uVBLock, g_nVBListCreateHeap_SizeMax );
+    m_uVBLock = P2PmsgHeap_Addrnn ( m_hVBList );
+
+    const VBLsize nSizeofHdr = P2PmsgHeap_Sizeof_Hdr ( m_hVBList );
+    ASSERT(nSizeofHdr>0&&nVBLockSize>nSizeofHdr);
+    const VBLaddr aVBLock = P2PmsgHeap_Alloc ( m_hVBList, VBLock_Item
+                                             , nVBLockSize - nSizeofHdr );
+    memcpy ( P2PmsgHeap_Addr2Phys ( m_hVBList, aVBLock )
+           , &m_oVBLock[0], nVBLockSize );
+
+    m_aVBLock     = aVBLock;
+    m_xVBLock     = 0;                   // Life cycle managed by the heap now
+    m_nVBLockSize = nVBLockSize;
+    ASSERT(P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock));
+    return aVBLock;
 }
 VBLaddr
 P3PmsgObject::Free ( VBLaddr aVBLockAddr )

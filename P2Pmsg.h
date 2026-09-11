@@ -529,6 +529,8 @@ class Msgcore_EXT P3PmsgObject
       VBLaddr
         AllocVBLock ( UCHAR uVBLockType, VBLsize nItemSize, bool bZero = true );
       VBLaddr
+        RehomeInlineItem ( );
+      VBLaddr
         Free ( VBLaddr aVBLockAddr );
       void*
         Msg2Phys ( VBLaddr aVBLockAddr ) const;
