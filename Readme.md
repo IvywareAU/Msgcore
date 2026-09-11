@@ -383,6 +383,7 @@ disclosure process and for a specific statement of what is and is not in scope.
 |---|---|
 | [`LINKAGE.md`](LINKAGE.md) | static vs dynamic, and the silent data corruption that mixing them causes |
 | [`byte_order.md`](byte_order.md) | which formats carry a real byte-order contract, and the `oSync` endian sentinel — which is also the message image’s **layout generation** field — cited from `Msgcore.h` and `MsgVBHeap.h` |
+| [`stack_paths.md`](stack_paths.md) | the `^` path delimiter — what a pushed value is, how a path names one, and the three defects that let `.Root.Item^` answer with `Item` itself |
 | The Linux port plan, **in the `Msgcore_ProdDocs` repository** | the IOCP → io_uring port and the platform layer — what `Platform/` exists for; moved out of this repository alongside the release-readiness register, so both are cited by description rather than by a path that no longer resolves here |
 | The COM server's own readme and IDL, **in the `MsgFacade` repository** | why the COM layer departs from a 1:1 transliteration in five places, and the COM contract argued at length — moved out of this repository by `c88f9f5`, so they are cited by description rather than by a path that no longer resolves here |
 | the release-readiness register | what is and is not ready, and in what order it gets fixed |
