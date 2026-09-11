@@ -78,7 +78,6 @@ cxx-to-c  P3PmsgAttr::~P3PmsgAttr    # UNTRIAGED (dtor, MsgAttr.h:84)
 cxx-to-c  P3PmsgAttr::AssertValid    # UNTRIAGED (method, MsgAttr.h:149)
 cxx-to-c  P3PmsgAttr::Connect    # UNTRIAGED (method, MsgAttr.h:89)
 cxx-to-c  P3PmsgAttr::Create    # UNTRIAGED (method, MsgAttr.h:118)
-cxx-to-c  P3PmsgAttr::Drop    # UNTRIAGED (method, MsgAttr.h:120)
 cxx-to-c  P3PmsgAttr::Nullify    # UNTRIAGED (method, MsgAttr.h:87)
 cxx-to-c  P3PmsgAttr::operator[]    # UNTRIAGED (operator, MsgAttr.h:106)
 cxx-to-c  P3PmsgAttr::operator+=    # UNTRIAGED (operator, MsgAttr.h:98)
@@ -139,7 +138,6 @@ cxx-to-c  P3PmsgDesc::~P3PmsgDesc    # UNTRIAGED (dtor, MsgDesc.h:113)
 cxx-to-c  P3PmsgDesc::AssertValid    # UNTRIAGED (method, MsgDesc.h:178)
 cxx-to-c  P3PmsgDesc::Connect    # UNTRIAGED (method, MsgDesc.h:118)
 cxx-to-c  P3PmsgDesc::Create    # UNTRIAGED (method, MsgDesc.h:145)
-cxx-to-c  P3PmsgDesc::Drop    # UNTRIAGED (method, MsgDesc.h:147)
 cxx-to-c  P3PmsgDesc::Nullify    # UNTRIAGED (method, MsgDesc.h:116)
 cxx-to-c  P3PmsgDesc::operator[]    # UNTRIAGED (operator, MsgDesc.h:133)
 cxx-to-c  P3PmsgDesc::operator+=    # UNTRIAGED (operator, MsgDesc.h:127)
@@ -155,12 +153,10 @@ cxx-to-c  P3PmsgDesc::VerifyContainment    # UNTRIAGED (method, MsgDesc.h:180)
 cxx-to-c  P3PmsgField::~P3PmsgField    # UNTRIAGED (dtor, P2Pmsg.h:648)
 cxx-to-c  P3PmsgField::AssertValid    # UNTRIAGED (method, P2Pmsg.h:729)
 cxx-to-c  P3PmsgField::Connect    # UNTRIAGED (method, P2Pmsg.h:653)
-cxx-to-c  P3PmsgField::Drop    # UNTRIAGED (method, P2Pmsg.h:702)
 cxx-to-c  P3PmsgField::Nullify    # UNTRIAGED (method, P2Pmsg.h:651)
 cxx-to-c  P3PmsgField::operator[]    # UNTRIAGED (operator, P2Pmsg.h:678)
 cxx-to-c  P3PmsgField::operator+=    # UNTRIAGED (operator, P2Pmsg.h:670)
 cxx-to-c  P3PmsgField::operator=    # UNTRIAGED (operator, P2Pmsg.h:660)
-cxx-to-c  P3PmsgField::operator==    # UNTRIAGED (operator, P2Pmsg.h:676)
 cxx-to-c  P3PmsgField::operatorbool    # UNTRIAGED (operator, P2Pmsg.h:682)
 cxx-to-c  P3PmsgField::operatorP3PmsgData&    # UNTRIAGED (operator, P2Pmsg.h:680)
 cxx-to-c  P3PmsgField::P3PmsgField    # UNTRIAGED (ctor, P2Pmsg.h:634)
@@ -205,13 +201,93 @@ cxx-to-c  P3PmsgVect::VerifyContainment    # UNTRIAGED (method, MsgVect.h:113)
 #  HeapHolders is the WORKING of IsSole, not a second answer. IsSole asks "can a
 #  write through this be seen anywhere but here", and answers it by comparing the
 #  heap's reference count against the references this object and the sub-objects it
-#  owns are holding; HeapHolders is that second number. A caller on the flat surface
-#  wants the answer and has it -- IsSole is the question the C API would carry -- and
-#  the count on its own is only meaningful next to P2PmsgHeap_RefCount, which the flat
-#  surface does not expose either. It also takes a P2PmsgHANDLE, which is not a type
-#  the flat surface has. Refer stack_paths.md section 29.
+#  owns are holding; HeapHolders is that second number. The count on its own is only
+#  meaningful next to P2PmsgHeap_RefCount, which the flat surface does not expose, and
+#  it takes a P2PmsgHANDLE, which is not a type the flat surface has.
+#
+#  THIS REASON SAID ONE THING THAT WAS NOT TRUE, and section 34 is where that was
+#  measured. It read "a caller on the flat surface wants the answer and has it --
+#  IsSole is the question the C API would carry". The caller does not have it: there
+#  is no msgcore_field_is_sole in Msgcore_c.h, and none of the nine
+#  msgcore_field_is_* predicates answers this question. IsSole scores BOUND only
+#  through check_api_drift.ps1's prefix fallback, which roots 'is_sole' at 'is' and
+#  matches msgcore_field_is_null. The argument above survives the correction whole --
+#  the working of a question is not the question -- but whether the flat surface
+#  should carry the question itself is now an open entry rather than a settled
+#  premise. Refer stack_paths.md sections 29 and 34.
 cxx-to-c  P3PmsgField::HeapHolders    # the working of IsSole, and takes a P2PmsgHANDLE
 cxx-to-c  P3PmsgDesc::HeapHolders    # as P3PmsgField::HeapHolders, one level in
 cxx-to-c  P3PmsgAttr::HeapHolders    # as P3PmsgField::HeapHolders, one level in
 cxx-to-c  P3PmsgCurs::HeapHolders    # as P3PmsgField::HeapHolders; P3PmsgCurs has no flat surface at all
 cxx-to-c  MsgStck::HeapHolders    # as P3PmsgField::HeapHolders, one level in
+cxx-to-c  P3PmsgList::HeapHolders    # as P3PmsgField::HeapHolders, plus the data cursors the list caches
+cxx-to-c  P3PmsgVect::HeapHolders    # as P3PmsgField::HeapHolders, plus the element cursor the vect caches
+#  P3PmsgData::HeapHolders, added by the same section, needs no line: P3PmsgData has
+#  no family in api-drift.config.psd1 and is therefore never scanned. The config says
+#  why in its own comment -- the class has no C projection by design.
+#
+#  Drop frees the item in the store; destroy releases a HANDLE to it. The flat
+#  surface already spells the second, once per family -- msgcore_field_destroy,
+#  msgcore_attr_destroy, msgcore_desc_destroy, msgcore_list_destroy,
+#  msgcore_vect_destroy -- so an export named msgcore_vect_drop sitting beside
+#  msgcore_vect_destroy would be two names that read the same and do the opposite.
+#  The surface removes things the other way round: it asks the PARENT and names the
+#  child (msgcore_field_delete_item, msgcore_attr_delete, msgcore_desc_delete,
+#  msgcore_list_delete_at, msgcore_vect_delete), or it empties in place
+#  (msgcore_*_truncate). Both spellings leave every handle the caller is holding
+#  valid. Drop asked of the item ITSELF cannot: it frees the block other live
+#  handles alias, and the durable re-resolution route rule 2 of Msgcore_c.h offers
+#  against relocation -- hold the p2pos, come back through msgcore_mgr_p2pos2field
+#  -- resolves to nothing once the item is gone. The flat ABI has no way to tell a
+#  handle that it died, so it does not hand out the call that kills one.
+#
+#  Two notes, because "drop is internal" would not have been a reason here. First,
+#  P3PmsgVect::Drop was written by d2763ce for exactly one caller -- MsgStck::Pop
+#  freeing the generation it had just unlinked, "no vect had ever been a pushed
+#  stack generation" (MsgVect.cpp:585) -- and that caller IS on the flat surface, as
+#  msgcore_stck_pop, which reaches Drop from the inside. Second, msgcore_stck_drop
+#  is not a counter-example: "Release the stacked position without restoring it"
+#  (Msgcore_c.h:886) frees no item the caller holds a handle on and unlinks nothing
+#  from the tree.
+#
+#  P3PmsgList::Drop (MsgList.h:122) is the same member under the same reason and has
+#  no line here ON PURPOSE. check_api_drift.ps1 scores it BOUND against
+#  msgcore_list_drop_head through its prefix fallback -- the root is
+#  'msgcore_list_drop' and msgcore_list_drop_head starts with it -- so a line would
+#  come back reported as redundant and the next reader would be told to delete it.
+#  msgcore_list_drop_head and _drop_tail actually bind P3PmsgList::DropHead and
+#  ::DropTail, which take one element off an end. The whole-object drop reaches no
+#  binding and is decided nowhere. Refer stack_paths.md section 34.
+cxx-to-c  P3PmsgVect::Drop    # frees the item; every drop-shaped name on the flat surface releases a handle instead
+cxx-to-c  P3PmsgField::Drop    # as P3PmsgVect::Drop; the surface deletes from the parent, by name
+cxx-to-c  P3PmsgAttr::Drop    # as P3PmsgVect::Drop, of a collection; msgcore_attr_truncate empties one without freeing it
+cxx-to-c  P3PmsgDesc::Drop    # as P3PmsgVect::Drop, of a collection; msgcore_desc_truncate empties one without freeing it
+#
+#  == and != on a field ask IDENTITY -- the same heap handle and the same block
+#  address, and therefore the SAME ITEM -- and not value equality, which is r_data()
+#  and r_name(). Refer stack_paths.md section 21. The flat surface already carries
+#  that question, as a VALUE rather than as a predicate: msgcore_field_get_p2pos is
+#  "the natural inode number (st_ino)" (Msgcore_c.h:547), and two handles denote the
+#  same item exactly when their p2pos are equal and non-zero, compared with the
+#  caller's own ==. It is the STRONGER of the two tests, which is why exposing the
+#  operator would make the surface worse rather than wider: the operator compares a
+#  block ADDRESS, and rule 2 at the top of Msgcore_c.h says any allocating call may
+#  move every block, so a msgcore_field_equals would be answerable only between two
+#  handles re-resolved since the last mutation, where the p2pos comparison survives
+#  one. The residue is small and worth naming: p2pos returns 0 for an unaddressable
+#  standalone field, so two distinct FLOATING fields compare equal on the flat
+#  surface where the operator would separate them.
+#
+#  The name comparison this same name also carries, operator == ( LPCTNAM ), is
+#  answered by msgcore_field_get_name plus the caller's own compare, and by
+#  msgcore_field_exists for the lookup form. Neither half of the name is missing
+#  from the surface; both are spelled as something other than an operator.
+#
+#  != is here and == was UNTRIAGED for no reason but timing. 4f4c334 added both
+#  overloads on the same day. == was already a banked NAME, because
+#  operator == ( LPCTNAM ) predates it (P2Pmsg.h:720 at 4f4c334^), and the check
+#  asks about each distinct name once, so the new == collapsed into the line that
+#  already existed and never resurfaced; != was a new name and surfaced at once.
+#  They are triaged together because they are one decision.
+cxx-to-c  P3PmsgField::operator!=    # identity, which msgcore_field_get_p2pos already carries as a comparable value
+cxx-to-c  P3PmsgField::operator==    # as operator!=; and the LPCTNAM overload is msgcore_field_get_name

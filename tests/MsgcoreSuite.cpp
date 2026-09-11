@@ -3422,6 +3422,200 @@ static void Test_SoleStorage()
 
 
 // ---------------------------------------------------------------------------
+// P3PmsgList / P3PmsgVect : the cursors a collection caches
+// ---------------------------------------------------------------------------
+// §31's first entry, measured rather than assumed. §29 stopped the walk at
+// P3PmsgList::m_pP3PmsgData[], P3PmsgVect::m_pP3PmsgData[] and
+// P3PmsgVect::m_pP3PmsgType because none of the three had been shown BOTH to
+// hold this heap and to be owned outright, and a holder subtracted that was
+// never mine reports TRUE with a stranger looking. Both halves are now facts of
+// the code: each of those pointers is newed at its own use site, deleted by the
+// collection's destructor and by Truncate, and never assigned a pointer that
+// came from anywhere else; and each wrapper is Connect()ed on the collection's
+// OWN handle, which reaches P3PmsgObject::Connecta and AddRefs.
+//
+// A VECT'S m_pP3PmsgData[] HOLDS NOTHING, and not because it is somebody
+// else's. Every site that would fill it is inside a comment block
+// (MsgVect.cpp:190-207 and :237-249), so the array is zeroed at construction,
+// deleted as nullptrs and never populated. There is no case for it below
+// because there is no call that can reach one; a vect's element cursor is
+// m_pP3PmsgType and that is what the vect cases here walk.
+//
+// §29's probe row is printed alongside each: refs= is what the heap says,
+// mine= is what the walk says, and sole= is what IsSole made of the two. refs=
+// is a static-mode column only -- P2PmsgHeap_RefCount is not exported, which
+// is the same bound Test_ImageAddressBounds runs into.
+static void SoleRow ( const char *pszWhat, const P3PmsgField& oField )
+{
+    const P2PmsgHANDLE hVBList = oField.GetP2PmsgHandle ( );
+#ifdef Msgcore_STATIC
+    printf ( "      %-44s refs=%d  mine=%d  sole=%s\n", pszWhat
+           , P2PmsgHeap_RefCount ( hVBList )
+           , oField.HeapHolders  ( hVBList )
+           , oField.IsSole ( ) ? "true" : "false" );
+#else
+    printf ( "      %-44s mine=%d  sole=%s\n", pszWhat
+           , oField.HeapHolders  ( hVBList )
+           , oField.IsSole ( ) ? "true" : "false" );
+#endif
+}
+
+static void Test_SoleCollectionCursors()
+{
+    //  A LIST'S DATA CURSORS ARE ITS OWN. GetNext, GetPrev and GetTail each
+    //  advance m_nCurs and Connect the wrapper in that slot on this list's
+    //  handle, so a walked list is holding its own heap once per slot used --
+    //  three of them, round-robin. Before §31 the walk stopped above them and a
+    //  list that had been read answered "somebody else is looking".
+    TF_CASE("a list's own data cursors do not stop it being sole")
+    {
+        P3PmsgList oList;
+        oList.AddListTail(P3PmsgData((int)1));   // ... which gives it a heap
+        oList.AddListTail(P3PmsgData((int)2));
+        TF_CHECK(!oList.IsInline());
+        SoleRow("a list nobody has read", oList);
+        TF_CHECK(oList.IsSole());
+
+        VBLaddr aPos = oList.GetHeadPos();
+        oList.GetNext(aPos);               // one cursor, and it is MINE
+        SoleRow("... once one element has been read", oList);
+        TF_CHECK(oList.IsSole());
+
+        oList.GetTail();                   // ... and a second slot, as well
+        SoleRow("... and the tail, in a second slot", oList);
+        TF_CHECK(oList.IsSole());
+
+        TF_CHECK_EQ((int)oList.GetCount(), 2);
+        TF_CHECK_EQ(oList.GetTail().c_int(), 2);
+    }
+
+    //  IT IS A COUNT AND NOT A FLAG here too: MAX_P3PmsgData_Curs is three and
+    //  a walk of three elements leaves three wrappers connected at once.
+    TF_CASE("a list walked end to end holds its heap once per cursor slot")
+    {
+        P3PmsgList oList;
+        for (int i = 1; i <= 3; i++)
+            oList.AddListTail(P3PmsgData((int)i));
+
+        VBLaddr aPos = oList.GetHeadPos();
+        int nSum = 0;
+        while (aPos)
+            nSum += oList.GetNext(aPos).c_int();
+        TF_CHECK_EQ(nSum, 6);
+
+        SoleRow("a list walked end to end", oList);
+        TF_CHECK(oList.IsSole());
+    }
+
+    //  A VECT'S ELEMENT CURSOR IS ITS OWN. Goto deletes the previous wrapper,
+    //  news one of the element's own kind and Connects it, so InsertAt -- which
+    //  ends in a Goto -- already leaves one holding this heap. Reading an
+    //  element is the same one holder, repositioned.
+    TF_CASE("a vect's own element cursor does not stop it being sole")
+    {
+        P3PmsgVect oVect(0, L"Elem", P3PmsgData((int)0));
+        oVect.InsertAt(0, P3PmsgField(L"e", P3PmsgData((int)10)));
+        oVect.InsertAt(1, P3PmsgField(L"e", P3PmsgData((int)20)));
+        SoleRow("a vect with two elements", oVect);
+        TF_CHECK(oVect.IsSole());
+
+        TF_CHECK(oVect.r_data(1).c_int() == 20);
+        SoleRow("... once an element has been read", oVect);
+        TF_CHECK(oVect.IsSole());
+
+        TF_CHECK_EQ((int)oVect.GetCount(), 2);
+    }
+
+    //  AND IT IS THE ELEMENT'S OWN KIND, which is why HeapHolders had to become
+    //  virtual. m_pP3PmsgType is declared P3PmsgField* and Goto news a
+    //  P3PmsgList or a P3PmsgVect into it when the element is one; a
+    //  non-virtual call would count the wrapper's own object and stop, missing
+    //  everything the nested collection is holding one level further in.
+    TF_CASE("a nested collection's cursors are reached through the element cursor")
+    {
+        P3PmsgVect oInner(2, L"Inner", P3PmsgData((int)0));
+        oInner.r_data(0).c_int(7);
+        oInner.r_data(1).c_int(8);
+
+        P3PmsgVect oOuter(0, L"Outer", P3PmsgData((int)0));
+        oOuter.InsertAt(0, P3PmsgField(L"scalar", P3PmsgData((int)1)));
+        oOuter.InsertAt(1, oInner);        // element 1 is itself a vect
+        SoleRow("a vect holding a vect", oOuter);
+        TF_CHECK(oOuter.IsSole());
+
+        //  Two wrappers on this heap now: the outer's, which IS a P3PmsgVect,
+        //  and the one that vect made for its own element.
+        TF_CHECK(oOuter.r_vect(1).r_data(1).c_int() == 8);
+        SoleRow("... and the inner element read through it", oOuter);
+        TF_CHECK(oOuter.IsSole());
+
+        TF_CHECK_EQ((int)oOuter.GetCount(), 2);
+    }
+
+    //  A LIST INSIDE A VECT reaches the other override the same way: the
+    //  element cursor is a P3PmsgList and its data cursors are a level below
+    //  that again.
+    TF_CASE("a list element's data cursor is reached through the element cursor")
+    {
+        P3PmsgList oInner;
+        oInner.AddListTail(P3PmsgData((int)5));
+        oInner.AddListTail(P3PmsgData((int)6));
+
+        P3PmsgVect oOuter(0, L"Outer", P3PmsgData((int)0));
+        oOuter.InsertAt(0, oInner);
+        TF_CHECK(oOuter.IsList(0));
+        SoleRow("a vect holding a list", oOuter);
+        TF_CHECK(oOuter.IsSole());
+
+        P3PmsgList& oHeld = oOuter.r_list(0);
+        VBLaddr     aPos  = oHeld.GetHeadPos();
+        TF_CHECK_EQ(oHeld.GetNext(aPos).c_int(), 5);
+        SoleRow("... with that list read through it", oOuter);
+        TF_CHECK(oOuter.IsSole());
+    }
+
+    //  THE ROWS THAT MUST NOT MOVE. Subtracting one holder too many reports a
+    //  guarantee that is not true, so every arm added here is checked against a
+    //  partner that can see the write.
+    TF_CASE("a shared list whose cursors were used is still not sole")
+    {
+        P3PmsgList oList;
+        oList.AddListTail(P3PmsgData((int)1));
+        oList.AddListTail(P3PmsgData((int)2));
+
+        P3PmsgList oShare;
+        oShare = oList.r_Object();
+        VBLaddr aPos = oList.GetHeadPos();
+        oList.GetNext(aPos);               // my cursor does not buy me the heap
+        oList.GetTail();
+        SoleRow("a shared list, walked by me", oList);
+        TF_CHECK(!oList.IsSole());
+        TF_CHECK(!oShare.IsSole());
+
+        oShare.AddListTail(P3PmsgData((int)3));
+        TF_CHECK_EQ((int)oList.GetCount(), 3);
+    }
+
+    TF_CASE("and a vect the STRANGER is walking is still the stranger's")
+    {
+        P3PmsgVect oVect(0, L"Elem", P3PmsgData((int)0));
+        oVect.InsertAt(0, P3PmsgField(L"e", P3PmsgData((int)10)));
+        TF_CHECK(oVect.IsSole());
+
+        P3PmsgVect oShare(0, L"Other", P3PmsgData((int)0));
+        oShare = oVect.r_Object();
+        TF_CHECK(oShare.r_data(0).c_int() == 10);   // the partner's cursor
+        SoleRow("a shared vect, walked by the partner", oVect);
+        TF_CHECK(!oVect.IsSole());
+        TF_CHECK(!oShare.IsSole());
+
+        oShare.r_data(0).c_int(44);
+        TF_CHECK(oVect.r_data(0).c_int() == 44);
+    }
+}
+
+
+// ---------------------------------------------------------------------------
 // P3PmsgObject : a chain longer than one link
 // ---------------------------------------------------------------------------
 // §27 measured every in-process path as producing exactly ONE link, and that
@@ -5777,6 +5971,7 @@ void RunMsgcoreSuite()
     Test_HandleOrCopy();
     Test_ValueCopiesItsPayload();
     Test_SoleStorage();
+    Test_SoleCollectionCursors();
     Test_ValueCopyReleasesItsPayload();
     Test_ChainLongerThanOne();
     Test_Event();

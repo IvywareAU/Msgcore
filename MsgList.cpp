@@ -717,4 +717,34 @@ P3PmsgList::IsDirty ( )
       return true;
     return false;
 }
+//
+//  References on hVBList held by this list and everything it owns
+//  NOTES: THE FIELD'S WALK, PLUS THE DATA CURSORS. §29 stopped above these and
+//         §31 recorded the stop as deliberate rather than an oversight, because
+//         a member may only be subtracted once it is shown to hold this heap
+//         AND to be owned outright. Both hold here and both are facts of the
+//         code: m_pP3PmsgData[i] is newed nowhere but at the three read sites
+//         -- GetNext, GetPrev and GetTail -- deleted by ~P3PmsgList and by
+//         Truncate, and never assigned a pointer that came from anywhere else;
+//         and each is Connect()ed on OBJ__hVBList, which reaches
+//         P3PmsgObject::Connecta and AddRefs.
+//       : ONE PER SLOT USED, and not one per list. m_nCurs advances modulo
+//         MAX_P3PmsgData_Curs and a read connects the wrapper in the new slot
+//         without disconnecting the others, so a list walked three deep is
+//         holding this heap three times -- the same reason P3PmsgCurs counts
+//         rather than flags.
+//       : m_pP3PmsgField on the collections a field owns points back UP and is
+//         not followed. Refer P3PmsgField::HeapHolders.
+int
+P3PmsgList::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 )
+      return 0;
+
+    int nHolders = P3PmsgField::HeapHolders ( hVBList );
+    for ( int i = 0; i < MAX_P3PmsgData_Curs; i++ )
+      if ( m_pP3PmsgData[i] != nullptr )
+        nHolders += m_pP3PmsgData[i] -> HeapHolders ( hVBList );
+    return nHolders;
+}
 

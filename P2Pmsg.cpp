@@ -1214,6 +1214,36 @@ P3PmsgData::p_Object ( ) const
 ASSERT(m_pObject);
     return m_pObject;
 }
+//
+//  References on hVBList held by this data cell
+//  NOTES: ONE OBJECT, and the same rule §29 rests on: Connect() reaches
+//         P3PmsgObject::Connectx -> Connecta, which AddRefs whenever the handle
+//         changes and returns early when it does not, and ~P3PmsgData deletes
+//         the object, which Closes it. So a live cell whose handle is this
+//         handle IS one reference. A cell that was never connected to a heap
+//         has m_hVBList == 0 and counts nothing.
+//       : IT IS VIRTUAL FOR THE ELEMENT CURSOR'S SAKE. P3PmsgVect::Goto news a
+//         P3PmsgList or a P3PmsgVect into m_pP3PmsgType, which is declared
+//         P3PmsgField*, and P3PmsgField::IsSole calls this on itself; without
+//         the dispatch a walked list would ask P3PmsgField::HeapHolders and
+//         stop one level above its own cursors, which is the row §31 opened.
+//       : IT MUST NOT BE CALLED ON A FIELD, and it never is. P3PmsgField
+//         aliases this m_pObject onto its own m_oObject (refer its
+//         constructors, which assign P3PmsgData::m_pObject = &m_oObject) and
+//         counts that object itself, so a field reaching this would count one
+//         object twice -- overcounting, which is the direction that reports a
+//         guarantee that is not true. P3PmsgField overrides this rather than
+//         adding to it, and every caller of this version holds a P3PmsgData
+//         that a list or a vect newed for itself.
+int
+P3PmsgData::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 ||
+         m_pObject == nullptr )
+      return 0;
+
+    return m_pObject -> m_hVBList == hVBList ? 1 : 0;
+}
 
 ///////////////////////////////////////////////////////////////////////
 //  Operations
@@ -4308,6 +4338,11 @@ P3PmsgField::IsInline ( ) const
 //         holding reaches that level and every level under it, and it reaches
 //         the MsgStck's stacked field on the way -- which was the other entry
 //         §26 left, closed by the same walk rather than by a second mechanism.
+//       : P3PmsgList and P3PmsgVect INHERIT THIS BODY and still answer for
+//         themselves, because HeapHolders is virtual: a walked list asks
+//         P3PmsgList::HeapHolders from here and reaches the data cursors it
+//         caches. That is §31's first entry, and it is why the call below is
+//         not resolved at compile time.
 bool
 P3PmsgField::IsSole ( ) const
 {
@@ -4342,10 +4377,21 @@ P3PmsgField::IsSole ( ) const
 //         members matches the item it landed on and does not disconnect the
 //         other two, so a walk across a collection holding a list and then a
 //         field leaves TWO of them on this heap. Refer P3PmsgCurs::HeapHolders.
-//       : UNDERCOUNTING IS STILL THE SAFE DIRECTION, and this still does some
-//         of it deliberately: the P3PmsgData cursors a P3PmsgList and a
-//         P3PmsgVect cache, and a vect's element type, are not descended into.
-//         A holder missed leaves FALSE, which promises nothing.
+//       : IT OVERRIDES P3PmsgData::HeapHolders RATHER THAN ADDING TO IT, and
+//         that is not a style choice. A field's inherited P3PmsgData::m_pObject
+//         is aliased onto its OWN m_oObject -- every P3PmsgField constructor
+//         assigns it, and ~P3PmsgField clears it so that ~P3PmsgData does not
+//         delete a member. OBJ__ below is that same object, so calling the base
+//         version as well would count one object twice. Overcounting is the
+//         direction that reports a guarantee that is not true.
+//       : §31's UNDERCOUNT IS CLOSED. The P3PmsgData cursors a P3PmsgList
+//         caches and a vect's element type are now descended into, by
+//         P3PmsgList::HeapHolders and P3PmsgVect::HeapHolders -- each of those
+//         members is newed at its use site, deleted by the collection, and
+//         Connect()ed on the collection's own handle, so each is owned outright
+//         and each holds this heap. A vect's m_pP3PmsgData[] is walked with
+//         them and is measured to hold nothing: every site that would fill it
+//         is commented out, so it is an array of nullptrs for its whole life.
 int
 P3PmsgField::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
 {

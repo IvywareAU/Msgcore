@@ -278,6 +278,9 @@ $redundant = @()
 $boundCnt  = 0
 $scanned   = 0
 $untriaged = 0
+$rootCnt   = 0     # of $boundCnt, how many matched by the prefix fallback
+$verbCnt   = 0     # ... and how many of THOSE rooted at a bare accessor verb
+$verbHits  = @()
 
 foreach ($pair in $cfg.Pairs) {
     $pairId = $pair.Id
@@ -310,15 +313,28 @@ foreach ($pair in $cfg.Pairs) {
 
             $key = "$pairId`0$typeName::$($mem.Name)"
 
-            $hit = $null
+            $hit     = $null
+            $byRoot  = $false      # matched by the prefix fallback, not exactly
+            $bareVerb = $false     # ... and the root was an accessor verb alone
             if ($pair.Surface.Kind -eq 'cfn') {
                 $snake = ConvertTo-Snake $mem.Name
                 $exact = $target + $snake
                 if ($surfaceNames.Contains($exact)) { $hit = $exact }
                 else {
-                    $root = $target + ($snake -split '_')[0]
+                    $seg  = ($snake -split '_')
+                    $root = $target + $seg[0]
                     foreach ($n in $surfaceNames) {
                         if ($n -eq $root -or $n.StartsWith($root + '_')) { $hit = $n; break }
+                    }
+                    if ($hit) {
+                        $byRoot = $true
+                        # A root of 'get'/'is'/'set' with more name behind it is an
+                        # accessor VERB matching anything in the family. The fallback
+                        # was written for DeclareItem -> declare_double, where the
+                        # root is the whole name; this is the case it was not written
+                        # for and cannot tell apart. Counted, not rejected -- refer
+                        # stack_paths.md section 34.
+                        $bareVerb = $seg.Count -gt 1 -and $seg[0] -in @('get','is','set','put')
                     }
                 }
             }
@@ -357,7 +373,13 @@ foreach ($pair in $cfg.Pairs) {
 
             if ($hit) {
                 $boundCnt++
-                if ($ShowBound) { Write-Host ("  bound    {0,-46} -> {1}" -f "$typeName::$($mem.Name)", $hit) }
+                if ($byRoot)   { $rootCnt++ }
+                if ($bareVerb) { $verbCnt++; $verbHits += "$typeName::$($mem.Name) -> $hit" }
+                if ($ShowBound) {
+                    Write-Host ("  bound    {0,-46} -> {1}{2}" -f "$typeName::$($mem.Name)", $hit,
+                                $(if ($bareVerb) { '   (prefix fallback, accessor root)' }
+                                  elseif ($byRoot) { '   (prefix fallback)' } else { '' }))
+                }
             }
             else {
                 $unbound += [pscustomobject]@{
@@ -400,6 +422,19 @@ Write-Host ("Scanned {0} public members over {1} pair(s); {2} bound, {3} allowli
 if ($untriaged -gt 0) {
     Write-Host ("  {0} of the allowlist entries are UNTRIAGED -- banked, not decided." -f $untriaged)
     if ($env:GITHUB_ACTIONS) { Write-Host "::notice file=$allowFile::$untriaged UNTRIAGED api-drift entries" }
+}
+# A number nobody prints is a number nobody reads, which is why UNTRIAGED is printed
+# above. BOUND has the same problem and it had gone unnoticed: a match through the
+# prefix fallback is weaker evidence than an exact one, and a match whose root is a
+# bare accessor verb is usually no evidence at all. Printing the split is not a
+# judgement on any one of them -- refer stack_paths.md section 34, which measured it
+# and deliberately did not tighten the matcher.
+if ($rootCnt -gt 0) {
+    Write-Host ("  {0} of the {1} bound matched by prefix fallback, {2} of those at a bare accessor root." -f
+                $rootCnt, $boundCnt, $verbCnt)
+    if ($ShowBound -and $verbHits.Count -gt 0) {
+        foreach ($v in $verbHits) { Write-Host "      $v" }
+    }
 }
 
 if ($redundant.Count -gt 0) {

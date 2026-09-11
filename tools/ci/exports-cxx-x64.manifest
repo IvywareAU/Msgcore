@@ -469,8 +469,11 @@
 ?HeapHolders@MsgStck@@QEBAHPEAX@Z
 ?HeapHolders@P3PmsgAttr@@QEBAHPEAX@Z
 ?HeapHolders@P3PmsgCurs@@QEBAHPEAX@Z
+?HeapHolders@P3PmsgData@@UEBAHPEAX@Z
 ?HeapHolders@P3PmsgDesc@@QEBAHPEAX@Z
-?HeapHolders@P3PmsgField@@QEBAHPEAX@Z
+?HeapHolders@P3PmsgField@@UEBAHPEAX@Z
+?HeapHolders@P3PmsgList@@UEBAHPEAX@Z
+?HeapHolders@P3PmsgVect@@UEBAHPEAX@Z
 ?HResult@P2Pevent@@QEAAPEAV1@JPEB_W@Z
 ?HResultHMODULE@P2Pevent@@QEAAPEAV1@JPEB_W0@Z
 ?Init@P3PmsgBSTR@@QEAAAEAVP3PmsgField@@PEB_WAEBVP3PmsgData@@@Z

@@ -159,6 +159,12 @@ class Msgcore_EXT P3PmsgVect : public P3PmsgField
       virtual bool
         IsDirty ( );
 
+      //  How many references on hVBList this vect, the sub-objects a field
+      //  owns, and the element cursor this vect caches are holding.  Refer
+      //  P3PmsgField::HeapHolders.
+      int
+        HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept override;
+
     // Internal helpers
     private:
       VBLaddr

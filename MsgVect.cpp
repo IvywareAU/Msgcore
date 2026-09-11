@@ -1103,6 +1103,44 @@ P3PmsgVect::IsDirty ( )
       return true;
     return false;
 }
+//
+//  References on hVBList held by this vect and everything it owns
+//  NOTES: THE FIELD'S WALK, PLUS THE ELEMENT CURSOR. §31 asked for the two
+//         proofs before anything here could be subtracted, and m_pP3PmsgType
+//         carries both: Goto news it -- as a P3PmsgList, a P3PmsgVect or a
+//         P3PmsgField, whichever the element is -- deletes the previous one on
+//         the way, and ~P3PmsgVect, Delete and Truncate delete it; it is never
+//         assigned a pointer from anywhere else. Goto then Connect()s it on
+//         OBJ__hVBList, which AddRefs. So there is at most one of them and it
+//         is this vect's own.
+//       : AND IT IS WALKED AS THE ELEMENT'S OWN KIND, which is why
+//         P3PmsgData::HeapHolders is virtual. m_pP3PmsgType is declared
+//         P3PmsgField* and a nested container puts a P3PmsgList or a
+//         P3PmsgVect in it; those hold cursors of their own one level further
+//         in, and a compile-time call would stop above them.
+//       : m_pP3PmsgData[] HOLDS NOTHING TODAY, and this is a measurement rather
+//         than an assumption. Every site that would fill it -- the vect's own
+//         GetNext and GetTail -- is inside a comment block, so the array is
+//         zeroed at construction and deleted as nullptrs. It is walked with the
+//         element cursor because the count is exact either way, and because a
+//         vect that grows those readers back would otherwise go quietly wrong
+//         in the unsafe direction.
+//       : m_pP3PmsgField on the collections a field owns points back UP and is
+//         not followed. Refer P3PmsgField::HeapHolders.
+int
+P3PmsgVect::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 )
+      return 0;
+
+    int nHolders = P3PmsgField::HeapHolders ( hVBList );
+    if ( m_pP3PmsgType != nullptr )
+      nHolders += m_pP3PmsgType -> HeapHolders ( hVBList );
+    for ( int i = 0; i < MAX_P3PmsgData_Curs; i++ )
+      if ( m_pP3PmsgData[i] != nullptr )
+        nHolders += m_pP3PmsgData[i] -> HeapHolders ( hVBList );
+    return nHolders;
+}
 ///*      virtual bool
 //        IsEmpty ( ) const = 0;*/
 //bool

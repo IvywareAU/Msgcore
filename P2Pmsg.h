@@ -344,9 +344,17 @@ class Msgcore_EXT P3PmsgData
       VBLock*
         GetContainerVBLock ( bool indirect = true ) const;
 
+      //  How many references on hVBList this data cell is holding -- one when
+      //  its object names this heap and none otherwise.  Virtual because
+      //  P3PmsgField, P3PmsgList and P3PmsgVect each count more than this and
+      //  are reached through base-class pointers.  Refer
+      //  P3PmsgField::HeapHolders.
+      virtual int
+        HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept;
+
     // Attributes
     private:
-      mutable 
+      mutable
       P3PmsgObject *m_pObject{nullptr};
       mutable
       TCHAR         m_szToString[256];
@@ -852,8 +860,11 @@ class Msgcore_EXT P3PmsgField : public P3PmsgName, public P3PmsgData
 
       //  How many references on hVBList this field and the sub-objects it owns
       //  are holding.  What IsSole subtracts; refer its implementation.
+      //  Overrides P3PmsgData's rather than adding to it -- a field's inherited
+      //  m_pObject IS its own m_oObject, and counting both would count one
+      //  object twice.
       int
-        HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept;
+        HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept override;
       virtual bool
         IsDirty ( ) const;
       virtual bool
