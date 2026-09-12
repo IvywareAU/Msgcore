@@ -753,6 +753,151 @@ static void Test_CApi_HandleGuards()
 }
 
 // ---------------------------------------------------------------------------
+// msgcore_field_is_sole : an export whose TRUE is a guarantee and whose FALSE
+// is not the opposite one.
+//
+// These cases exist for the CONTRACT rather than for the arithmetic -- the
+// arithmetic is pinned on the C++ side, by Test_SoleCollectionCursors and its
+// neighbours in MsgcoreSuite.cpp, which can read the heap's own refcount. What
+// is pinned HERE is the pair of promises Msgcore_c.h publishes above the
+// declaration, in the only vocabulary a flat caller has: handles.
+//
+// The last case is the load-bearing one and it asserts a FALSE. It is there so
+// that a later reader who finds the asymmetry untidy and "fixes" FALSE into the
+// opposite guarantee breaks a test rather than a consumer: the shortfall it
+// pins is a real reference on the store's own heap, not a bug.
+// ---------------------------------------------------------------------------
+static void CApiSoleRow(const char* pszWhat, MsgFieldHandle h)
+{
+    printf("      %-50s is_sole=%d\n", pszWhat, msgcore_field_is_sole(h));
+}
+
+static void Test_CApi_IsSole()
+{
+    TF_CASE("TRUE is a guarantee: a detached copy nobody else can reach")
+    {
+        MsgMgrHandle   hMgr  = msgcore_mgr_create_nn(MSGCORE_ADDR_64, 4096, 1u << 20);
+        MsgFieldHandle hRoot = msgcore_mgr_root(hMgr);
+        TF_CHECK(hRoot != nullptr);
+        msgcore_field_destroy(msgcore_field_declare_int(hRoot, L"n", 7, 1));
+
+        //  select_item is the detached half of the header's contract: a deep
+        //  copy, exempt from rule 2 and unable to see the tree.
+        MsgFieldHandle hCopy = msgcore_field_select_item(hRoot, L"n");
+        TF_CHECK(hCopy != nullptr);
+        CApiSoleRow("a detached copy of a leaf", hCopy);
+        TF_CHECK_EQ(msgcore_field_is_sole(hCopy), 1);
+
+        //  The guarantee, spent: mutate in place, and nobody is looking.
+        msgcore_field_set_int(hCopy, 99);
+        TF_CHECK_EQ(msgcore_field_get_int(hCopy), 99);
+
+        MsgFieldHandle hLive = msgcore_field_child(hRoot, L"n");
+        TF_CHECK(hLive != nullptr);
+        TF_CHECK_EQ(msgcore_field_get_int(hLive), 7);       // unmoved
+
+        msgcore_field_destroy(hLive);
+        msgcore_field_destroy(hCopy);
+        msgcore_field_destroy(hRoot);
+        msgcore_mgr_destroy(hMgr);
+    }
+
+    TF_CASE("the FIELD's answer, not the object's: a floater with descendants")
+    {
+        //  The width of the TRUE half, pinned. msgcore_field_is_sole forwards to
+        //  P3PmsgField::IsSole, which subtracts the sub-objects the field made
+        //  itself; P3PmsgObject::IsSole cannot tell those from a stranger and
+        //  answers FALSE from the moment a field is asked for its descendants.
+        //  That is stack_paths.md section 26's headline row, reached flat. If
+        //  this case ever reads 0, somebody has narrowed the export to the
+        //  object's question and the guarantee got smaller without the header
+        //  or the manifest moving.
+        MsgMgrHandle   hMgr  = msgcore_mgr_create_nn(MSGCORE_ADDR_64, 4096, 1u << 20);
+        MsgFieldHandle hCopy = msgcore_mgr_as_field(hMgr);     // detached, grown
+        TF_CHECK(hCopy != nullptr);
+        CApiSoleRow("a detached store copy, untouched", hCopy);
+
+        MsgListHandle hList = msgcore_field_declare_list(hCopy, L"kids");
+        TF_CHECK(hList != nullptr);
+        msgcore_list_destroy(hList);       // the only OTHER view, gone again
+
+        //  What is left holding the heap besides hCopy is hCopy's own
+        //  P3PmsgDesc, cached by the declare. It is the field's, so it is
+        //  subtracted, so the answer stays TRUE.
+        CApiSoleRow("... once it has been given a descendant", hCopy);
+        TF_CHECK_EQ(msgcore_field_is_sole(hCopy), 1);
+
+        msgcore_field_destroy(hCopy);
+        msgcore_mgr_destroy(hMgr);
+    }
+
+    TF_CASE("FALSE where it is earned: a second live view of one item")
+    {
+        MsgMgrHandle   hMgr  = msgcore_mgr_create_nn(MSGCORE_ADDR_64, 4096, 1u << 20);
+        MsgFieldHandle hRoot = msgcore_mgr_root(hMgr);
+        TF_CHECK(hRoot != nullptr);
+        msgcore_field_destroy(msgcore_field_declare_int(hRoot, L"n", 7, 1));
+
+        MsgFieldHandle hA = msgcore_field_child(hRoot, L"n");
+        MsgFieldHandle hB = msgcore_field_child(hRoot, L"n");
+        TF_CHECK(hA != nullptr && hB != nullptr);
+        CApiSoleRow("one of two live handles on the same item", hA);
+        TF_CHECK_EQ(msgcore_field_is_sole(hA), 0);
+        TF_CHECK_EQ(msgcore_field_is_sole(hB), 0);
+
+        //  This is the thing FALSE is warning about, when it happens to be
+        //  right: an in-place write through hA is visible through hB.
+        msgcore_field_set_int(hA, 99);
+        TF_CHECK_EQ(msgcore_field_get_int(hB), 99);
+
+        msgcore_field_destroy(hB);
+        msgcore_field_destroy(hA);
+        msgcore_field_destroy(hRoot);
+        msgcore_mgr_destroy(hMgr);
+    }
+
+    TF_CASE("FALSE IS NOT A GUARANTEE: the only handle on a store reads FALSE")
+    {
+        //  THE ROW THAT MUST NOT BE 'FIXED'. hRoot is the one and only field
+        //  handle this API has issued against hMgr; no second flat view of that
+        //  item exists, and the caller cannot make one without asking. The
+        //  answer is 0 anyway, because the store holds references on its own
+        //  heap that the field cannot attribute to itself -- see stack_paths.md
+        //  section 36, which measures the shortfall at exactly one and shows it
+        //  is deliberate.
+        //
+        //  If this ever reads 1, somebody has taught FALSE to mean "a second
+        //  view exists". It does not and must not: the header says so in as
+        //  many words, and a consumer that inverted it would write in place on
+        //  the strength of a count that was merely short.
+        MsgMgrHandle   hMgr  = msgcore_mgr_create_nn(MSGCORE_ADDR_64, 4096, 1u << 20);
+        MsgFieldHandle hRoot = msgcore_mgr_root(hMgr);
+        TF_CHECK(hRoot != nullptr);
+        CApiSoleRow("the sole flat handle on an untouched store root", hRoot);
+        TF_CHECK_EQ(msgcore_field_is_sole(hRoot), 0);
+
+        msgcore_field_destroy(hRoot);
+        msgcore_mgr_destroy(hMgr);
+    }
+
+    TF_CASE("an invalid handle answers 0, which is the answer that promises nothing")
+    {
+        void* pvBogus = (void*)0x1;                  // faults on any read-through check
+        TF_CHECK_EQ(msgcore_field_is_sole(pvBogus), 0);
+
+        MsgMgrHandle   hMgr  = msgcore_mgr_create();
+        MsgFieldHandle hRoot = msgcore_mgr_root(hMgr);
+        TF_CHECK(hRoot != nullptr);
+
+        TF_CHECK_EQ(msgcore_field_is_sole(hMgr), 0); // manager spent as field
+        msgcore_field_destroy(hRoot);
+        TF_CHECK_EQ(msgcore_field_is_sole(hRoot), 0);// destroyed handle
+
+        msgcore_mgr_destroy(hMgr);
+    }
+}
+
+// ---------------------------------------------------------------------------
 void RunMsgcoreCApiSuite()
 {
     Test_CApi_TypeNames();
@@ -765,5 +910,6 @@ void RunMsgcoreCApiSuite()
     Test_CApi_MoveChild();
     Test_CApi_RetypeChild();
     Test_CApi_TriggerSink();
+    Test_CApi_IsSole();
     Test_CApi_HandleGuards();
 }

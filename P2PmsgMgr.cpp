@@ -370,6 +370,17 @@ P2PmsgMgr::Load ( LPCTSTR lpszFilename )
     return FALSE;
 }*/
 
+//  Puts the free-block boundary tags back, whatever happens between the scrub
+//  and the last byte being written. Save throws from a dozen places in between.
+namespace {
+struct P2PmsgScrubGuard
+{
+    P2PmsgHANDLE m_h;
+    explicit P2PmsgScrubGuard ( P2PmsgHANDLE h ) noexcept : m_h(h) {}
+   ~P2PmsgScrubGuard ( ) { P2PmsgHeap_ScrubFoots ( m_h, true ); }
+};
+}
+
 BOOL
 P2PmsgMgr::Save ( LPCTSTR lpszFilename, bool bDefragment )
 {
@@ -410,6 +421,13 @@ P2PmsgMgr::Save ( LPCTSTR lpszFilename, bool bDefragment )
       }
 
       // Capture the heap image to persist.
+      //  Scrubbed of free-block boundary tags first, and re-stamped once the
+      //  bytes are out. The tags are an in-memory accelerator for backward
+      //  coalescing; letting them reach the file would make an image written by
+      //  this build differ from one written before the tags existed, for no
+      //  gain -- nothing ever reads the inside of a free block back.
+      P2PmsgHeap_ScrubFoots ( m_hMgr, false );
+      P2PmsgScrubGuard shFoots ( m_hMgr );   // Re-stamps, including on a throw
       void    *vpIOmage     = P2PmsgHeap_pImage ( m_hMgr );
       VBLsize  dwIOmageSize = P2PmsgHeap_Sizeof ( m_hMgr );
 
@@ -500,11 +518,8 @@ P2PmsgMgr::Save ( LPCTSTR lpszFilename, bool bDefragment )
 BOOL
 P2PmsgMgr::SharedMode ( DWORD dwSharedMode )
 {
-    
-    if ( dwSharedMode == m_dwSharedMode )
-      return dwSharedMode;
-
-    return dwSharedMode;
+    m_dwSharedMode = dwSharedMode;
+    return TRUE;
 }
 
 BOOL
@@ -776,18 +791,76 @@ P2PmsgMgr::P2Pos2Object ( P2Pos nP2Pos, BOOL bPageIn )
 CString
 P2PmsgMgr::P2Pos2Path ( P2Pos pos )
 {
-    if ( IsField(pos) )
+    //  ONE ARM PER BLOCK KIND, and the kind is read off the P3PmsgObject at
+    //  pos rather than from IsField(pos). IsField(pos) answers
+    //  VBLockItem_IsField, which is FALSE for a list and FALSE for a vector,
+    //  so six of the eleven things a P2Pos can name fell through to the
+    //  ASSERT(0) that used to stand here: a list, a vector, and all four
+    //  collections. Every one of them HAS a path. §6 taught
+    //  P3Pmsg_GetPath(const P3PmsgField*) about containers, §12 gave the
+    //  attribute collection an overload and §15 gave the descendant
+    //  collection one -- this was the one place that could still reach none
+    //  of it, so a path P3Pmsg_GetPath would build the manager would not.
+    if ( pos == 0 )
+      return CString();
+
+    P3PmsgObject oObject = P2Pos2Object ( pos );
+    if ( oObject.IsVoid() )
+      return CString();
+
+    //  THE COLLECTIONS ARE ASKED ABOUT FIRST, and not for tidiness. IsAttr
+    //  and IsDesc read the block header, which every block has. IsField,
+    //  IsList and IsVect go straight to VBLock_pItem and read a VBLockItem's
+    //  fields out of whatever block is actually there -- on a collection
+    //  block that is the ut union misread P2PmsgAttr_GetVBLockParentnn
+    //  already records. Asked in this order, the question is never put to a
+    //  block that cannot answer it.
+    if ( oObject.IsAttr() || oObject.IsDesc() )
     {
-      P3PmsgField oField = P2Pos2Field(pos).r_Object();
+      //  NEITHER OVERLOAD TAKES A P3PmsgObject. Both reach the owner through
+      //  the collection's back-pointer to the field it hangs off -- GetField()
+      //  -- and P3PmsgAttr(const P3PmsgObject&) sets only m_oObject, leaving
+      //  that pointer null. A collection converted straight from an object
+      //  therefore builds a lone '@' or '.' with no owner in front of it,
+      //  which is a string, not a path.
+      //
+      //  So the owner comes first: GetParent() on a collection block is
+      //  exactly the item the collection hangs off, and r_Attr()/r_Desc()
+      //  install the back-pointer the overloads want.
+      P3PmsgObject oOwner = oObject.GetParent();
+      if ( !oOwner.IsField() && !oOwner.IsList() && !oOwner.IsVect() )
+        return CString();     // Unparented collection; nothing to hang it off
+      P3PmsgField oField = oOwner;
+      return oObject.IsAttr() ? P3Pmsg_GetPath ( &oField.r_Attr() )
+                              : P3Pmsg_GetPath ( &oField.r_Desc() );
+    }
+
+    //  AN ITEM -- a field, a list or a vector. All three are VBLockItem
+    //  blocks and all three are what the P3PmsgField overload builds a path
+    //  for, because P3PmsgList and P3PmsgVect both derive from P3PmsgField
+    //  (§6). The CONVERTING CONSTRUCTOR takes all three; assignment would
+    //  throw "Invalid overloaded context" for the two that are not fields,
+    //  the same trap RootPath2Object carried until §13.
+    VBLock *pVBLock = (VBLock *)r_Object().Msg2Phys ( pos );
+    if ( pVBLock && VBLock_IsItem(pVBLock) )
+    {
+      P3PmsgField oField = oObject;
       return P3Pmsg_GetPath ( &oField );
     }
+
     //else if ( IsNode(pos) )
     //{
-    //  ASSERT(0);
     //  P3PmsgNode oNode = P2Pos2Node(pos).r_Object();
     //  return P3Pmsg_GetPath ( &oNode );
     //}
-    else ASSERT(0);
+
+    //  ANYTHING ELSE -- a name block, a data block, a stack block. None of
+    //  them is an object a path names, and none of them is a caller error
+    //  worth an ASSERT: §9's rule is that what a caller spells is the
+    //  caller's business. The empty string says "no path" the way a void
+    //  P3PmsgObject says "no object", and msgcore_mgr_p2pos2path already
+    //  keeps the two apart -- nullptr when the call threw, the string
+    //  otherwise.
     return CString();
 }
 P3PmsgObject
@@ -809,12 +882,44 @@ P2PmsgMgr::RootPath2Object ( LPCWSTR lpszObjectPath )
     // Introduce locals
     CString        strRoot;
     CList<CString> oCListItems;
-    P3PmsgItem     oItemParent = r_Object();     // Root becomes parent
+    //  A P3PmsgObject, not a P3PmsgItem. Every step of this walk is
+    //  P3Pmsg_SelectObject, which is a free function over P3PmsgObject and has
+    //  an arm for each kind there is -- an item, a list, a vector, an attribute
+    //  collection, a descendant collection. Nothing about the walk needed a
+    //  field; only the variable did, and holding one meant the assignment that
+    //  carries the walk forward was P3PmsgField::operator=(const
+    //  P3PmsgObject&), which THROWS "Invalid overloaded context" for anything
+    //  that is not a field.
+    //
+    //  So a list or a vector anywhere but the last position ended the path
+    //  with a raised event: ".Root.Numbers.Leaf" and ".Root.Numbers@Unit" both
+    //  threw, though the object-path spellings of the same two questions have
+    //  answered since §6 taught the selector about containers. An ordinary MISS
+    //  under a list -- ".Root.Numbers.Nobody" -- threw the same event rather
+    //  than "Path to object does not exist", because the walk died on the list
+    //  one step before it ever asked about the name.
+    P3PmsgObject   oParent = r_Object();         // Root becomes parent
 
     // Problematic
     try
     {
-      P3Pmsg_SplitRootPath ( lpszObjectPath, strRoot, oCListItems );
+      //  The verdict is the point of the call. Discarded, a path the splitter
+      //  REFUSED was walked anyway, over whatever components it had collected
+      //  before it gave up -- and since the walk answers the last component it
+      //  managed, a malformed path came back as the object one step up from
+      //  where the refusal happened. A silently wrong object, with nothing to
+      //  distinguish it from a right one.
+      //
+      //  A missing descendant already throws here ("Path to object does not
+      //  exist"); a path that is not a path is at least as much the caller's
+      //  error, and void is reserved for a search that ran and found nothing.
+      if ( !P3Pmsg_SplitRootPath ( lpszObjectPath, strRoot, oCListItems ) )
+        EVERR->MODULE
+             //  L"%ls", never the path as the format itself -- refer the note
+             //  on the throw below.
+             ->Message(L"%ls", lpszObjectPath)
+             ->Message("Malformed object path")
+             ->Throw();
 
       // Process the full Object path
       POSITION posItems = oCListItems.GetHeadPosition();
@@ -822,43 +927,111 @@ P2PmsgMgr::RootPath2Object ( LPCWSTR lpszObjectPath )
       {
         CString strItem = oCListItems.GetNext(posItems);
         LPCWSTR lpszItemName = strItem;
-        if ( P3Pmsg_IsPathDelimiter(lpszItemName) )
+        //  Only the DESCENDANT delimiters come off, and they have to: a path
+        //  handed to P3Pmsg_SelectObject with a leading '.' means "this
+        //  component names the object you are standing on", and it is matched
+        //  against the PARENT's own name (P2Pmsg.cpp, P3Pmsg_SelectObject), so
+        //  ".Child" asked of the parent matches nothing. Stripped, it is a
+        //  plain name and the field arm looks it up among the descendants,
+        //  which is what a step of this walk means.
+        //
+        //  '@' and '^' must SURVIVE, because for those two the delimiter IS
+        //  the instruction and the name after it is read somewhere else:
+        //  "@Tag" is the attribute Tag, "^" is the item as it stood before the
+        //  last push, "^Kid" is that item's child. Stripped, all three became
+        //  plain names and were looked up among the descendants -- so an
+        //  attribute or a pushed value was answered with whatever child
+        //  happened to share its name, or, far more often, with nothing.
+        //  Every component of either kind was silently the wrong question.
+        //
+        //  Spelled out rather than asking P3Pmsg_IsPathDelimiter, which
+        //  answers TRUE for the terminator as well: an empty component
+        //  stepped the pointer PAST its own end.
+        //
+        //  ONLY WHERE A NAME FOLLOWS IT. A lone '.' names the descendant
+        //  collection (§15), and there the delimiter IS the instruction --
+        //  exactly as it is for '@' and '^', which is why those two were never
+        //  stripped. Stripped anyway, a bare '.' became the empty string, and
+        //  P3Pmsg_SelectObject looked for a descendant with no name.
+        //
+        //  A NAME, and not merely SOMETHING. The test used to be "not the end of
+        //  the component", which is the same thing only where the component is
+        //  '.' and nothing else. The splitter seeds a component with the
+        //  delimiter that introduces it and absorbs a following '^' (it does the
+        //  same for "@^", §10), so ".Store.BHP.^" arrives here as ".^" -- a bare
+        //  '.' with the stack delimiter after it. Stripped to "^", it selected
+        //  the ITEM's snapshot, where "@^" one line of reasoning away selects the
+        //  attribute COLLECTION's. §9's rule is that '^' commutes with '@' and
+        //  with '.'; "^." already answered the snapshot's descendant collection
+        //  and ".^" answered something else entirely (§17).
+        if ( !P3Pmsg_IsPathDelimiter ( lpszItemName + 1 ) &&
+             ( lpszItemName[0] == T_DescDelim ||
+               lpszItemName[0] == T_BackSlash ||
+               lpszItemName[0] == T_ForeSlash    ) )
           lpszItemName++;
-
-        // Requested path item may or may not exist at this stage
-        // NOTES: If the requested Item is non-descendant type cannot proceed
-        //      : P2PmsgTreeCtrl's only handle descendant items
-        if ( !oItemParent.Exists(lpszItemName) )
-        {
-          wchar_t wTypeDelimiter = strItem[0];
-          if ( wTypeDelimiter == T_DescDelim ||
-               wTypeDelimiter == T_BackSlash ||
-               wTypeDelimiter == T_ForeSlash    )
-          {
-            //RefreshFolder(oItemParent);
-            if ( m_pfncP2PopulateCB )
-              m_pfncP2PopulateCB ( m_nfncP2PopulateCBKey, oItemParent.GetP2Pos(), FALSE );
-            if ( !oItemParent.Exists(lpszItemName) )
-              EVERR->MODULE
-                   //  L"%ls", never the path as the format itself: Message() is
-                   //  Message(LPCWSTR lpszFormat, ...) and runs the string
-                   //  through _vstprintf_s, so an object path containing a '%'
-                   //  was consuming a variadic argument that was never passed
-                   //  (finding M3 of the internal, unpublished security
-                   //  review). Paths reach here from callers,
-                   //  including the C ABI. %ls not %s - wide in both the MSVC
-                   //  and glibc dialects (see commit 5aa9b2a).
-                   ->Message(L"%ls", lpszObjectPath)
-                   ->Message("Path to object does not exist")
-                   ->Throw();
-          }
-        }
 
         // Select the current item
         // NOTES: Last item in list is the requested item
-        oItemParent = oItemParent.SelectObject(lpszItemName);
+        //      : ONE selection per component. P3PmsgItem::Exists is itself
+        //        "!P3Pmsg_SelectObject(...).IsVoid()" (P2Pmsg.cpp), so asking
+        //        it and then selecting ran the whole lookup twice for every
+        //        component of every path. The answer is what the test was
+        //        after; only the populate callback below needs a second look,
+        //        and only when the first one missed.
+        P3PmsgObject oSelected = P3Pmsg_SelectObject ( &oParent, lpszItemName );
+
+        // NOTES: If the requested Item is non-descendant type cannot proceed
+        //      : P2PmsgTreeCtrl's only handle descendant items
+        if ( oSelected.IsVoid() )
+        {
+          //  Only the DESCENDANT components throw for a miss, which is
+          //  deliberate and unchanged -- those get the populate callback and
+          //  then "Path to object does not exist". An '@' or a '^' that finds
+          //  nothing is an ordinary answer: an item that was never pushed has
+          //  no snapshot, so the empty object is the answer -- "IsEmpty flags
+          //  failed search", as the contract above says.
+          //
+          //  And a component that carries NO NAME never throws, whichever
+          //  delimiter introduced it. The paging callback exists for a named
+          //  child that may not be in memory yet; a bare delimiter asks for
+          //  the COLLECTION it introduces (§15), and an item that has never
+          //  had one has no block for it. That is the same fact ".Root.Item@"
+          //  reports as void (§12), and reporting it two different ways
+          //  depending on which collection was asked for would be nothing but
+          //  an accident of the delimiter.
+          wchar_t wTypeDelimiter = strItem[0];
+          if ( strItem.GetLength() == 1   ||
+               ( wTypeDelimiter != T_DescDelim &&
+                 wTypeDelimiter != T_BackSlash &&
+                 wTypeDelimiter != T_ForeSlash    ) )
+            return P3PmsgObject();
+
+          //RefreshFolder(oParent);
+          if ( m_pfncP2PopulateCB )
+            m_pfncP2PopulateCB ( m_nfncP2PopulateCBKey, oParent.GetP2Pos(), FALSE );
+          oSelected = P3Pmsg_SelectObject ( &oParent, lpszItemName );
+          if ( oSelected.IsVoid() )
+            EVERR->MODULE
+                 //  L"%ls", never the path as the format itself: Message() is
+                 //  Message(LPCWSTR lpszFormat, ...) and runs the string
+                 //  through _vstprintf_s, so an object path containing a '%'
+                 //  was consuming a variadic argument that was never passed
+                 //  (finding M3 of the internal, unpublished security
+                 //  review). Paths reach here from callers,
+                 //  including the C ABI. %ls not %s - wide in both the MSVC
+                 //  and glibc dialects (see commit 5aa9b2a).
+                 ->Message(L"%ls", lpszObjectPath)
+                 ->Message("Path to object does not exist")
+                 ->Throw();
+        }
+
+        //  Whatever it is, the walk stands on it and keeps going. There is no
+        //  last-component special case any more: a non-field that ends the
+        //  path is handed back by the return below, which is the same object
+        //  by the same route as one the walk steps off.
+        oParent = oSelected;
       }
-      return oItemParent.r_Object();
+      return oParent;
     }
 
     // Tidy up, and

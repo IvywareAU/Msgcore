@@ -344,9 +344,17 @@ class Msgcore_EXT P3PmsgData
       VBLock*
         GetContainerVBLock ( bool indirect = true ) const;
 
+      //  How many references on hVBList this data cell is holding -- one when
+      //  its object names this heap and none otherwise.  Virtual because
+      //  P3PmsgField, P3PmsgList and P3PmsgVect each count more than this and
+      //  are reached through base-class pointers.  Refer
+      //  P3PmsgField::HeapHolders.
+      virtual int
+        HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept;
+
     // Attributes
     private:
-      mutable 
+      mutable
       P3PmsgObject *m_pObject{nullptr};
       mutable
       TCHAR         m_szToString[256];
@@ -520,7 +528,14 @@ class Msgcore_EXT P3PmsgObject
         operator = ( const P3PmsgObject& rhs );
       bool
         operator == ( const P3PmsgObject& rhs ) const;
+      bool
+        operator != ( const P3PmsgObject& rhs ) const;
 
+      //  `if ( oObject )` and nothing else.  EXPLICIT because the implicit
+      //  form made `oA == oB` compile as `(int)(bool)oA == (int)(bool)oB` --
+      //  "are we both non-void" wearing the spelling of "are we the same
+      //  item".  Refer P3PmsgField::operator == for the measurement.
+      explicit
         operator bool ( ) const noexcept;
 
     // Memory management
@@ -528,6 +543,22 @@ class Msgcore_EXT P3PmsgObject
     public:
       VBLaddr
         AllocVBLock ( UCHAR uVBLockType, VBLsize nItemSize, bool bZero = true );
+      VBLaddr
+        RehomeInlineItem ( );
+
+      //  Give this object its own copy of whatever its inline VALUE block
+      //  points at.  memcpy duplicates the block; a value that has outgrown
+      //  the block keeps its payload elsewhere and only chains to it, and
+      //  copying the chain is not copying the value.  Refer the implementation.
+      void
+        PrivatiseInlineChain ( );
+
+      //  Give back what this object's inline VALUE block points at.  The other
+      //  half of PrivatiseInlineChain: that one allocates the copy's payload
+      //  block on the heap the two objects SHARE, and a shared heap does not go
+      //  away when the copy does.  Refer the implementation.
+      void
+        ReleaseInlineChain ( );
       VBLaddr
         Free ( VBLaddr aVBLockAddr );
       void*
@@ -571,6 +602,21 @@ class Msgcore_EXT P3PmsgObject
         IsEmpty ( ) const noexcept { return m_nVBLockSize==0 ? true : false; }
       bool
         IsVoid ( ) const noexcept;
+
+      //  Is the item INSIDE me, or on a heap where others can name it?
+      //  That, and not "is there a heap", is what decides whether a write
+      //  through this object can be seen anywhere else.  Refer the
+      //  implementation for what it does not settle.
+      bool
+        IsInline ( ) const noexcept;
+
+      //  Can anything other than me see a write through me?  TRUE is a
+      //  guarantee that nothing can; FALSE says only that the question is
+      //  open.  That is IsInline's guarantee widened to cover the storage
+      //  rather than the block -- refer the implementation for the row it
+      //  covers and the one it does not.
+      bool
+        IsSole ( ) const noexcept;
       bool
         IsData ( ) const;
       bool
@@ -714,13 +760,28 @@ class Msgcore_EXT P3PmsgField : public P3PmsgName, public P3PmsgData
         operator += ( const P3PmsgVect& rhs );
       P3PmsgField&
         operator += ( const P3PmsgField& rhs );
+      //  Compare by NAME.  const since [2026-09-11]: P3PmsgName declares both
+      //  of its comparisons const, this hides them, and a const field could
+      //  therefore not be compared to a name at all -- C2678, while every
+      //  meaningless comparison below compiled.
       bool
-        operator == ( LPCTNAM lpszName );
+        operator == ( LPCTNAM lpszName ) const;
+
+      //  Compare by IDENTITY -- do these two denote the SAME item?  That is
+      //  P3PmsgObject's question and this asks it of the object.  For the
+      //  value, which is a different question, ask r_data() and r_name().
+      bool
+        operator == ( const P3PmsgField& rhs ) const;
+      bool
+        operator != ( const P3PmsgField& rhs ) const;
+
       virtual P3PmsgField&
         operator [] ( LPCTNAM lpszName );
 
         operator P3PmsgData& ( );
 
+      //  `if ( oField )` and nothing else.  Refer P3PmsgObject::operator bool.
+      explicit
         operator bool ( ) const;
 
     // Chained reference exposures
@@ -786,6 +847,24 @@ class Msgcore_EXT P3PmsgField : public P3PmsgName, public P3PmsgData
         Sizeof ( ) const;
       virtual bool
         IsVoid ( ) const;
+
+      //  Is this field's item stored inside the field?  If it is, a write
+      //  through it reaches nobody.  Refer P3PmsgObject::IsInline.
+      virtual bool
+        IsInline ( ) const;
+
+      //  Can a write through this field be seen anywhere but here?  TRUE
+      //  guarantees not.  Refer P3PmsgObject::IsSole.
+      virtual bool
+        IsSole ( ) const;
+
+      //  How many references on hVBList this field and the sub-objects it owns
+      //  are holding.  What IsSole subtracts; refer its implementation.
+      //  Overrides P3PmsgData's rather than adding to it -- a field's inherited
+      //  m_pObject IS its own m_oObject, and counting both would count one
+      //  object twice.
+      int
+        HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept override;
       virtual bool
         IsDirty ( ) const;
       virtual bool
@@ -1023,6 +1102,10 @@ Msgcore_EXT CString
 P3Pmsg_GetPath ( const P3PmsgField *pField );
 Msgcore_EXT CString
 P3Pmsg_GetPath ( const P3PmsgAttr *pAttr );
+Msgcore_EXT CString
+P3Pmsg_GetPath ( const P3PmsgDesc *pDesc );
+Msgcore_EXT VBLsize
+P3Pmsg_GetStckDepth ( const P3PmsgField *pItem, VBLaddr aOwner );
 Msgcore_EXT P3PmsgObject
 P3Pmsg_GetRoot ( const P3PmsgItem *pItem );
 Msgcore_EXT BOOL

@@ -230,11 +230,14 @@
 ??4SafeDSetPaging@@QAEPAVP3PmsgField@@PAV1@@Z
 ??4SafeRegistrationPush@@QAEAAV0@ABV0@@Z
 ??8P3PmsgData@@QAEHABV0@@Z
-??8P3PmsgField@@QAE_NPB_W@Z
+??8P3PmsgField@@QBE_NABV0@@Z
+??8P3PmsgField@@QBE_NPB_W@Z
 ??8P3PmsgName@@QBE_NABV0@@Z
 ??8P3PmsgName@@QBE_NPB_W@Z
 ??8P3PmsgObject@@QBE_NABV0@@Z
 ??9P3PmsgData@@QAEHABV0@@Z
+??9P3PmsgField@@QBE_NABV0@@Z
+??9P3PmsgObject@@QBE_NABV0@@Z
 ??AP3PmsgAttr@@UAEAAVP3PmsgField@@PB_W@Z
 ??AP3PmsgDesc@@UAEAAVP3PmsgField@@PB_W@Z
 ??AP3PmsgField@@UAEAAV0@PB_W@Z
@@ -387,6 +390,7 @@
 ?Drop@P3PmsgDesc@@UAEXXZ
 ?Drop@P3PmsgField@@UAEXXZ
 ?Drop@P3PmsgList@@UAEXXZ
+?Drop@P3PmsgVect@@UAEXXZ
 ?DropHead@P3PmsgList@@QAEXXZ
 ?DropTail@P3PmsgList@@QAEXXZ
 ?DropTriggers@P2PmsgMgr@@QAEIIPAUHWND__@@K@Z
@@ -462,6 +466,14 @@
 ?Group@P2Pevent@@QAAPAV1@PBDZZ
 ?GuidToString@@YAXAAU_GUID@@PA_W@Z
 ?HasParent@P3PmsgObject@@QBEHXZ
+?HeapHolders@MsgStck@@QBEHPAX@Z
+?HeapHolders@P3PmsgAttr@@QBEHPAX@Z
+?HeapHolders@P3PmsgCurs@@QBEHPAX@Z
+?HeapHolders@P3PmsgData@@UBEHPAX@Z
+?HeapHolders@P3PmsgDesc@@QBEHPAX@Z
+?HeapHolders@P3PmsgField@@UBEHPAX@Z
+?HeapHolders@P3PmsgList@@UBEHPAX@Z
+?HeapHolders@P3PmsgVect@@UBEHPAX@Z
 ?HResult@P2Pevent@@QAEPAV1@JPB_W@Z
 ?HResultHMODULE@P2Pevent@@QAEPAV1@JPB_W0@Z
 ?Init@P3PmsgBSTR@@QAEAAVP3PmsgField@@PB_WABVP3PmsgData@@@Z
@@ -495,6 +507,8 @@
 ?IsField@P2PmsgRecurs@@QAE_NXZ
 ?IsField@P3PmsgObject@@QBE_NXZ
 ?IsField@P3PmsgVect@@QAE_NH@Z
+?IsInline@P3PmsgField@@UBE_NXZ
+?IsInline@P3PmsgObject@@QBE_NXZ
 ?IsItem@P3PmsgCurs@@QAE_NXZ
 ?IsList@P2PmsgRecurs@@QAE_NXZ
 ?IsList@P3PmsgCurs@@QAE_NXZ
@@ -506,6 +520,8 @@
 ?IsolateP2Pevent@@YAPAVP2Pevent@@XZ
 ?IsRoot@P3PmsgObject@@QBE_NXZ
 ?IsSoCursor@P3PmsgCurs@@UAE_NXZ
+?IsSole@P3PmsgField@@UBE_NXZ
+?IsSole@P3PmsgObject@@QBE_NXZ
 ?IsStacked@P3PmsgField@@UBE_NXZ
 ?IsStck@P3PmsgObject@@QBE_NXZ
 ?IsValid@P2PmsgMgr@@UBEHXZ
@@ -580,9 +596,11 @@
 ?P3Pmsg_FindParentWithAttr@@YA?AVP3PmsgObject@@ABV1@PB_W@Z
 ?P3Pmsg_fwprintf@@YAHPAU_iobuf@@PB_WZZ
 ?P3Pmsg_GetPath@@YA?AV?$CStringT@_WV?$StrTraitMFC_DLL@_WV?$ChTraitsCRT@_W@ATL@@@@@ATL@@PBVP3PmsgAttr@@@Z
+?P3Pmsg_GetPath@@YA?AV?$CStringT@_WV?$StrTraitMFC_DLL@_WV?$ChTraitsCRT@_W@ATL@@@@@ATL@@PBVP3PmsgDesc@@@Z
 ?P3Pmsg_GetPath@@YA?AV?$CStringT@_WV?$StrTraitMFC_DLL@_WV?$ChTraitsCRT@_W@ATL@@@@@ATL@@PBVP3PmsgField@@@Z
 ?P3Pmsg_GetRoot@@YA?AVP3PmsgObject@@PBVP3PmsgField@@@Z
 ?P3Pmsg_GetRootname@@YA?AV?$CStringT@_WV?$StrTraitMFC_DLL@_WV?$ChTraitsCRT@_W@ATL@@@@@ATL@@PB_W@Z
+?P3Pmsg_GetStckDepth@@YAIPBVP3PmsgField@@I@Z
 ?P3Pmsg_GetTStamp@@YA_JABVP3PmsgField@@@Z
 ?P3Pmsg_IsPathDelimiter@@YAHPB_W@Z
 ?P3Pmsg_IsValidItemname@@YAHPB_WPA_W@Z
@@ -626,6 +644,7 @@
 ?Print@P3PmsgField@@UAEXPAU_iobuf@@HH@Z
 ?Print@P3PmsgList@@UAEXPAU_iobuf@@HH@Z
 ?Print@P3PmsgVect@@UAEXPAU_iobuf@@HH@Z
+?PrivatiseInlineChain@P3PmsgObject@@QAEXXZ
 ?Push@MsgStck@@UAEAAV1@XZ
 ?Push@P2PmsgRecurs@@QAEHXZ
 ?PushBack@P3PmsgAttr@@QAE?AUP2PmsgFieldHdl@@ABVP3PmsgField@@@Z
@@ -680,6 +699,8 @@
 ?RecycleThis@P3PmsgCurs@@AAEXXZ
 ?Register4P2Pevents@P2Pevent@@SAXIP6GXIKABV1@@ZKK@Z
 ?Register4P2Pevents@P2Pevent@@SAXPAUHWND__@@IKK@Z
+?RehomeInlineItem@P3PmsgObject@@QAEIXZ
+?ReleaseInlineChain@P3PmsgObject@@QAEXXZ
 ?ReleaseP2Piomage@P3PmsgBSTR@@QAEXXZ
 ?Rename@MsgStck@@QAEAAV1@PB_W_N@Z
 ?Rename@P2PmsgMgr@@QAEHPB_W@Z

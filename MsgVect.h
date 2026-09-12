@@ -81,6 +81,8 @@ class Msgcore_EXT P3PmsgVect : public P3PmsgField
 
         operator P3PmsgData& ( );
 
+      //  `if ( oVect )` and nothing else.  Refer P3PmsgObject::operator bool.
+      explicit
         operator bool ( );
 
     // Navigation and 
@@ -89,6 +91,8 @@ class Msgcore_EXT P3PmsgVect : public P3PmsgField
         Delete ( int nElem );
       void
         Truncate ( );
+      virtual void
+        Drop ( );
       P3PmsgField&
         InsertAt ( int nElem, const P3PmsgField& oField );
       //P3PmsgNode&
@@ -138,8 +142,6 @@ class Msgcore_EXT P3PmsgVect : public P3PmsgField
       bool
         IsData ( int nElem );
       bool
-        IsName ( int nElem );
-      bool
         IsField ( int nElem );
       bool
         IsList ( int nElem );
@@ -154,6 +156,12 @@ class Msgcore_EXT P3PmsgVect : public P3PmsgField
         Sizeof ( UCHAR uVBLock ) const;
       virtual bool
         IsDirty ( );
+
+      //  How many references on hVBList this vect, the sub-objects a field
+      //  owns, and the element cursor this vect caches are holding.  Refer
+      //  P3PmsgField::HeapHolders.
+      int
+        HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept override;
 
     // Internal helpers
     private:

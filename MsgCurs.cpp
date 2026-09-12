@@ -91,6 +91,33 @@ P3PmsgCurs::~P3PmsgCurs ( )
     if ( m_pItemParent )
       delete m_pItemParent;
 }
+//
+//  References on hVBList held by this cursor
+//  NOTES: ALL THREE by-value members, and not just the one m_pP3PmsgFoN is
+//         pointing at. Goto connects whichever matches the item it landed on
+//         and leaves the other two exactly as the previous Goto left them, so a
+//         cursor that has walked past a list and then a field is holding this
+//         heap TWICE. Nobody had counted, which is why the caller subtracting
+//         one per cursor would have been wrong in the dangerous direction.
+//       : m_pItemParent as well -- the P3PmsgItem constructor fills it by
+//         assigning the item's object, which AddRefs, and the destructor above
+//         frees it.
+//       : m_pP3PmsgAttr and m_pP3PmsgDesc are the collection that owns this
+//         cursor and are NOT followed; m_pP3PmsgFoN only aliases one of the
+//         three members already counted. Refer P3PmsgField::HeapHolders.
+int
+P3PmsgCurs::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 )
+      return 0;
+
+    int nHolders = m_oP3PmsgField.HeapHolders ( hVBList )
+                 + m_oP3PmsgList .HeapHolders ( hVBList )
+                 + m_oP3PmsgVect .HeapHolders ( hVBList );
+    if ( m_pItemParent != nullptr )
+      nHolders += m_pItemParent -> HeapHolders ( hVBList );
+    return nHolders;
+}
 void
 P3PmsgCurs::RecycleThis ( )
 {

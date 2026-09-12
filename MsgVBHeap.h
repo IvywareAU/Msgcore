@@ -145,6 +145,13 @@ P2PmsgHANDLE
 P2PmsgHeap_AddRef ( P2PmsgHANDLE hVBHeap );
 BOOL
 P2PmsgHeap_Close  ( P2PmsgHANDLE hVBHeap );
+//  How many holders this heap has -- the count AddRef raises and Close lowers.
+//  ONE means the asker is the only holder, and so that nothing else in the
+//  process can be looking at anything on this heap.  It counts holders of the
+//  HEAP and not names for a block: >1 leaves the question open rather than
+//  answering it the other way.  0 for a null handle.
+int
+P2PmsgHeap_RefCount ( P2PmsgHANDLE hVBHeap ) noexcept;
 void
 P2PmsgHeap_InitBSTRio ( VBListBSTRio *pBSTRio, VBLsize nSizeofBSTRio, UCHAR uAddrType );
 VBLaddr
@@ -160,6 +167,11 @@ UCHAR
 P2PmsgHeap_Addrnn ( P2PmsgHANDLE hVBHeap );
 VBLsize
 P2PmsgHeap_Sizeof ( P2PmsgHANDLE hVBHeap );
+//  Free-block boundary tags are an in-memory accelerator and must not reach a
+//  serialised image; Save scrubs them, writes, and restores them. Refer the
+//  note on P2PmsgHeap_ScrubFoots in MsgVBHeap.cpp.
+void
+P2PmsgHeap_ScrubFoots ( P2PmsgHANDLE hVBHeap, bool bRestore ) noexcept;
 VBLsize
 P2PmsgHeap_Sizeof ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock );
 VBListIOmage*
@@ -268,6 +280,22 @@ bool
 P2PmsgHeap_AssertVBlocks ( P2PmsgHANDLE hVBHeap );
 bool
 P2PmsgHeap_AssertValidAlloc ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock );
+//  THE PURE ONE, and the reason there are two.  P2PmsgHeap_AssertValidAlloc is
+//  a developer aid that REPAIRS: where the block it is judging is not Linked it
+//  sets the bit and carries on (MsgVBHeap.cpp, the SYS and BSTRio arms), which
+//  makes it useless to a caller that wants to refuse on the answer -- promoting
+//  such a call out of an ASSERT(...) would start running that write in Release,
+//  where the ASSERT had been keeping it out.  Debug and Release leave different
+//  bytes in the block for exactly that reason, and that is a defect rather than
+//  a design.
+//
+//  P2PmsgHeap_IsValidAlloc asks the same question with no write on any path and
+//  no assertion on any path.  Use it wherever the answer is going to decide
+//  something -- item 19's own prescription, a named refusal in every build.
+//  Use the Assert form only where the heap is this process's own and a broken
+//  invariant is this code's bug.
+bool
+P2PmsgHeap_IsValidAlloc ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock );
 
 ///////////////////////////////////////////////////////////////////////
 //  Triggers

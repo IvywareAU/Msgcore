@@ -75,9 +75,23 @@ class P2PSafePtr
         //         copy's m_pRefCount points into the SOURCE object. Outliving
         //         the source reads freed storage, and reaching zero there hands
         //         Delete() a pointer that was never new'd.
+        //       : AN EMPTY SOURCE HAS NOTHING TO SHARE, which is the whole of
+        //         the first guard below. Without it SwapRef2Shared() migrated a
+        //         count of ZERO to the heap and this constructor then raised it
+        //         to one, for a pointee that does not exist: the copy's
+        //         destructor asserted, freed the count, and the SOURCE's
+        //         destructor then read the freed int. Two objects, two asserts
+        //         and a use-after-free, reachable only since this constructor
+        //         began to compile at all.
         P2PSafePtr ( const P2PSafePtr& rSafePtr )
         {
           m_pSafePtrType = rSafePtr.m_pSafePtrType;
+          if ( m_pSafePtrType == NULL )
+          {
+            m_pRefCount = &m_nRefCount;
+            m_nRefCount = 0;
+            return;
+          }
           if ( rSafePtr.m_pRefCount == &rSafePtr.m_nRefCount )
             rSafePtr.SwapRef2Shared ( );
           m_pRefCount    = rSafePtr.m_pRefCount;
@@ -91,23 +105,95 @@ class P2PSafePtr
       SafePtrType*
         operator->() const { return  m_pSafePtrType; }
       SafePtrType&
-        operator*()  { return *m_pSafePtrType; }
-      
-        operator SafePtrType*() { return m_pSafePtrType; }
+        operator*()  const { return *m_pSafePtrType; }
 
-        operator bool () { return m_pSafePtrType ? true : false; }
+      //  The raw pointer, WITHOUT giving up ownership -- which Dereference()
+      //  below does and this does not. Say it by name.
+      SafePtrType*
+        p_SafePtr () const { return m_pSafePtrType; }
 
+      //  EXPLICIT, and it took the nine call sites below being written out to
+      //  make it so. Implicit, it was the idiom the library is written in: nine
+      //  places hand a safe pointer straight to a function taking a raw one and
+      //  the compiler obliged. It also obliged `delete sp` and `sp[0]`, because
+      //  a conversion that hands out the raw pointer hands out everything a raw
+      //  pointer can do -- and deleting through it frees the payload under a
+      //  holder that still counts one, whose own destructor is then the second
+      //  free. Nobody had written either; that is not the same as nobody being
+      //  able to. The nine sites now say p_SafePtr() and mean it.
+      //  NOTES: STILL CONST. One of the nine reads through a const reference,
+      //         and an accessor that is not const would have broken it.
+        explicit operator SafePtrType*() const { return m_pSafePtrType; }
+
+      //  EXPLICIT, because the two conversions together answered questions
+      //  nobody asked and refused the one this class is for. `int n = sp`
+      //  compiled, through bool; `sp == sp` did NOT -- C2593, the two of them
+      //  being equally good ways to reach a built-in ==. Explicit keeps the
+      //  CONTEXTUAL conversions, which are the ones anybody wants: `if ( sp )`,
+      //  `!sp`, `sp && x`, `sp ? a : b` and static_cast<bool>.
+      //  NOTES: IT DOES NOT MAKE THIS A BOOL-FREE TYPE, and the table in §25
+      //         says so: a SafePtrType* converts to bool on its own, so
+      //         `bool b = sp` and `return sp` from a bool function still
+      //         compile and always did. What explicit closes is the ARITHMETIC
+      //         reading -- int, and the built-in operators reached through it.
+      //       : Nothing in the built tree used this conversion at all. Deleting
+      //         it outright and compiling nine solutions in both configurations
+      //         gave 0 errors, which is why making it explicit costs nothing.
+        explicit operator bool () const { return m_pSafePtrType ? true : false; }
+
+      //  Do we point at the same thing?
+      //  NOTES: The comparison this template always meant to offer, and the
+      //         one expression involving it that did not compile. It is
+      //         identity of the POINTEE, which is the only thing two safe
+      //         pointers can sensibly be asked: each keeps its own count, and
+      //         two counts say nothing about what is being counted.
+      //       : The raw-pointer arm is not a convenience. Without it
+      //         `sp == pThing` would build a TEMPORARY safe pointer around
+      //         pThing through the implicit constructor above, and that
+      //         temporary DELETES what it was handed when the comparison ends.
+      bool
+        operator == ( const P2PSafePtr& rSafePtr ) const
+        { return m_pSafePtrType == rSafePtr.m_pSafePtrType; }
+      bool
+        operator != ( const P2PSafePtr& rSafePtr ) const
+        { return m_pSafePtrType != rSafePtr.m_pSafePtrType; }
+      bool
+        operator == ( SafePtrType *pSafePtrType ) const
+        { return m_pSafePtrType == pSafePtrType; }
+      bool
+        operator != ( SafePtrType *pSafePtrType ) const
+        { return m_pSafePtrType != pSafePtrType; }
+
+      //  NOTES: CONST, and that is a defect fix rather than tidying. Taking the
+      //         source by NON-const reference meant a temporary could not bind
+      //         here, so `sp = MakeSP()` fell through to the raw-pointer
+      //         overload below by way of operator SafePtrType*(). That arm
+      //         stamps a fresh count of ONE and knows nothing of the count the
+      //         temporary is still holding, so the temporary's destructor freed
+      //         the pointee and left the assignee addressing it -- a
+      //         use-after-free, with a second delete behind it. Measured either
+      //         side of this line.
+      //       : A raw pointer still selects the overload below, an exact match
+      //         beating a user-defined conversion, so `spMsg = Factory()` and
+      //         `spPump = 0` take ownership the way they always did.
+      //       : The empty-source guard is the copy constructor's, for the
+      //         reason given there.
       P2PSafePtr&
-        operator = ( P2PSafePtr& rSafePtr )
+        operator = ( const P2PSafePtr& rSafePtr )
         {
           if ( this == &rSafePtr )
             return *this;
           Delete();
-          rSafePtr.SwapRef2Shared ( );
           m_pSafePtrType = rSafePtr.m_pSafePtrType;
+          if ( m_pSafePtrType == NULL )
+          {
+            m_pRefCount = &m_nRefCount;
+            m_nRefCount = 0;
+            return *this;
+          }
+          rSafePtr.SwapRef2Shared ( );
           m_pRefCount    = rSafePtr.m_pRefCount;
-          if ( m_pSafePtrType )
-            (*m_pRefCount)++;
+        (*m_pRefCount)++;
           return *this;
         }
 
@@ -138,7 +224,7 @@ class P2PSafePtr
           return pSafePtrType;
         }
       bool
-        IsEmpty ()
+        IsEmpty () const
         {
           return m_pSafePtrType == NULL ? true : false;
         }

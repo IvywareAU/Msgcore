@@ -7,5 +7,5 @@
 # See the release-readiness register, item 19 for what each form costs in Release.
 
 callwrap 245
-marker 216
-predicate 192
+marker 209
+predicate 183

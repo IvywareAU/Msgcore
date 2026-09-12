@@ -36,13 +36,13 @@
                                      consumers are told to use: it bumps
                                      Msgcore_version.h in the same commit.
 
-        exports-cxx-x64.manifest     700 mangled C++ names per platform. The
+        exports-cxx-x64.manifest     769 mangled C++ names per platform. The
         exports-cxx-win32.manifest   INTERNAL surface -- whole-class MFC
                                      extension-DLL export, pinned to the exact
                                      MSVC toolset, MFC version, CRT model and
                                      _ITERATOR_DEBUG_LEVEL. Per platform because
                                      the two manglings share nothing: the same
-                                     982 exports differ in 1340 names between
+                                     1051 exports differ in 1470 names between
                                      x64 and Win32, which is the ABI difference
                                      showing through and not a defect.
 
@@ -83,6 +83,17 @@
     984. The supplement regenerated EMPTY -- the observable proof item 10 asked
     for, rather than an assertion that the edit was made -- and it has been
     deleted along with the code that read it.
+
+    THE FOUR FIGURES IN THE PARAGRAPH ABOVE ARE ITEM 10's, AND ARE HISTORY. They
+    record what the two manifests held on the day the supplement was retired and
+    are left as written, because rewriting them would destroy the measurement they
+    are. Today the same counts are 769 mangled and 1051 exports per platform, and
+    the synthesised members number 23 rather than 22 -- one more class is exported
+    than there was, MsgStck, and __autoclassinit2 tracked it. The mechanism is
+    unchanged; only the arithmetic moved. It moved unnoticed for a while, which is
+    the failure this file exists to catch one directory over: stack_paths.md
+    section 33 is where Win32 was re-measured for the first time since 4d39d0d,
+    and where these numbers were brought current.
 
     -Configuration IS KEPT rather than removed. It no longer selects an
     expectation, because there is now only one. It records which configuration

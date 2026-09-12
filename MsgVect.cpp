@@ -448,9 +448,11 @@ ASSERT(r_Object().IsVect());
 //}
 
 
+//  Does this vector denote an item?  (Refer P3PmsgObject::operator bool)
+//  NOTES: Inverted, as P3PmsgList::operator bool was, and equally uncalled.
 P3PmsgVect::operator bool ( )
 {
-    return IsVoid();
+    return !IsVoid ( );
 }
 
 //P3PmsgField&
@@ -571,6 +573,68 @@ P3PmsgVect::Truncate ( )
 //    return *m_pCurs;
 //}
 //
+
+//
+//  Memory management
+//  NOTES: P3PmsgList has had this since it was written; P3PmsgVect never did,
+//         so a vect fell through to P3PmsgField::Drop, which opens with
+//         ASSERT(OBJ__IsField()) -- false for a vect -- and then frees the item
+//         block WITHOUT Truncate(), leaking every element block and every
+//         aExtra continuation behind it. Nothing had dropped a vect before:
+//         P3PmsgDesc and P3PmsgAttr drop their children through the base class,
+//         and no vect had ever been a pushed stack generation because
+//         MsgStck::Push asserted for one. Popping a vect is what needed it.
+//       : The body is P3PmsgList::Drop's, with Truncate() doing the
+//         type-specific part -- it frees the element blocks through
+//         FreeElemDeep and then unchains the aExtra continuations.
+//       : THE TYPE TEST THROWS RATHER THAN ASSERTS, and the reason is the
+//         first note above. P3PmsgField::Drop already had the same test as
+//         ASSERT(OBJ__IsField()), and it did not stop a vect being dropped
+//         through it, because an ASSERT is not in the binary that did the
+//         dropping. Repeating the pattern one level down would buy exactly
+//         as much. It is not decoration either: Truncate() reads the element
+//         slot array through VBLock_pVect and hands what it finds to Free, so
+//         on a block that is not a vect those are arbitrary bytes taken as
+//         addresses. That matters in Release, which is the whole of item 19.
+void
+P3PmsgVect::Drop ( )
+{
+    if ( !r_Object().IsVect() )
+      EVERR->MODULE
+           ->Message(L"Drop on a P3PmsgVect whose block is not a vect")
+           ->Throw();
+    if ( IsAttributed() )
+      r_Attr().Drop();
+    if ( IsDescendant() )
+      r_Desc().Drop();
+    if ( IsStacked() )
+      r_Stck().Drop();
+
+    P2PmsgField_DropName ( this );
+    P2PmsgField_DropData ( this );
+    Truncate ( );
+
+    // Isolate parent
+    VBLock *pVBLockParent = P2PmsgField_GetVBLockParent ( this );
+    if ( pVBLockParent )
+    {
+      if ( VBLock_IsAttr(pVBLockParent) )
+      {
+        VBLockAttr *pAttrParent = VBLock_pAttr(pVBLockParent);
+        P2PmsgAttr_UnLinkItem ( &m_oObject, pAttrParent, OBJ__VBLocknn );
+      }
+      else if ( VBLock_IsDesc(pVBLockParent) )
+      {
+        VBLockDesc *pDescParent = VBLock_pDesc(pVBLockParent);
+        P2PmsgDesc_UnLinkItem ( &m_oObject, pDescParent, OBJ__VBLocknn );
+      }
+      else
+        ASSERT(0);
+    }
+
+    // Tidy up, and
+    OBJ__Free ( OBJ__aVBLock );
+}
 
 //
 //  Allocate a fresh element item block and deep-copy oField into it.  The
@@ -1050,6 +1114,44 @@ P3PmsgVect::IsDirty ( )
          P3PmsgField::IsDirty()    )
       return true;
     return false;
+}
+//
+//  References on hVBList held by this vect and everything it owns
+//  NOTES: THE FIELD'S WALK, PLUS THE ELEMENT CURSOR. §31 asked for the two
+//         proofs before anything here could be subtracted, and m_pP3PmsgType
+//         carries both: Goto news it -- as a P3PmsgList, a P3PmsgVect or a
+//         P3PmsgField, whichever the element is -- deletes the previous one on
+//         the way, and ~P3PmsgVect, Delete and Truncate delete it; it is never
+//         assigned a pointer from anywhere else. Goto then Connect()s it on
+//         OBJ__hVBList, which AddRefs. So there is at most one of them and it
+//         is this vect's own.
+//       : AND IT IS WALKED AS THE ELEMENT'S OWN KIND, which is why
+//         P3PmsgData::HeapHolders is virtual. m_pP3PmsgType is declared
+//         P3PmsgField* and a nested container puts a P3PmsgList or a
+//         P3PmsgVect in it; those hold cursors of their own one level further
+//         in, and a compile-time call would stop above them.
+//       : m_pP3PmsgData[] HOLDS NOTHING TODAY, and this is a measurement rather
+//         than an assumption. Every site that would fill it -- the vect's own
+//         GetNext and GetTail -- is inside a comment block, so the array is
+//         zeroed at construction and deleted as nullptrs. It is walked with the
+//         element cursor because the count is exact either way, and because a
+//         vect that grows those readers back would otherwise go quietly wrong
+//         in the unsafe direction.
+//       : m_pP3PmsgField on the collections a field owns points back UP and is
+//         not followed. Refer P3PmsgField::HeapHolders.
+int
+P3PmsgVect::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 )
+      return 0;
+
+    int nHolders = P3PmsgField::HeapHolders ( hVBList );
+    if ( m_pP3PmsgType != nullptr )
+      nHolders += m_pP3PmsgType -> HeapHolders ( hVBList );
+    for ( int i = 0; i < MAX_P3PmsgData_Curs; i++ )
+      if ( m_pP3PmsgData[i] != nullptr )
+        nHolders += m_pP3PmsgData[i] -> HeapHolders ( hVBList );
+    return nHolders;
 }
 ///*      virtual bool
 //        IsEmpty ( ) const = 0;*/

@@ -211,9 +211,11 @@ P3PmsgDesc::operator [] ( LPCTNAM lpszName )
     return m_pCurs->r_item();
 }
 
+//  Does this descendant collection denote an item?
+//  NOTES: Refer P3PmsgAttr::operator bool.
 P3PmsgDesc::operator bool ( ) const
 {
-    return r_Object();
+    return !r_Object().IsVoid ( );
 }
 
 //  Memory management
@@ -262,6 +264,27 @@ const P3PmsgObject&
 P3PmsgDesc::r_Object ( ) const noexcept
 {
     return m_oObject;
+}
+//
+//  References on hVBList held by this collection and by its cursor
+//  NOTES: READS m_pCurs AND DOES NOT CREATE ONE. r_Curs() is a creating
+//         accessor -- it news a cursor on first call, and a cursor takes a
+//         reference on the heap as soon as it lands on an item. A question
+//         about who is holding this heap that answered by taking another
+//         reference on it would be its own wrong answer, so this asks the
+//         member directly.
+//       : m_pP3PmsgField is the field that OWNS this collection and is not
+//         followed. Refer P3PmsgField::HeapHolders for why not.
+int
+P3PmsgDesc::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 )
+      return 0;
+
+    int nHolders = m_oObject.m_hVBList == hVBList ? 1 : 0;
+    if ( m_pCurs != nullptr )
+      nHolders += m_pCurs -> HeapHolders ( hVBList );
+    return nHolders;
 }
 
 void
@@ -780,8 +803,25 @@ P2PmsgDesc_GetVBLockParentnn ( const P3PmsgDesc *pDesc )
 {
     if ( pDesc->GetField() == 0 )
       return 0;
+    //  THE COLLECTION'S OWN BLOCK, not the owning item's -- the same defect
+    //  §12 found and fixed in P2PmsgAttr_GetVBLockParentnn, left standing here
+    //  because this one had no caller either. GetField()->r_Object() is the
+    //  ITEM (P3PmsgDesc holds a pointer back to the field it belongs to, which
+    //  is what GetField() means), and reading it through VBLock_pDesc picks
+    //  VBLockDesc's fields out of a VBLockItem's ut union: the parent comes
+    //  back as whatever bytes lie at that offset, and Msg2Phys of that runs
+    //  off the arena.
+    //
+    //  The collection lives at the item's aDescn, which is what
+    //  P3PmsgDesc__GetVBLocknn reads and what MsgDesc's own link routines
+    //  write into every child's aParent.
     //TODO:LJM deprecated below VBLock *pVBLock   = P3PmsgDesc__VBLock ( pDesc );
-    VBLock *pVBLock   = ptrVBLOCK(pDesc->GetField()->r_Object()); //->r_Object().GetVBLock();
+    VBLaddr aVBLockDesc = P3PmsgDesc__GetVBLocknn ( pDesc );
+    if ( aVBLockDesc == 0 )
+      return 0;                        // No descendants; no collection block
+    VBLock *pVBLock   = (VBLock *)pDesc->GetField()->r_Object().Msg2Phys ( aVBLockDesc );
+    if ( pVBLock == nullptr || !VBLock_IsDesc(pVBLock) )
+      return 0;
     UCHAR   uVBLock   = pVBLock->oHdr.uVBLockDefs;
     ASSERT(VBLock_IsLinked(pVBLock));
     return VBLockDesc_GetParent ( uVBLock, VBLock_pDesc(pVBLock) );

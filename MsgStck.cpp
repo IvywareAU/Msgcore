@@ -64,6 +64,8 @@ VBLock*
 MsgStck__GetVBLock  ( MsgStck *pThis );
 VBLaddr
 MsgStck__AllocItem ( MsgStck *pThis, const P3PmsgField& oField );
+static void
+MsgStck__Unlink ( MsgStck *pThis, VBLaddr aPopped, VBLaddr aBelow );
 
 //UINT
 //P2PmsgAttr_GetExtra  ( P3PmsgField *pField );
@@ -123,6 +125,102 @@ MsgStck::Connect ( P3PmsgField *pField ) noexcept
     m_pP3PmsgField = pField;
 }
 
+
+//
+//  Re-links the stack around the generation Pop is about to drop: the live item
+//  takes the generation BELOW the popped one, and the popped one's own aStack
+//  is cut.
+//  NOTES: BOTH STORES MATTER, and the second was missing. Drop() walks the
+//         stack -- P3PmsgField::Drop and P3PmsgList::Drop both end with
+//         "if (IsStacked()) r_Stck().Drop()" -- and MsgStck::Drop zeroes every
+//         link the rest of the way down. So dropping a popped item that still
+//         pointed at the generation below it severed the generations Pop was
+//         supposed to leave standing, and leaked their blocks, since
+//         MsgStck::Drop unlinks without freeing.
+//         Measured before the second store: push "Gen0"/"Gen1"/"Gen2"/"Gen3",
+//         pop once, and "^" answered Gen1 while "^^" -- Gen0, which is still
+//         allocated and still correct -- answered void. A single push and pop
+//         hid it, because there was no generation below to sever, and that is
+//         the only shape anything in the tree had exercised.
+//       : RE-DERIVED here rather than passed in. The restore above this call
+//         allocates (r_Attr(), r_Desc(), AddListTail, InsertAt), an allocation
+//         may grow the heap, and a grown heap moves every block in the image.
+//         Both VBLock pointers held across it are stale; the two VBLaddr's are
+//         not, because they are offsets.
+static void
+MsgStck__Unlink ( MsgStck *pThis, VBLaddr aPopped, VBLaddr aBelow )
+{
+    P3PmsgObject& oObject  = (P3PmsgObject&)pThis -> GetField() -> r_Object();
+    UCHAR&        uVBLock  = oObject.m_uVBLock;
+    VBLock       *pVBLock  = ptrVBLOCK ( oObject );
+    VBLock       *pVBLock1 = (VBLock *)oObject.Msg2Phys ( aPopped );
+    VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock),  aBelow );
+    VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock1), 0      );
+    //  Off the chain, so no longer a snapshot of anything. aParent on an item
+    //  means "the collection I am linked into", and Push borrows it to mean
+    //  "the item I was pushed from" -- which is true only while the block is
+    //  on that item's stack. P3PmsgField::Drop reads aParent to decide which
+    //  collection to unlink from and ASSERTs on anything else, so the loan has
+    //  to be returned here, where the block stops being a snapshot, and not
+    //  left for the free to trip over. Same idiom as every other unlink.
+    VBLockItem_SetParent ( uVBLock, VBLock_pItem(pVBLock1), 0      );
+}
+
+//
+//  Copies the four parts of an item that every item type has in common.
+//  NOTES: Piece by piece, and NOT through P3PmsgField::operator=, which copies
+//         the stack as well (P2Pmsg.cpp:3235). Inside Push that would duplicate
+//         the very generations the push is re-linking; inside Pop it would
+//         re-attach the snapshot's chain to the live item. The four assignments
+//         below are what the field arm of Push has always done by hand, lifted
+//         out so the list and vector arms cannot drift from it.
+//       : bRestore is Pop's side of it. Push copies onto a block that
+//         P2PmsgItem_InitField / _InitItem has just laid out empty, so an
+//         absent collection is already absent; Pop copies onto the LIVE item,
+//         which may carry attributes or descendants the snapshot does not, and
+//         those have to go.
+static void
+MsgStck__CopyParts ( P3PmsgField& oDst, P3PmsgField& oSrc, bool bRestore )
+{
+    oDst.r_name() = oSrc.r_name();
+    oDst.r_data() = oSrc.r_data();
+    if ( oSrc.IsAttributed() )
+      oDst.r_Attr() = oSrc.r_Attr();
+    else if ( bRestore )
+      oDst.r_Attr().Drop();
+    if ( oSrc.IsDescendant() )
+      oDst.r_Desc() = oSrc.r_Desc();
+    else if ( bRestore )
+      oDst.r_Desc().Drop();
+}
+
+//
+//  Copies a list's elements. P2PmsgList_InitItem lays out an EMPTY list --
+//  VBLockList_Init zeroes aFirst, aLast and nItems -- so the payload is not
+//  carried by the allocation the way the name and data cells are, and has to be
+//  walked over. This is the same loop P3PmsgList::operator= uses, and it relies
+//  on the same thing: the source keeps its own cursor, so its GetNext()
+//  references stay valid across the destination's AddListTail() calls.
+static void
+MsgStck__CopyElems ( P3PmsgList& oDst, P3PmsgList& oSrc )
+{
+    VBLaddr aElem = oSrc.GetHeadPos ( );
+    while ( aElem )
+      oDst.AddListTail ( oSrc.GetNext(aElem) );
+}
+
+//
+//  The same for a vector, by index. P3PmsgVect::InsertAt -> AllocElem handles a
+//  nested field, list or vector, so an element that is itself a container is
+//  deep-copied rather than aliased.
+static void
+MsgStck__CopyElems ( P3PmsgVect& oDst, P3PmsgVect& oSrc )
+{
+    VBLelem nItems = oSrc.GetCount ( );
+    for ( VBLelem i = 0; i < nItems; i++ )
+      oDst.InsertAt ( (int)i, oSrc.r_item((int)i) );
+}
+
 MsgStck&
 MsgStck::Push ( )
 {
@@ -139,45 +237,80 @@ MsgStck::Push ( )
     //  ASSERT(0);
     //}
 
-    // P3PmsgList
-    if ( m_pP3PmsgField->r_Object().IsList() )
+    const bool bList = m_pP3PmsgField->r_Object().IsList();
+    const bool bVect = m_pP3PmsgField->r_Object().IsVect();
+    if ( !bList && !bVect && !m_pP3PmsgField->r_Object().IsField() )
     {
-      ASSERT(0);
+      ASSERT(0);                       // Not an item; nothing to push
+      return *this;
+    }
+
+    //  ALLOCATION AND LINKING ARE TYPE-INDEPENDENT, and that is why the list
+    //  and vector arms below are so short. MsgStck__AllocItem has dispatched on
+    //  the item type since it was written -- it sizes with P2PmsgList_SizeofItem
+    //  or P2PmsgVect_SizeofItem and lays the block out with the matching
+    //  _InitItem -- so a list block was always allocatable; Push simply never
+    //  called it for one and asserted instead. The two links are aStack fields
+    //  in the VBLockItem header, which every item type carries whatever the ut
+    //  union under it holds.
+    VBLaddr aVBLock1 = MsgStck__AllocItem ( this, *m_pP3PmsgField );
+    VBLock *pVBLock1 = (VBLock *)m_pP3PmsgField -> r_Object().Msg2Phys(aVBLock1);
+
+    // RE-DERIVED, and it must be: pVBLock above was taken BEFORE the
+    // allocation on the line above it, and an allocation may grow the heap,
+    // which reallocates the base image and moves every block in it. Writing
+    // through the stale pointer corrupted whatever now occupied that
+    // address -- reliably, once a store was big enough for AllocItem to
+    // trigger a growth. Found 2026-08-15 by MsgcoreCom's PushValue.
+    pVBLock = ptrVBLOCK ( m_pP3PmsgField->r_Object() );
+
+    VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock),  aVBLock1 );
+    VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock1), aVBLock2 );
+    pVBLock1 -> oHdr.uVBLockDefs |= VBLock_Linked;
+
+    //  RECORD THE OWNER. aParent was left zero here, and a zero parent is what
+    //  P3Pmsg_GetPath reads as a FLOATING item -- so every snapshot of BHP,
+    //  whatever its generation and wherever BHP lived, answered ".BHP": not
+    //  this object's path, resolving to something else entirely, and the same
+    //  string for all of them. Nothing else in the block could be walked to
+    //  find the owner, because aStack runs the other way (owner -> newest ->
+    //  older) and a snapshot has no back-link along it.
+    //
+    //  The OWNER, not the generation above: the older generations already
+    //  point at it and go on pointing at it, so a push adds this one line and
+    //  Pop and Drop have nothing to maintain -- the block they unlink is one
+    //  they free. P3Pmsg_GetPath counts the generation by walking the owner's
+    //  chain, which also tells it that this really is a snapshot of that item.
+    VBLockItem_SetParent ( uVBLock, VBLock_pItem(pVBLock1)
+                         , m_pP3PmsgField->r_Object().GetVBLocknn() );
+
+    //  Read the size while pVBLock1 is still fresh: everything below this line
+    //  allocates, and the copies are addressed by VBLaddr, not by pointer.
+    const VBLsize nSizeof1 = VBLock_Hdr_u_SizeNN ( pVBLock1 );
+
+    // P3PmsgList
+    if ( bList )
+    {
+      P3PmsgList oLive  ( m_pP3PmsgField->r_Object() );
+      P3PmsgList oList1 ( oObject.m_hVBList, aVBLock1, nSizeof1 );
+      MsgStck__CopyParts ( oList1, oLive, false );
+      MsgStck__CopyElems ( oList1, oLive );
     }
 
     // P3PmsgVect
-    else if ( m_pP3PmsgField->r_Object().IsVect() )
+    else if ( bVect )
     {
-      ASSERT(0);
+      P3PmsgVect oLive  ( m_pP3PmsgField->r_Object() );
+      P3PmsgVect oVect1 ( oObject.m_hVBList, aVBLock1, nSizeof1 );
+      MsgStck__CopyParts ( oVect1, oLive, false );
+      MsgStck__CopyElems ( oVect1, oLive );
     }
 
     // P3PmsgField
-    else if ( m_pP3PmsgField->r_Object().IsField() )
+    else
     {
-      //UINT nSizeofItem = P2PmsgField_SizeofItem ( uVBLock, m_pP3PmsgField );
-      VBLaddr aVBLock1 = MsgStck__AllocItem ( this, *m_pP3PmsgField );
-      VBLock *pVBLock1 = (VBLock *)m_pP3PmsgField -> r_Object().Msg2Phys(aVBLock1);
-
-      // RE-DERIVED, and it must be: pVBLock above was taken BEFORE the
-      // allocation on the line above it, and an allocation may grow the heap,
-      // which reallocates the base image and moves every block in it. Writing
-      // through the stale pointer corrupted whatever now occupied that
-      // address -- reliably, once a store was big enough for AllocItem to
-      // trigger a growth. Found 2026-08-15 by MsgcoreCom's PushValue.
-      pVBLock = ptrVBLOCK ( m_pP3PmsgField->r_Object() );
-
-      VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock),  aVBLock1 );
-      VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock1), aVBLock2 );
-      pVBLock1 -> oHdr.uVBLockDefs |= VBLock_Linked;
-
-      P3PmsgField oField1 ( oObject.m_hVBList
-                          , aVBLock1, VBLock_Hdr_u_SizeNN(pVBLock1) );
-      oField1.r_name() = m_pP3PmsgField -> r_name();
-      oField1.r_data() = m_pP3PmsgField -> r_data();
-      if ( m_pP3PmsgField->IsAttributed() )
-        oField1.r_Attr() = m_pP3PmsgField -> r_Attr();
-      if ( m_pP3PmsgField->IsDescendant() )
-        oField1.r_Desc() = m_pP3PmsgField -> r_Desc();
+      P3PmsgField oField1 ( oObject.m_hVBList, aVBLock1, nSizeof1 );
+      MsgStck__CopyParts ( oField1, *m_pP3PmsgField, false );
     }
 
     // Tidy up, and
@@ -197,6 +330,7 @@ MsgStck::Pop ( )
       return *this;                    // Nothing pushed
     VBLock *pVBLock1 = (VBLock *)m_pP3PmsgField -> r_Object().Msg2Phys ( aVBLock1 );
     VBLaddr aVBLock2 = VBLockItem_GetStack ( uVBLock, VBLock_pItem(pVBLock1) );
+    const VBLsize nSizeof1 = VBLock_Hdr_u_SizeNN ( pVBLock1 );
 
     // P3PmsgNode
     //if ( m_pP3PmsgField->r_Object().IsNode() )
@@ -204,35 +338,54 @@ MsgStck::Pop ( )
     //  ASSERT(0);
     //}
 
-    // P3PmsgList
-    if ( m_pP3PmsgField->r_Object().IsList() )
+    const bool bList = m_pP3PmsgField->r_Object().IsList();
+    const bool bVect = m_pP3PmsgField->r_Object().IsVect();
+    if ( !bList && !bVect && !m_pP3PmsgField->r_Object().IsField() )
     {
-      ASSERT(0);
+      ASSERT(0);                       // Not an item; nothing to pop
+      return *this;
+    }
+
+    // P3PmsgList
+    if ( bList )
+    {
+      //  Restored THROUGH THE CALLER'S OWN OBJECT where there is one. A
+      //  P3PmsgList caches up to MAX_P3PmsgData_Curs element cursors, and
+      //  Truncate() is what clears them; truncating a second view of the same
+      //  block would free the element blocks while leaving the caller's cursors
+      //  pointing at them.
+      P3PmsgList  oView ( m_pP3PmsgField->r_Object() );
+      P3PmsgList *pLive = dynamic_cast<P3PmsgList*>(m_pP3PmsgField);
+      P3PmsgList& oLive = pLive ? *pLive : oView;
+      P3PmsgList  oList1 ( oObject.m_hVBList, aVBLock1, nSizeof1 );
+      oLive.Truncate ( );
+      MsgStck__CopyParts ( oLive, oList1, true );
+      MsgStck__CopyElems ( oLive, oList1 );
+      MsgStck__Unlink    ( this, aVBLock1, aVBLock2 );
+      oList1.Drop ( );
     }
 
     // P3PmsgVect
-    else if ( m_pP3PmsgField->r_Object().IsVect() )
+    else if ( bVect )
     {
-      ASSERT(0);
+      P3PmsgVect  oView ( m_pP3PmsgField->r_Object() );
+      P3PmsgVect *pLive = dynamic_cast<P3PmsgVect*>(m_pP3PmsgField);
+      P3PmsgVect& oLive = pLive ? *pLive : oView;
+      P3PmsgVect  oVect1 ( oObject.m_hVBList, aVBLock1, nSizeof1 );
+      oLive.Truncate ( );
+      MsgStck__CopyParts ( oLive, oVect1, true );
+      MsgStck__CopyElems ( oLive, oVect1 );
+      MsgStck__Unlink    ( this, aVBLock1, aVBLock2 );
+      oVect1.Drop ( );
     }
 
     // P3PmsgField
-    else if ( m_pP3PmsgField->r_Object().IsField() )
+    else
     {
-      P3PmsgField oField1 ( oObject.m_hVBList
-                          , aVBLock1, VBLock_Hdr_u_SizeNN(pVBLock1) );
-      m_pP3PmsgField -> r_name() = oField1.r_name();
-      m_pP3PmsgField -> r_data() = oField1.r_data();
-      if ( oField1.IsAttributed() )
-        m_pP3PmsgField -> r_Attr() = oField1.r_Attr();
-      else
-        m_pP3PmsgField -> r_Attr().Drop();
-      if ( oField1.IsDescendant() )
-        m_pP3PmsgField -> r_Desc() = oField1.r_Desc();
-      else
-        m_pP3PmsgField -> r_Desc().Drop();
-      VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock), aVBLock2 );
-      oField1.Drop();
+      P3PmsgField oField1 ( oObject.m_hVBList, aVBLock1, nSizeof1 );
+      MsgStck__CopyParts ( *m_pP3PmsgField, oField1, true );
+      MsgStck__Unlink    ( this, aVBLock1, aVBLock2 );
+      oField1.Drop ( );
     }
 
     // Tidy up, and
@@ -376,18 +529,92 @@ MsgStck__AllocItem ( MsgStck *pThis, const P3PmsgField& oField )
     return aVBLock;
 }
 
+//
+//  Releases every generation on the item's stack.
+//  NOTES: IT USED TO FREE NOTHING. It walked to the deepest generation, zeroed
+//         each aStack on the way back up, and returned -- so every pushed block,
+//         and the name and data blocks hanging off it, stayed allocated with
+//         nothing left pointing at them. Every caller wants the storage back:
+//         P3PmsgField::Drop, P3PmsgList::Drop and P3PmsgVect::Drop all reach
+//         here while dismantling an item, MsgFacade's FacadeNode exposes it as
+//         the COM "drop the stack" verb, and TargetCore's P2PeerMsg calls it
+//         when it replaces one stack with another.
+//         Measured on a single push of a 272-byte item: push, record the
+//         snapshot's P2Pos, Drop, push an identical item again, and the second
+//         snapshot landed 272 bytes further on instead of in the block the
+//         first one had vacated.
+//       : HEAD FIRST, WHICH IS WHY THIS IS A LOOP AND NOT A RECURSION. Drop()
+//         ends with "if (IsStacked()) r_Stck().Drop()", so simply dropping the
+//         head would unwind the chain on its own -- deepest generation first.
+//         That is the one order this heap cannot reclaim. Generations are
+//         pushed at ascending addresses, and P2PmsgHeap_CollateIOMAGE merges a
+//         freed block only with its NEXT physical neighbour; there is no
+//         backward merge, because a VBHeap block carries no footer to find its
+//         predecessor by. Free deepest-first and every block's next neighbour
+//         is still allocated at the moment it is freed, so nothing coalesces:
+//         the list ends up holding N separate blocks, only the highest merges
+//         with the image tail, and that merged block then sits at the head of
+//         the free list and satisfies every subsequent request -- so the other
+//         N-1 are never looked at again. Free head-first and each block merges
+//         into the span above it that was freed a moment earlier, and the whole
+//         chain comes back.
+//         Measured, three generations, four rounds of push-push-push-Drop:
+//             deepest-first   949 1361 1773 2185   (+412 a round)
+//             head-first      949  949  949  949
+//         The loop therefore unlinks each generation before dropping it, which
+//         is also what stops Drop() recursing underneath us.
+//       : THIS IS ORDERING, NOT A HEAP FIX. Any caller that frees adjacent
+//         blocks low-to-high loses them the same way -- P3PmsgDesc::Truncate
+//         deletes child 0 repeatedly and drifts 824 bytes per truncate-refill
+//         round on five children, with no stack involved. Refer stack_paths.md
+//         section 8.
+//       : BY THE GENERATION'S OWN TYPE. A pushed list is a list, and
+//         P3PmsgField::Drop opens ASSERT(OBJ__IsField()) and frees the item
+//         block with no Truncate(), which would leak every element in it --
+//         the same trap P3PmsgVect::Drop was added to close.
 void
 MsgStck::Drop ( )
 {
     if ( m_pP3PmsgField == nullptr )
       return;
     VBLock *pVBLock = (VBLock *)m_pP3PmsgField -> r_Object().GetVBLock ( );
-    VBLaddr aStack = VBLockItem_GetStack ( pVBLock->oHdr.uVBLockDefs, VBLock_pItem(pVBLock) );
+    if ( pVBLock == nullptr )
+      return;
+    UCHAR   uVBLock = pVBLock->oHdr.uVBLockDefs;
+    VBLaddr aStack  = VBLockItem_GetStack ( uVBLock, VBLock_pItem(pVBLock) );
     if ( !aStack )
       return;
-    P3PmsgField oField ( m_pP3PmsgField->OBJ__hVBList, aStack, 0 );
-                oField.r_Stck().Drop();
-    VBLockItem_SetStack ( pVBLock->oHdr.uVBLockDefs, VBLock_pItem(pVBLock), 0 );
+
+    // Unlink, then free -- head first
+    VBLockItem_SetStack ( uVBLock, VBLock_pItem(pVBLock), 0 );
+
+    P2PmsgHANDLE hVBList = m_pP3PmsgField -> OBJ__hVBList;
+    VBLaddr      aGen    = aStack;
+    while ( aGen )
+    {
+      VBLock     *pGen  = (VBLock *)m_pP3PmsgField->r_Object().Msg2Phys(aGen);
+      VBLockItem *pItem = VBLock_pItem ( pGen );
+      VBLaddr     aNext = VBLockItem_GetStack ( pGen->oHdr.uVBLockDefs, pItem );
+      VBLockItem_SetStack  ( pGen->oHdr.uVBLockDefs, pItem, 0 );
+      //  And the owner it was pushed from -- refer MsgStck__Unlink.
+      VBLockItem_SetParent ( pGen->oHdr.uVBLockDefs, pItem, 0 );
+      if ( VBLockItem_IsList(pItem) )
+      {
+        P3PmsgList oGen ( hVBList, aGen, 0 );
+        oGen.Drop ( );
+      }
+      else if ( VBLockItem_IsVect(pItem) )
+      {
+        P3PmsgVect oGen ( hVBList, aGen, 0 );
+        oGen.Drop ( );
+      }
+      else
+      {
+        P3PmsgField oGen ( hVBList, aGen, 0 );
+        oGen.Drop ( );
+      }
+      aGen = aNext;
+    }
 }
 
 //  Navigation and 
@@ -607,4 +834,29 @@ P3PmsgField*
 MsgStck::GetField ( ) noexcept
 {
     return m_pP3PmsgField;
+}
+//
+//  References on hVBList held by this stack
+//  NOTES: The three stacked objects, each of which is newed on the OWNING
+//         field's heap by r_field/r_list/r_vect and deleted by RecycleThis. A
+//         Push alone creates none of them -- §26 measured a push as adding no
+//         holder at all and that reading was correct -- so what this counts is
+//         a snapshot that has since been READ. That is the state §26 could not
+//         reach and recorded as unreachable rather than as costing nothing.
+//       : m_pP3PmsgField is the field that OWNS this stack and is not followed.
+//         Refer P3PmsgField::HeapHolders.
+int
+MsgStck::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 )
+      return 0;
+
+    int nHolders = 0;
+    if ( m_pStckField != nullptr )
+      nHolders += m_pStckField -> HeapHolders ( hVBList );
+    if ( m_pStckList  != nullptr )
+      nHolders += m_pStckList  -> HeapHolders ( hVBList );
+    if ( m_pStckVect  != nullptr )
+      nHolders += m_pStckVect  -> HeapHolders ( hVBList );
+    return nHolders;
 }

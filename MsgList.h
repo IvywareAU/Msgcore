@@ -108,6 +108,8 @@ class Msgcore_EXT P3PmsgList : public P3PmsgField
 
         operator P3PmsgData& ( );
 
+      //  `if ( oList )` and nothing else.  Refer P3PmsgObject::operator bool.
+      explicit
         operator bool ( );
 
     // Navigation and 
@@ -143,6 +145,12 @@ class Msgcore_EXT P3PmsgList : public P3PmsgField
         Sizeof ( UCHAR uVBLock ) const;
       virtual bool
         IsDirty ( );
+
+      //  How many references on hVBList this list, the sub-objects a field
+      //  owns, and the data cursors this list caches are holding.  Refer
+      //  P3PmsgField::HeapHolders.
+      int
+        HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept override;
 
     // Attributes
     protected:

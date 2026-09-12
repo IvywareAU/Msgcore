@@ -645,6 +645,24 @@ msgcore_field_is_descendant(MsgFieldHandle hField)
     return toField(hField)->IsDescendant() ? 1 : 0;
 }
 
+// P3PmsgField::IsSole, not P3PmsgObject::IsSole: the field's override subtracts
+// the sub-objects it made itself, so a field that has merely been asked for its
+// descendants still answers TRUE. The object's version cannot tell those from a
+// stranger. The contract the header publishes -- TRUE guarantees, FALSE does not
+// -- is the field's, and forwarding to r_Object() here would quietly narrow the
+// TRUE half that the whole export exists for.
+//
+// The bad-handle answer is 0 and that is not arbitrary: 0 is the answer that
+// promises nothing, so a stale or hostile handle can never be turned into a
+// licence to write in place. (msgcore_field_is_null / _is_void answer 1 for the
+// same reason -- in those, 1 is the pessimistic half.)
+MSGCORE_C_API int
+msgcore_field_is_sole(MsgFieldHandle hField)
+{
+    if (!toField(hField)) return 0;
+    return toField(hField)->IsSole() ? 1 : 0;
+}
+
 // ---------------------------------------------------------------------------
 // P3PmsgList
 // ---------------------------------------------------------------------------

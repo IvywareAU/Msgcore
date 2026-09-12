@@ -1214,6 +1214,36 @@ P3PmsgData::p_Object ( ) const
 ASSERT(m_pObject);
     return m_pObject;
 }
+//
+//  References on hVBList held by this data cell
+//  NOTES: ONE OBJECT, and the same rule §29 rests on: Connect() reaches
+//         P3PmsgObject::Connectx -> Connecta, which AddRefs whenever the handle
+//         changes and returns early when it does not, and ~P3PmsgData deletes
+//         the object, which Closes it. So a live cell whose handle is this
+//         handle IS one reference. A cell that was never connected to a heap
+//         has m_hVBList == 0 and counts nothing.
+//       : IT IS VIRTUAL FOR THE ELEMENT CURSOR'S SAKE. P3PmsgVect::Goto news a
+//         P3PmsgList or a P3PmsgVect into m_pP3PmsgType, which is declared
+//         P3PmsgField*, and P3PmsgField::IsSole calls this on itself; without
+//         the dispatch a walked list would ask P3PmsgField::HeapHolders and
+//         stop one level above its own cursors, which is the row §31 opened.
+//       : IT MUST NOT BE CALLED ON A FIELD, and it never is. P3PmsgField
+//         aliases this m_pObject onto its own m_oObject (refer its
+//         constructors, which assign P3PmsgData::m_pObject = &m_oObject) and
+//         counts that object itself, so a field reaching this would count one
+//         object twice -- overcounting, which is the direction that reports a
+//         guarantee that is not true. P3PmsgField overrides this rather than
+//         adding to it, and every caller of this version holds a P3PmsgData
+//         that a list or a vect newed for itself.
+int
+P3PmsgData::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 ||
+         m_pObject == nullptr )
+      return 0;
+
+    return m_pObject -> m_hVBList == hVBList ? 1 : 0;
+}
 
 ///////////////////////////////////////////////////////////////////////
 //  Operations
@@ -2458,6 +2488,26 @@ ASSERT(0);
 //         take the inline-copy branch.
 P3PmsgObject::P3PmsgObject ( const P3PmsgObject& rhs )
 {
+    //  AN ITEM IS REHOMED BEFORE IT IS SHARED, and this is the only place a
+    //  floating one is ever asked for by value -- P3Pmsg_SelectObject and every
+    //  other "here is the object you asked for" returns one. Without it the
+    //  answer is a DUPLICATE of the floating item rather than the item: its
+    //  P2Pos differs and a write through it does not reach the original.
+    //  RehomeInlineItem does nothing to a value block, so P3PmsgData and
+    //  P3PmsgName still take the inline-copy branch below (refer its NOTES).
+    //  Casting away const to do it is what Connect already does, one arm down,
+    //  and for the same reason: the two handles can only name one block if the
+    //  block moves out of the object that built it.
+    //  ON THE STATE OF THE BLOCK, NOT THE STATE OF THE HEAP. The guard was
+    //  `rhs.m_hVBList == 0`, and an object can hold a heap and still address
+    //  its own inline array -- refer RehomeInlineItem. On that state nothing
+    //  was rehomed, the AddRef arm below ran, and m_aVBLock was copied
+    //  verbatim: a pointer into the SOURCE OBJECT. Where the source was a
+    //  local, the copy outlived it and read a dead stack frame. §22.
+    if ( rhs.m_nVBLockSize != 0 &&
+         rhs.m_aVBLock == (VBLaddr)&rhs.m_oVBLock[0] )
+      ((P3PmsgObject&)rhs).RehomeInlineItem ( );
+
     m_uVBLock     = rhs.m_uVBLock;
     m_aVBLock     = rhs.m_aVBLock;
     m_xVBLock     = rhs.m_xVBLock;
@@ -2465,27 +2515,42 @@ P3PmsgObject::P3PmsgObject ( const P3PmsgObject& rhs )
     m_hVBList     = rhs.m_hVBList;
     if ( m_hVBList )
       P2PmsgHeap_AddRef ( m_hVBList );
-    else if ( rhs.m_nVBLockSize == 0 )
+
+    if ( rhs.m_nVBLockSize == 0 && rhs.m_hVBList == 0 )
     {
       // Void: no heap and no inline block to copy. Stay void.
       m_aVBLock = 0;
       m_xVBLock = 0;
     }
-    else
+    else if ( rhs.m_aVBLock == (VBLaddr)&rhs.m_oVBLock[0] )
     {
+      // Still inline, so RehomeInlineItem declined it: a VALUE block and not
+      // an item. Copy it, and address OUR copy of it -- never the source's,
+      // which is the whole of the defect above. The heap, if there is one,
+      // holds the payload the block points at and has been AddRef'd already.
       m_aVBLock = (VBLaddr)&m_oVBLock[0];
       m_xVBLock = 0;
       memcpy ( m_oVBLock, (void*)&rhs.m_oVBLock[0], sizeof(m_oVBLock) );
+
+      //  AND OUR OWN COPY OF WHAT IT POINTS AT. The memcpy above copies the
+      //  block; a value that has outgrown it does not keep its payload IN the
+      //  block, it keeps a chain pointer to a second block on the heap -- so
+      //  the memcpy copies the pointer and both objects name one payload. A
+      //  write through either was then seen by the other, and the first of
+      //  them to retype FREED it under the other. §23.
+      PrivatiseInlineChain ( );
     }
 }
 P3PmsgObject::~P3PmsgObject ( )
 {
+    ReleaseInlineChain ( );            // ... before the heap it is on is closed
     if ( m_hVBList )
       P2PmsgHeap_Close ( m_hVBList );
 }
 void
 P3PmsgObject::Nullify ( )
 {
+    ReleaseInlineChain ( );            // ... before the heap it is on is closed
     if ( m_hVBList )
       P2PmsgHeap_Close ( m_hVBList );
     m_hVBList     = 0;
@@ -2526,16 +2591,52 @@ P3PmsgObject::Connect ( const P3PmsgObject& oObject )
     }
     // Cannot share heap that does not exist
     // NOTES: Create heap and place data on heap
-    if ( oObject.m_hVBList == 0 )
+    //      : Which is what this arm said and did not do. It created the heap
+    //        and left m_aVBLock pointing into the SOURCE's inline storage,
+    //        then copied that pointer below as though it were an address on
+    //        the new heap. A SYS heap addresses by raw pointer, so the result
+    //        reads correctly and dangles the moment the source goes out of
+    //        scope. The ASSERT beneath it said so -- "It's a bug should this
+    //        occur", on a condition the guard above has already excluded, so
+    //        every path that reached here asserted.
+    //      : RehomeInlineItem is the "place data on heap" half. It answers 0
+    //        for a block that is not an item, and a value block is duplicated
+    //        instead -- the same thing the copy constructor does with one, so
+    //        that `oA = oB` and `P3PmsgObject oA = oB` agree. They are
+    //        deliberately kept in step; refer the copy constructor's NOTES.
+    //      : ASKED OF THE BLOCK, NOT OF THE HEAP -- the copy constructor's
+    //        correction, and for the identical reason. `oObject.m_hVBList == 0`
+    //        skipped an object that has a heap and an inline block both, and
+    //        the share below then took the source's own address. §22.
+    if ( oObject.m_nVBLockSize != 0 &&
+         oObject.m_aVBLock == (VBLaddr)&oObject.m_oVBLock[0] )
     {
       P3PmsgObject& oObj = (P3PmsgObject&)oObject;
-      oObj.m_hVBList = P2PmsgHeap_CreateSYS ( VBLock_Addrxx
-                                        , g_nVBListCreateHeap_SizeMax );
-      oObj.m_uVBLock = P2PmsgHeap_Addrnn ( oObj.m_hVBList );
-      // It's a bug should this occur
-      // TODO: Code around this issue
-      ASSERT(oObject.m_nVBLockSize==0);
+      if ( oObj.RehomeInlineItem ( ) == 0 )
+      {
+        // A value block. AddRef before Nullify: the heap it names may be the
+        // one this object is about to let go of.
+        P2PmsgHANDLE hVBList = oObject.m_hVBList;
+        if ( hVBList )
+          P2PmsgHeap_AddRef ( hVBList );
+        Nullify ( );
+        m_hVBList     = hVBList;
+        m_uVBLock     = oObject.m_uVBLock;
+        m_aVBLock     = (VBLaddr)&m_oVBLock[0];
+        m_xVBLock     = 0;
+        m_nVBLockSize = oObject.m_nVBLockSize;
+        memcpy ( m_oVBLock, (void*)&oObject.m_oVBLock[0], sizeof(m_oVBLock) );
+        PrivatiseInlineChain ( );      // ... and of what it points at. §23.
+        return;
+      }
     }
+
+    //  This object is about to stop naming whatever it names, so give back an
+    //  inline chain first -- while m_hVBList is still the heap the chain is on.
+    //  The VALUE arm above reaches this through Nullify(); the share arm below
+    //  overwrites m_aVBLock outright and would otherwise leave the block on a
+    //  heap that outlives the change.
+    ReleaseInlineChain ( );
 
     P2PmsgHANDLE hVBListClose = m_hVBList;
     m_hVBList = oObject.m_hVBList;
@@ -2554,6 +2655,7 @@ if(m_aVBLock&&m_aVBLock!=(VBLaddr)&m_oVBLock)ASSERT(m_hVBList);//TODO:LJM debugg
 void
 P3PmsgObject::Connecta ( P2PmsgHANDLE hVBList, VBLaddr aVBLock, VBLsize nVBLockSize )
 {
+    ReleaseInlineChain ( );            // Before m_aVBLock stops naming it
     m_xVBLock     = 0;                 // Flags life cycle managed internally
     m_aVBLock     = aVBLock;
     m_nVBLockSize = nVBLockSize;
@@ -2641,9 +2743,42 @@ P3PmsgObject::operator == ( const P3PmsgObject& rhs ) const
     return false;
 }
 
+//
+//  Do these two objects denote DIFFERENT items?
+//  NOTES: The negation of the line above, written out because it could be
+//         written before this existed and meant something else. operator bool
+//         was an implicit conversion, so `oA != oB` had a viable built-in
+//         candidate -- (int)(bool)oA != (int)(bool)oB -- and compiled to "is
+//         exactly one of us void", which is an answer to a question nobody
+//         asks. Refer P3PmsgField::operator == .
+bool
+P3PmsgObject::operator != ( const P3PmsgObject& rhs ) const
+{
+    return !( *this == rhs );
+}
+
+//
+//  Does this object denote an item?
+//  NOTES: EXACTLY !IsVoid(), and nothing else. It used to answer "is there a
+//         heap", which is a different question and gave the opposite answer to
+//         IsVoid() on the one state where they differ: an object carrying an
+//         inline block -- a floating item, or a standalone value. IsVoid() has
+//         asked "m_hVBList==0 && m_aVBLock==0" since 2025-02-18; this did not
+//         follow it.
+//       : §19 made that gap move. An inline item is rehomed onto a heap the
+//         first time it is shared, so a floating object answered false here,
+//         then true, with nothing about the item changed -- merely because
+//         somebody took a copy of the handle. Asking a question must not be
+//         what decides its answer.
+//       : Every caller in this tree and in Chartboard reads it as "did I get
+//         anything?" -- P3PmsgAttr and P3PmsgDesc delegate to it, GetParent
+//         walks are guarded by it, and RootPath2Object failures are detected
+//         with it. All of them are handed either a tree object or a void one,
+//         so none of them changes behaviour; only the floating case is
+//         corrected.
 P3PmsgObject::operator bool ( ) const noexcept
 {
-    return m_hVBList ? true : false;
+    return !IsVoid ( );
 }
 
 //  Allocate a new VBLock of memory from the P2PmsgHeap
@@ -2675,8 +2810,325 @@ P3PmsgObject::AllocVBLock ( UCHAR uVBLockType, VBLsize nVBLockSize, bool /*bZero
       m_hVBList = P2PmsgHeap_CreateSYS ( m_uVBLock
                                   , g_nVBListCreateHeap_SizeMax );
       m_uVBLock = P2PmsgHeap_Addrnn ( m_hVBList );
+
+      //  AND THE ITEM GOES WITH IT.  This is the last instant at which nothing
+      //  can point at an inline block -- the allocation below is the first
+      //  attribute, descendant, push or payload the object has ever had --
+      //  which is the invariant RehomeInlineItem's NOTES rely on, stated
+      //  there and not acted on here.  Leaving the item behind strands it:
+      //  from the next line on the object has a heap AND addresses itself, a
+      //  state every "is it shared" test in this file used to read as SHARED,
+      //  and a copy then took the address of the SOURCE OBJECT.  §22.
+      //
+      //  This runs BEFORE the allocation below, so the block moves while it is
+      //  still true that nothing points at it, and the item's identity changes
+      //  when it GROWS rather than when somebody asks after it -- which is the
+      //  rule §19 set and this keeps.
+      RehomeInlineItem ( );
     }
     return P2PmsgHeap_Alloc ( m_hVBList, uVBLockType, nVBLockSize );
+}
+//
+//  Moves an inline ITEM block onto a heap of its own
+//  NOTES: A floating item's VBLock is built inside the P3PmsgObject that
+//         carries it -- RenderThisSafe inits it in m_oVBLock and Connecta's
+//         it with no heap at all. So the object IS the storage, and a copy of
+//         the object is a second block rather than a second handle on one:
+//         GetP2Pos differs, and a write through one is not seen by the other.
+//         An item in a tree does neither, because its block is on the heap and
+//         the copy shares it.
+//       : That is only tenable while the block is never shared and never
+//         outlives its object, and both of those fail. Connect says so in its
+//         own comment -- "Cannot share heap that does not exist. NOTES: Create
+//         heap and place data on heap" -- and then creates the heap without
+//         placing anything on it, leaving m_aVBLock pointing into the SOURCE's
+//         storage. It carries an ASSERT calling that a bug and a TODO to code
+//         around it. This is the code around it.
+//       : ONLY AN ITEM. A standalone VBLock that is NOT an item is a value --
+//         P3PmsgData and P3PmsgName use ConnectVBLock for exactly that, and
+//         the copy constructor duplicating one is what a value copy means.
+//         Items are objects with identity; values are not. The discriminator
+//         is the block header, which every block has (refer §16 of
+//         stack_paths.md for why the header and not VBLock_pItem).
+//       : NOTHING CAN POINT AT THE BLOCK YET. A collection or a push is
+//         allocated through AllocVBLock, which creates the heap when there is
+//         none -- so an item with no heap has no attributes, no descendants
+//         and no stack, and there are no back-pointers to fix up.
+//       : THAT INVARIANT IS A WINDOW, AND IT CLOSES. It was read here as a
+//         standing property of any object without a heap, guarded by an
+//         m_hVBList test at the top of this function; what it actually is is a
+//         property of the moment BEFORE the heap exists. AllocVBLock is where
+//         the heap is created, so AllocVBLock is where the block has to move,
+//         and it now does. An object that reaches this function with a heap
+//         already has therefore been through it once, and the item it carries
+//         is on that heap -- unless the block is not an item at all, which the
+//         test below is for. §22.
+//       : The block is copied whole. P2PmsgHeap_Alloc adds the header size to
+//         the request and VBLock_Init stamps only uVBLockDefs and the size, so
+//         asking for nVBLockSize less the header yields a block of exactly
+//         nVBLockSize whose header the copy then reproduces -- including
+//         Linked and Alloc, which the inline block already carries and which
+//         are true of the heap block as well.
+//
+//  Returns:     VBLaddr
+//               Address of the block on its new heap, or 0 if this object does
+//               not carry an inline item -- in which case the caller keeps
+//               whatever it was doing before.
+VBLaddr
+P3PmsgObject::RehomeInlineItem ( )
+{
+    //  WHERE IS THE BLOCK -- not, is there a heap. It used to decline on
+    //  `m_hVBList != 0` and call that "already on a heap", which is a
+    //  different question and gives the wrong answer on the one state where
+    //  the two disagree: an object that has a heap AND still addresses its own
+    //  inline array. A floating item gets there by growing -- AllocVBLock
+    //  creates a SYS heap for a payload the inline block cannot hold, and
+    //  leaves the item block where it is -- and 128 wide characters of data is
+    //  enough to do it. Refer stack_paths.md §22 for the measurement.
+    //       : The test that matters was already on the next line, so the guard
+    //         below is not merely wrong, it is redundant when it is right.
+    if ( m_nVBLockSize == 0                       ||
+         m_aVBLock != (VBLaddr)&m_oVBLock[0]         )
+      return 0;                          // The block is not the inline one
+    if ( !VBLock_IsItem ( (VBLock *)&m_oVBLock[0] ) )
+      return 0;                          // A value, not an object
+
+    const VBLsize nVBLockSize = m_nVBLockSize;
+    if ( m_hVBList == 0 )
+      m_hVBList = P2PmsgHeap_CreateSYS ( m_uVBLock, g_nVBListCreateHeap_SizeMax );
+    m_uVBLock = P2PmsgHeap_Addrnn ( m_hVBList );
+
+    //  VBLsize IS UNSIGNED -- Msgcore.h spells it UINT_PTR -- so a declared
+    //  size at or below the header size does not make the subtraction below
+    //  negative, it makes it enormous, and hands P2PmsgHeap_Alloc a request
+    //  near the address-space ceiling. This was an ASSERT, which is the
+    //  release-readiness register's item 19 exactly: the condition matters in
+    //  Release, so it throws there too rather than compiling out of the only
+    //  build anybody ships.
+    const VBLsize nSizeofHdr = P2PmsgHeap_Sizeof_Hdr ( m_hVBList );
+    if ( nSizeofHdr == 0 || nVBLockSize <= nSizeofHdr )
+      EVERR->MODULE
+           ->AFP(nVBLockSize)->AFP(nSizeofHdr)
+           ->Message(L"Inline block of %I64u cannot carry a header of %I64u"
+                    , (UINT64)nVBLockSize, (UINT64)nSizeofHdr )
+           ->Throw();
+    const VBLaddr aVBLock = P2PmsgHeap_Alloc ( m_hVBList, VBLock_Item
+                                             , nVBLockSize - nSizeofHdr );
+    memcpy ( P2PmsgHeap_Addr2Phys ( m_hVBList, aVBLock )
+           , &m_oVBLock[0], nVBLockSize );
+
+    m_aVBLock     = aVBLock;
+    m_xVBLock     = 0;                   // Life cycle managed by the heap now
+    m_nVBLockSize = nVBLockSize;
+    //  ITEM 19, and the one of the eight that needed an argument before it
+    //  could be made. This was ASSERT(P2PmsgHeap_AssertValidAlloc(...)), and it
+    //  was left in when the other seven were decided because AssertValidAlloc
+    //  is not a predicate: its SYS arm sets VBLock_Linked on the block it is
+    //  judging. Under an ASSERT that is not a lost CHECK, it is a lost WRITE --
+    //  Debug leaves the bit set and Release does not, on a block VBLock_Init
+    //  stamps without it -- so promoting the call as it stood would have
+    //  started running a repair in Release rather than merely started checking
+    //  in Release. P2PmsgHeap_IsValidAlloc is the same question with no write
+    //  on any path (MsgVBHeap.h), which is what makes the refusal below safe to
+    //  run in both builds and what makes both builds leave the same bytes here.
+    if ( !P2PmsgHeap_IsValidAlloc ( m_hVBList, m_aVBLock ) )
+      EVERR->MODULE
+           ->AFP(m_aVBLock)
+           ->Message(L"Rehomed block at 0x%I64x is not a valid heap allocation"
+                    , (UINT64)m_aVBLock )
+           ->Throw();
+    return aVBLock;
+}
+//
+//  Duplicates one block on the heap it is already on
+//  NOTES: Sized from the block's own header, the way RehomeInlineItem sizes
+//         the block it moves and for the same reason: P2PmsgHeap_Alloc adds
+//         the header back and may round the request up, so asking for the
+//         declared size LESS the header yields a block the copy reproduces
+//         exactly -- header, flags and all.
+//       : The allocation invalidates pointers, which is why the source is
+//         resolved a second time after it and only its size is read before.
+static VBLaddr
+P2PmsgObject_CopyHeapVBLock ( P2PmsgHANDLE hVBList, VBLaddr aVBLock )
+{
+    VBLock       *pVBLock    = (VBLock *)P2PmsgHeap_Addr2Phys ( hVBList, aVBLock );
+    const VBLsize nVBLockSize= VBLock_Hdr_u_SizeNN ( pVBLock );
+    const UCHAR   uVBLockType= pVBLock->oHdr.uVBLockDefs & VBLock_TypeMask;
+    const VBLsize nSizeofHdr = P2PmsgHeap_Sizeof_Hdr ( hVBList );
+    //  THE SAME UNSIGNED SUBTRACTION AS RehomeInlineItem, and a worse input:
+    //  nVBLockSize is read out of the block's OWN header, so on a heap opened
+    //  from an image it is attacker-shaped. Under an ASSERT the guard is in no
+    //  shipped binary at all; item 19 says a condition that matters in Release
+    //  throws there.
+    if ( nSizeofHdr == 0 || nVBLockSize <= nSizeofHdr )
+      EVERR->MODULE
+           ->AFP(nVBLockSize)->AFP(nSizeofHdr)
+           ->Message(L"Block declares %I64u, which cannot carry a header of %I64u"
+                    , (UINT64)nVBLockSize, (UINT64)nSizeofHdr )
+           ->Throw();
+
+    const VBLaddr aCopy      = P2PmsgHeap_Alloc ( hVBList, uVBLockType
+                                                , nVBLockSize - nSizeofHdr );
+    memcpy ( P2PmsgHeap_Addr2Phys ( hVBList, aCopy )
+           , P2PmsgHeap_Addr2Phys ( hVBList, aVBLock ), nVBLockSize );
+    //  The twin of the promotion in RehomeInlineItem above, and the sharper of
+    //  the two: hVBList here may be a heap opened from an IMAGE, so the block
+    //  this copy was sized from is attacker-shaped. The BSTRio arm's repair is
+    //  already refused inside P2PmsgHeap_UntrustedGate, but nothing guarantees
+    //  a gate is open at this point, and a validator that writes to the bytes
+    //  it was asked to judge is not the thing to build a refusal on. The pure
+    //  form writes nothing on either arm.
+    if ( !P2PmsgHeap_IsValidAlloc ( hVBList, aCopy ) )
+      EVERR->MODULE
+           ->AFP(aCopy)
+           ->Message(L"Duplicated block at 0x%I64x is not a valid heap allocation"
+                    , (UINT64)aCopy )
+           ->Throw();
+    return aCopy;
+}
+//
+//  Gives this object its own copy of what its inline VALUE block points at
+//  NOTES: The copy constructor and Connect duplicate an inline block with a
+//         memcpy and call that a value copy. It is one only while the whole
+//         value fits in the block. It stops being one the moment the value
+//         outgrows it: P2PmsgObject_NewVBLockData and P3PmsgName_ResizeName
+//         both put the payload in a SECOND block on the heap and leave a
+//         CHAIN POINTER behind in the first -- so what the memcpy copies from
+//         that point on is an address, and the two objects name one payload.
+//       : WHICH IS THE SAME MISTAKE §22 FIXED ONE LEVEL UP, and not the same
+//         defect. §22's copy pointed into the SOURCE OBJECT and dangled when
+//         the source died; this points into a HEAP both of them hold open, so
+//         it stays readable. What it does instead is alias: a write through
+//         either is seen by the other, and the first of them to retype hands
+//         the block back to the heap while the other still chains to it --
+//         P2PmsgObject_NewVBLockData walks the chain and Free()s what it
+//         finds. Measured: two standalone values, one payload at one address,
+//         a byte written through one read back through the other.
+//       : ON THE HEAP THEY SHARE, not a new one. The heap handle was AddRef'd
+//         by the caller before this runs, so it outlives either object on its
+//         own; what the two of them must not share is the BLOCK. Allocating
+//         here keeps the payload where every accessor already expects to
+//         resolve it.
+//       : THE CHAIN IS WALKED, not just its first link. Chaining is usually a
+//         single step -- NewVBLockData collapses what it finds before adding
+//         one -- but the readers loop, so this loops.
+//       : Blocks that are not values do not come here. An ITEM is rehomed out
+//         of the object before either caller reaches its value arm (refer
+//         RehomeInlineItem), and an object whose block is already on a heap
+//         shares that block deliberately: that is what a handle IS.
+void
+P3PmsgObject::PrivatiseInlineChain ( )
+{
+    if ( m_hVBList == 0                           ||
+         m_aVBLock != (VBLaddr)&m_oVBLock[0]         )
+      return;                          // Nothing inline, or nowhere to put it
+
+    if ( VBLock_IsData ( (VBLock *)&m_oVBLock[0] ) )
+    {
+      VBLaddr aOwner = 0;              // 0 addresses the inline block itself
+      for ( ;; )
+      {
+        VBLockData *pData = VBLock_pData ( aOwner ? (VBLock *)Msg2Phys ( aOwner )
+                                                  : (VBLock *)&m_oVBLock[0] );
+        if ( !VBLockData_IsChained ( pData ) )
+          return;
+        const VBLaddr aChain2Next = VBLockData_GetChain2Next ( m_uVBLock, pData );
+        const VBLaddr aMine       = P2PmsgObject_CopyHeapVBLock ( m_hVBList
+                                                                , aChain2Next );
+                    pData = VBLock_pData ( aOwner ? (VBLock *)Msg2Phys ( aOwner )
+                                                  : (VBLock *)&m_oVBLock[0] );
+        VBLockData_SetChain2Next ( m_uVBLock, pData, aMine );
+        aOwner = aMine;
+      }
+    }
+
+    if ( VBLock_IsName ( (VBLock *)&m_oVBLock[0] ) )
+    {
+      VBLaddr aOwner = 0;
+      for ( ;; )
+      {
+        VBLockName *pName = VBLock_pName ( aOwner ? (VBLock *)Msg2Phys ( aOwner )
+                                                  : (VBLock *)&m_oVBLock[0] );
+        if ( !VBLockName_IsChained ( pName ) )
+          return;
+        const VBLaddr aChain2Next = VBLockName_GetChain2Next ( m_uVBLock, pName );
+        const VBLaddr aMine       = P2PmsgObject_CopyHeapVBLock ( m_hVBList
+                                                                , aChain2Next );
+                    pName = VBLock_pName ( aOwner ? (VBLock *)Msg2Phys ( aOwner )
+                                                  : (VBLock *)&m_oVBLock[0] );
+        VBLockName_SetChain2Next ( m_uVBLock, pName, aMine );
+        aOwner = aMine;
+      }
+    }
+}
+//
+//  Gives back what this object's inline VALUE block points at
+//  NOTES: THE OTHER HALF OF PrivatiseInlineChain, and it was missing. That one
+//         gives a copy its own payload block ON THE HEAP THE TWO OBJECTS SHARE,
+//         which is right -- the AddRef has settled the heap's lifetime. But a
+//         shared heap does not go away when the copy does, and ~P3PmsgObject
+//         closes the heap and frees nothing, so the block stayed allocated on a
+//         heap that was still open. Copying a grown value in a loop therefore
+//         allocated once per iteration and gave nothing back: measured at 4841
+//         copies before the heap refused at its ceiling.
+//       : ONLY AN INLINE BLOCK, and only its chain. The block itself lives in
+//         this object and is not the heap's to take. An item on a heap belongs
+//         to the message and is nobody's to free here, which is what the
+//         address test excludes; an externally managed block is excluded by
+//         m_xVBLock, the same guard Free() keeps.
+//       : SAFE TO CALL TWICE. Every walk starts from a chain pointer and stops
+//         on a zero one, and the owner's pointer is cleared before returning,
+//         so a Nullify() followed by the destructor frees each block once.
+//       : The chain is one link long in practice and this does not assume it.
+//         P2PmsgObject_NewVBLockData and P3PmsgName_ResizeName both REPLACE the
+//         chained block rather than appending to it, so growth cannot lengthen
+//         a chain; a longer one can only arrive already built, in an image. The
+//         loops here tolerate that for the same reason the ones in
+//         NewVBLockData do.
+void
+P3PmsgObject::ReleaseInlineChain ( )
+{
+    if ( m_hVBList == 0                           ||
+         m_xVBLock != 0                           ||
+         m_aVBLock != (VBLaddr)&m_oVBLock[0]         )
+      return;                          // Not ours to give back
+
+    if ( VBLock_IsData ( (VBLock *)&m_oVBLock[0] ) )
+    {
+      VBLockData *pData = VBLock_pData ( (VBLock *)&m_oVBLock[0] );
+      VBLaddr     aNext = VBLockData_IsChained ( pData )
+                            ? VBLockData_GetChain2Next ( m_uVBLock, pData ) : 0;
+      if ( aNext )
+        VBLockData_SetChain2Next ( m_uVBLock, pData, 0 );
+      while ( aNext )
+      {
+        VBLockData   *pNext  = VBLock_pData ( (VBLock *)Msg2Phys ( aNext ) );
+        const VBLaddr aAfter = VBLockData_IsChained ( pNext )
+                                 ? VBLockData_GetChain2Next ( m_uVBLock, pNext )
+                                 : 0;
+        Free ( aNext );
+        aNext = aAfter;
+      }
+      return;
+    }
+
+    if ( VBLock_IsName ( (VBLock *)&m_oVBLock[0] ) )
+    {
+      VBLockName *pName = VBLock_pName ( (VBLock *)&m_oVBLock[0] );
+      VBLaddr     aNext = VBLockName_IsChained ( pName )
+                            ? VBLockName_GetChain2Next ( m_uVBLock, pName ) : 0;
+      if ( aNext )
+        VBLockName_SetChain2Next ( m_uVBLock, pName, 0 );
+      while ( aNext )
+      {
+        VBLockName   *pNext  = VBLock_pName ( (VBLock *)Msg2Phys ( aNext ) );
+        const VBLaddr aAfter = VBLockName_IsChained ( pNext )
+                                 ? VBLockName_GetChain2Next ( m_uVBLock, pNext )
+                                 : 0;
+        Free ( aNext );
+        aNext = aAfter;
+      }
+    }
 }
 VBLaddr
 P3PmsgObject::Free ( VBLaddr aVBLockAddr )
@@ -2715,13 +3167,13 @@ P3PmsgObject::Msg2Size ( VBLaddr aVBLockAddr ) const
 P2Pos
 P3PmsgObject::GetP2Pos ( ) const noexcept
 {
-    ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock)); //TODO:LJM 64bit
+    ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_IsValidAlloc(m_hVBList,m_aVBLock)); //TODO:LJM 64bit
     return m_aVBLock;
 }
 char*
 P3PmsgObject::GetVBLock ( ) const
 {
-    ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock));
+    ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_IsValidAlloc(m_hVBList,m_aVBLock));
     if ( m_aVBLock == (VBLaddr)&m_oVBLock[0] )
       return (char*)&m_oVBLock[0];
     if ( m_hVBList )
@@ -2731,7 +3183,7 @@ P3PmsgObject::GetVBLock ( ) const
 VBLaddr
 P3PmsgObject::GetVBLocknn ( ) const
 {
-    ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock));
+    ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_IsValidAlloc(m_hVBList,m_aVBLock));
     return m_aVBLock;
 }
 VBLsize
@@ -2830,8 +3282,10 @@ P3PmsgObject::AssertValid ( ) const
       EVERR -> Module ( __FUNCTION__ )
             -> Message("Encountered unlinked VBLock object" )
             -> Throw();
-    if ( m_hVBList )
-      P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock);
+    if ( m_hVBList && !P2PmsgHeap_IsValidAlloc(m_hVBList,m_aVBLock) )
+      EVERR -> Module ( __FUNCTION__ )
+            -> Message("Corrupted allocation" )
+            -> Throw();
     if ( m_aVBLock                           &&
          m_aVBLock != (VBLaddr)&m_oVBLock[0] &&
          m_hVBList ==           NULL            )
@@ -2861,7 +3315,7 @@ BOOL
 P3PmsgObject::AssertValidAddr ( VBLaddr aVBLockAddr )
 {
     if ( m_hVBList )
-      return P2PmsgHeap_AssertValidAlloc ( m_hVBList, aVBLockAddr );
+      return P2PmsgHeap_IsValidAlloc ( m_hVBList, aVBLockAddr );
     return aVBLockAddr == (VBLaddr)&m_oVBLock[0] ? TRUE : FALSE;
 }
 
@@ -2889,6 +3343,94 @@ P3PmsgObject::IsVoid ( ) const noexcept
 {
     // Added "m_oVBLock==0" [20250218] LJM
     return (m_hVBList==0 && m_aVBLock==0)? true : false;
+}
+
+//
+//  Is the item I denote stored INSIDE me?
+//  NOTES: §22 recorded that a field cannot say whether it is a copy or a
+//         handle. This is the half of that question which has an answer, and
+//         it is the half that bites. TRUE means this object IS the storage:
+//         m_oVBLock holds the block, nothing else in the process can be
+//         looking at it, and a write through this object reaches nobody --
+//         which is exactly the state a caller who meant to write THROUGH has
+//         got wrong. FALSE means the block is on a heap and this object is one
+//         NAME for it, so a copy of this object is a second name for the same
+//         item and sees that write.
+//       : IT IS NOT "is there a heap", which is what every test in this file
+//         used to ask and what GetP2PmsgHandle() still answers. The two
+//         disagreed on one state -- an inline item whose object had been given
+//         a heap -- and on that state the heap question said SHARED about a
+//         block that was nobody's but its own. AllocVBLock now rehomes the
+//         item when it creates that heap, so the state no longer occurs; this
+//         asks the question that was right either way.
+//       : IT DOES NOT SAY WHOSE ITEM IT IS. A value copy that has since grown
+//         lives on a heap too, and answers false here while reaching nothing
+//         the caller holds. For whose, there is a comparand and it is §21's
+//         `==`. What this adds is an answer that needs none.
+//       : AND ITS FALSE IS NOT A GUARANTEE, which is what that row means: true
+//         says a write reaches nobody, false says only that the block is not
+//         in here. IsSole below is the same guarantee asked of the STORAGE
+//         rather than of the block, and it covers that row. Ask this one when
+//         the question is where the item is; ask that one when the question is
+//         whether anyone else can see a write. §24.
+//       : A void object answers false -- it denotes no item, so the item is
+//         not inside it either. Ask IsVoid() first, as with every other
+//         question in this family.
+bool
+P3PmsgObject::IsInline ( ) const noexcept
+{
+    return ( m_aVBLock != 0 && m_aVBLock == (VBLaddr)&m_oVBLock[0] )
+             ? true : false;
+}
+//
+//  Can anything at all, other than me, see a write through me?
+//  NOTES: TRUE IS A GUARANTEE: no. FALSE is not the opposite guarantee, and
+//         says only that the question is open -- which is the shape IsInline
+//         has as well, and the reason for this is that IsInline's guarantee
+//         covers too little. IsInline asks where the BLOCK is and answers
+//         false for a duplicate that has since grown, which lives on a heap of
+//         its very own and reaches nothing at all. §24 recorded that row. This
+//         asks after the STORAGE and answers it true.
+//       : Two ways to be sole, and they are the two ways to own storage. The
+//         block is INSIDE this object, which is IsInline and which nothing
+//         else in the process can address -- §22 rehomes an item before it is
+//         ever shared and §23 duplicates a value's payload, so an inline block
+//         is reachable only through the object carrying it. Or the block is on
+//         a heap THIS OBJECT IS THE ONLY HOLDER OF: every object that names a
+//         heap holds a reference to it (Connecta AddRefs, and the copy
+//         constructor and Connect do too), so a count of one means there is no
+//         second object to be looking.
+//       : ASK THE FIELD, NOT THIS, WHEN THERE IS A FIELD TO ASK.
+//         P3PmsgField::IsSole overrides rather than forwards: it knows which of
+//         the heap's holders are its own sub-objects and subtracts them, which
+//         is the row below. This one cannot -- an object has no parts -- so
+//         what follows is about THIS answer, and the field's is narrower.
+//       : WHAT FALSE DOES NOT SAY. The count is of holders of the HEAP, not of
+//         names for the BLOCK, so a second holder may be naming something else
+//         entirely -- including one of this object's own sub-objects. A field
+//         that has been asked for its descendants keeps a P3PmsgDesc that holds
+//         the heap, and answers false from then on while still being the only
+//         name for its item. Measured, and left: narrowing it further needs a
+//         count per block, which is a different library.
+//       : It follows that false is not "shared" and must not be read as it.
+//         For WHOSE the comparand is §21's `==`, which is exact in both
+//         directions and needs the other object to compare against. This is
+//         the answer available when there is nothing to compare to.
+//       : A void object answers false. It denotes no storage, so it is not the
+//         sole holder of any -- ask IsVoid() first, as with the rest of this
+//         family.
+//       : A heap handle handed out raw by GetP2PmsgHandle() and held without
+//         an AddRef is outside the count and outside this guarantee. That is
+//         the ownership contract the rest of the file keeps; this reads the
+//         count it maintains.
+bool
+P3PmsgObject::IsSole ( ) const noexcept
+{
+    if ( m_aVBLock == 0 )
+      return false;                    // Void: no storage to be sole holder of
+    if ( m_aVBLock == (VBLaddr)&m_oVBLock[0] )
+      return true;                     // The block is in here, so nowhere else
+    return P2PmsgHeap_RefCount ( m_hVBList ) == 1;
 }
 bool
 P3PmsgObject::IsData ( ) const
@@ -3045,21 +3587,39 @@ P3PmsgField::P3PmsgField ( )
 {
     RenderThisSafe ( );
 }
+//
+//  A P3PmsgField copies as a VALUE
+//  NOTES: RenderThisSafe builds this field its own item and then operator=
+//         copies rhs into it, member by member -- name, data, attributes,
+//         descendants, stack. The result is a second item that reads the same,
+//         not a second handle on the first, and that is what it has always
+//         been.
+//       : What stood here was an arm that AddRef'd rhs's heap and shared its
+//         block -- a HANDLE copy -- behind `if ( !OBJ__hVBList )`, testing a
+//         member of THIS field that RenderThisSafe had just set to zero on the
+//         line above. Connecta(0,...) returns early when the handle it is
+//         given already matches, so the guard was true on every call and the
+//         arm below it never ran. It has been removed rather than repaired:
+//         reviving it would flip every field copy in this tree and in
+//         Chartboard from a value to an alias, silently, which is a decision
+//         and not a bug fix.
+//       : AND SO HAS THE ASSERT(OBJ__hVBList==nullptr) THAT REPLACED IT. It
+//         asserted the finding this note already states, in one of six
+//         constructors that all call RenderThisSafe and none of which asserts
+//         it. Nothing in either build branches on the answer -- the assignment
+//         below runs either way -- so item 19's second half applies: a
+//         condition that does not matter in Release does not want asserting
+//         either. It is prose now, where the rest of the finding lives.
+//       : THE HANDLE IS SPELLED r_Object(). `P3PmsgField oB = oA` is a copy of
+//         the item; `P3PmsgField oB = oA.r_Object()` is the item. The library
+//         writes the second wherever it means to write through -- refer
+//         P3PmsgRefactor_DataType and P2Pmsg_UpgradeMove -- because a collection
+//         hands back its cursor, and the next Select moves it.
 P3PmsgField::P3PmsgField ( const P3PmsgField& rhs )
            : P3PmsgName ( (P3PmsgField *)0 ), P3PmsgData ( (P3PmsgField *)0 )
 {
     RenderThisSafe ( );
-    if ( !OBJ__hVBList )
-    {
-     *this = rhs;
-      return;
-    }
-    if ( rhs.OBJ__hVBList )
-      OBJ__hVBList = P2PmsgHeap_AddRef ( rhs.OBJ__hVBList );
-    if ( rhs.OBJ__hVBList )
-      OBJ__uVBLock = P2PmsgHeap_Addrnn ( rhs.OBJ__hVBList );
-    m_oObject    = rhs.m_oObject;
-    ASSERT(rhs.OBJ__IsField());
+   *this = rhs;
 }
 P3PmsgField::P3PmsgField ( LPCTSTR lpszName, size_t nSize )
            : P3PmsgName ( (P3PmsgField *)0 ), P3PmsgData ( (P3PmsgField *)0 )
@@ -3319,11 +3879,62 @@ P3PmsgField::operator = ( const P3PmsgName& rhs )
    (P3PmsgName&)*this = rhs;
     return *this;
 }
+//
+//  Is this the field called <lpszName>?
+//  NOTES: const since [2026-09-11]. P3PmsgName declares operator == against
+//         both a name and another P3PmsgName, and both are const; this one
+//         hides them and was not, so `oConstField == L"AAA"` -- the ONLY
+//         comparison this class ever meant to offer -- was the one that did
+//         not compile. C2678, and no fall-back, because a string literal does
+//         not convert to int and so the built-in candidates below were not
+//         viable either.
 bool
-P3PmsgField::operator == ( LPCTNAM lpszName )
+P3PmsgField::operator == ( LPCTNAM lpszName ) const
 {
     ASSERT(P3PmsgName::m_pObject==&m_oObject);
     return _tcsicmp(c_name(), lpszName ) ? false : true;
+}
+
+//
+//  Do these two fields denote the SAME item?
+//  NOTES: THIS IS AN IDENTITY TEST, NOT A VALUE TEST. It asks P3PmsgObject,
+//         which compares the heap handle and the block address -- so a handle
+//         and the item it was taken from are equal, and a value copy of that
+//         item is NOT, however identically it reads. That distinction is the
+//         whole of it: `P3PmsgField oB = oA` is a second item and
+//         `P3PmsgField oB = oA.r_Object()` is the first one, and until this
+//         existed the pair could not be asked which they were.
+//       : What `oA == oB` used to do was compile anyway. operator bool was an
+//         implicit conversion, so the built-in operator ==(int,int) was a
+//         viable candidate and the expression meant
+//         `(int)(bool)oA == (int)(bool)oB` -- "are we both non-void". Against
+//         a store holding AAA=1 and BBB=2 that answered true for a handle, for
+//         a value copy, for an unrelated item and for an empty floating one:
+//         four questions, one answer, and only the first of them right.
+//       : It is the CONVERSION that made that legal, so the conversion is now
+//         explicit on this class, on P3PmsgObject, and on the four collections
+//         -- refer the declarations in P2Pmsg.h. `if ( oField )`, `!oField`,
+//         `oA && oB` and static_cast<bool> are contextual and unaffected;
+//         `oA == oB`, `oA < oB`, `int n = oField` and `oField + 1` are not,
+//         and no longer compile. Building every solution in this tree and in
+//         Chartboard with the conversion explicit produced no error at all,
+//         which is the measurement: nothing anywhere was using it.
+//       : For "do these two read the same", which is what P3PmsgData::operator
+//         == answers for a value, compare r_data() and r_name() -- this class
+//         hides both, deliberately, because a field is an item first.
+bool
+P3PmsgField::operator == ( const P3PmsgField& rhs ) const
+{
+    return r_Object ( ) == rhs.r_Object ( );
+}
+
+//
+//  Do these two fields denote DIFFERENT items?
+//  NOTES: Refer P3PmsgField::operator == .
+bool
+P3PmsgField::operator != ( const P3PmsgField& rhs ) const
+{
+    return !( *this == rhs );
 }
 P3PmsgField&
 P3PmsgField::operator [] ( LPCTNAM lpszName )
@@ -3331,13 +3942,22 @@ P3PmsgField::operator [] ( LPCTNAM lpszName )
     return r_Desc()[lpszName];
 }
 
+//
+//  `if ( oField )` -- does this field denote an item?
+//  NOTES: EXACTLY !IsVoid(), as it is on P3PmsgObject and now on P3PmsgList
+//         and P3PmsgVect, so that `if ( oField )` asks one question with one
+//         answer wherever it is written.
+//       : It used to answer "is it populated" -- a name of non-zero length or
+//         data that is not NULL -- which is a reasonable question wearing the
+//         spelling of a different one. A floating item therefore answered
+//         `if ( oField )` true while `oField.IsVoid()` also answered true, in
+//         the same breath. Where the old meaning is wanted it is still two
+//         calls away: !r_data().IsNull() and r_name().c_size().
+//       : Its one caller in this solution asked the question about the wrong
+//         variable -- refer CListCtrl_Ext -- and never fired.
 P3PmsgField::operator bool ( ) const
 {
-    if ( r_data().DataType() != VBLockData_NULL )
-      return true;
-    if ( r_name().c_size() > 0 )
-      return true;
-    return false;
+    return !IsVoid ( );
 }
 
 // Chained reference exposures
@@ -3709,12 +4329,141 @@ P3PmsgField::IsDirty ( ) const
     return false;
 }
 
+//
+//  Does this field denote NO item?
+//  NOTES: The object's question, asked of the object. It used to answer "is
+//         there a heap", which reported a floating item -- one with a name, a
+//         value and, after §19, an identity -- as void, and which §19 then
+//         made mutable: sharing the item rehomes its block onto a heap, so the
+//         answer changed from void to not-void with nothing about the item
+//         changed.
+//       : P3PmsgObject::IsVoid asks whether there is a block at all, which is
+//         the question every caller here means. A field built over a void
+//         object -- a lookup that found nothing -- has no block and is still
+//         void; a field that Nullify() has emptied is too, because
+//         P3PmsgObject::Nullify clears m_aVBLock as well as the handle.
+//       : P3PmsgList and P3PmsgVect inherit this, and their operator bool is
+//         built on it.
 bool
 P3PmsgField::IsVoid ( ) const
 {
-    if ( OBJ__hVBList == nullptr )
-      return true;
-    return false;
+    return OBJ__.IsVoid ( );
+}
+
+//
+//  Is this field's item stored inside the field?
+//  NOTES: The object's question, asked of the object -- as IsVoid() is.
+//       : `P3PmsgField oB = oA` copies the ITEM, and oB answers TRUE: a write
+//         to oB is oB's alone. `P3PmsgField oB = oA.r_Object()` names the item
+//         and answers false. Both spellings are deliberate and both are used;
+//         until this existed a callee handed a P3PmsgField& could not tell
+//         which of them it had been given. Refer P3PmsgObject::IsInline for
+//         what that does and does not settle.
+//       : P3PmsgList and P3PmsgVect inherit it, and it is virtual for the same
+//         reason IsVoid() is.
+bool
+P3PmsgField::IsInline ( ) const
+{
+    return OBJ__.IsInline ( );
+}
+//
+//  Can a write through this field be seen anywhere but here?
+//  NOTES: The object's question, asked of the object -- as IsVoid() and
+//         IsInline() are. A callee handed a P3PmsgField& and nothing to
+//         compare it to can ask this one and get a guarantee out of TRUE:
+//         whatever it writes, nobody else is looking.
+//       : FALSE IS NOT THE OPPOSITE. Refer P3PmsgObject::IsSole for what it
+//         does and does not settle, and §21's `==` for whose item it is.
+//       : P3PmsgList and P3PmsgVect inherit it, and it is virtual for the same
+//         reason IsVoid() is.
+//       : IT DOES NOT SIMPLY FORWARD, and that is the point of overriding it.
+//         The object counts holders of the HEAP and cannot tell a stranger from
+//         one of this field's own parts, so a field that had been asked for its
+//         descendants answered FALSE from then on while its item was still
+//         nobody else's -- §24 measured that and left it. A field CAN tell:
+//         m_pP3PmsgAttr and m_pP3PmsgDesc are its own, it made them, and each
+//         holds one reference on the heap while it names it. Subtracting them
+//         is exact rather than approximate.
+//       : UNDERCOUNTING IS SAFE AND OVERCOUNTING IS NOT, which is why nothing
+//         is subtracted on trust. A holder missed leaves the answer FALSE, and
+//         false promises nothing; a holder subtracted that was never mine would
+//         report TRUE with a stranger looking, and true is a guarantee.
+//       : THE SUBTRACTION IS HeapHolders BELOW, and §29 is why it is a walk
+//         rather than the two `nMine++` lines it started as. Those counted the
+//         Attr and the Desc and stopped there, so a collection that had been
+//         WALKED still answered FALSE: the cursor is a level further in, and a
+//         cursor holds the heap. Asking each owned sub-object what it is
+//         holding reaches that level and every level under it, and it reaches
+//         the MsgStck's stacked field on the way -- which was the other entry
+//         §26 left, closed by the same walk rather than by a second mechanism.
+//       : P3PmsgList and P3PmsgVect INHERIT THIS BODY and still answer for
+//         themselves, because HeapHolders is virtual: a walked list asks
+//         P3PmsgList::HeapHolders from here and reaches the data cursors it
+//         caches. That is §31's first entry, and it is why the call below is
+//         not resolved at compile time.
+bool
+P3PmsgField::IsSole ( ) const
+{
+    if ( OBJ__.m_aVBLock == 0 )
+      return false;                    // Void: no storage to be sole holder of
+    if ( OBJ__.IsInline ( ) )
+      return true;                     // The block is in here, so nowhere else
+
+    const P2PmsgHANDLE hVBList = OBJ__.m_hVBList;
+    if ( hVBList == 0 )
+      return false;                    // A block on no heap is nobody's to count
+
+    return P2PmsgHeap_RefCount ( hVBList ) == HeapHolders ( hVBList );
+}
+//
+//  References on hVBList held by this field and everything it owns
+//  NOTES: ONE RULE, applied down the ownership tree, and it is the heap's own:
+//         every path that gives a P3PmsgObject a non-zero m_hVBList AddRefs it
+//         -- the copy constructor, Connect, Connecta and the two CreateSYS
+//         sites, which is all of them -- and ~P3PmsgObject closes it. So a live
+//         object whose handle is this handle IS one reference. This counts
+//         references rather than estimating them, and that is what lets IsSole
+//         compare the total to it.
+//       : WHAT IS FOLLOWED IS WHAT IS OWNED, and nothing else. m_pP3PmsgAttr,
+//         m_pP3PmsgDesc and m_pMsgStck are made here and deleted here. A
+//         collection's m_pP3PmsgField and a cursor's m_pP3PmsgAttr /
+//         m_pP3PmsgDesc point back UP at the owner and are not followed:
+//         following one would count this field a second time and report TRUE
+//         with a stranger looking.
+//       : IT IS A COUNT AND NOT A FLAG because one cursor can hold more than
+//         one. P3PmsgCurs::Goto connects whichever of its three by-value
+//         members matches the item it landed on and does not disconnect the
+//         other two, so a walk across a collection holding a list and then a
+//         field leaves TWO of them on this heap. Refer P3PmsgCurs::HeapHolders.
+//       : IT OVERRIDES P3PmsgData::HeapHolders RATHER THAN ADDING TO IT, and
+//         that is not a style choice. A field's inherited P3PmsgData::m_pObject
+//         is aliased onto its OWN m_oObject -- every P3PmsgField constructor
+//         assigns it, and ~P3PmsgField clears it so that ~P3PmsgData does not
+//         delete a member. OBJ__ below is that same object, so calling the base
+//         version as well would count one object twice. Overcounting is the
+//         direction that reports a guarantee that is not true.
+//       : §31's UNDERCOUNT IS CLOSED. The P3PmsgData cursors a P3PmsgList
+//         caches and a vect's element type are now descended into, by
+//         P3PmsgList::HeapHolders and P3PmsgVect::HeapHolders -- each of those
+//         members is newed at its use site, deleted by the collection, and
+//         Connect()ed on the collection's own handle, so each is owned outright
+//         and each holds this heap. A vect's m_pP3PmsgData[] is walked with
+//         them and is measured to hold nothing: every site that would fill it
+//         is commented out, so it is an array of nullptrs for its whole life.
+int
+P3PmsgField::HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept
+{
+    if ( hVBList == 0 )
+      return 0;
+
+    int nHolders = OBJ__.m_hVBList == hVBList ? 1 : 0;
+    if ( m_pP3PmsgAttr != nullptr )
+      nHolders += m_pP3PmsgAttr -> HeapHolders ( hVBList );
+    if ( m_pP3PmsgDesc != nullptr )
+      nHolders += m_pP3PmsgDesc -> HeapHolders ( hVBList );
+    if ( m_pMsgStck != nullptr )
+      nHolders += m_pMsgStck    -> HeapHolders ( hVBList );
+    return nHolders;
 }
 bool
 P3PmsgField::IsStacked ( ) const
@@ -6552,6 +7301,51 @@ P3Pmsg_GetRootname ( LPCTSTR lpszItemPath )
     return strRootname;
 }
 
+//
+//  How many '^' name pItem from the item at aOwner, or 0 if that item's stack
+//  does not hold pItem at all.
+//
+//  The walk is the answer to both questions at once: a snapshot records its
+//  OWNER in aParent, not the generation above it, so the distance has to be
+//  counted -- and counting it means following the chain, which is also what
+//  proves the block is on it. A parent that points at an item for some other
+//  reason (a list holding an element, say) simply never matches and comes back
+//  zero, which is the caller's signal to carry on as before.
+//
+//  It is also the test for "am I a snapshot": the three Drop implementations
+//  read aParent to decide which collection to unlink themselves from, and a
+//  snapshot belongs to none -- MsgStck has already taken it off the aStack
+//  chain by then. That code was correct only because a stack block's aParent
+//  used to be zero.
+Msgcore_EXT VBLsize
+P3Pmsg_GetStckDepth ( const P3PmsgField *pItem, VBLaddr aOwner )
+{
+    if ( pItem == nullptr || aOwner == 0 )
+      return 0;
+    VBLock *pOwner = (VBLock *)pItem -> r_Object().Msg2Phys ( aOwner );
+    if ( pOwner == nullptr || !VBLock_IsItem(pOwner) )
+      return 0;
+
+    const UCHAR   uVBLock = pOwner->oHdr.uVBLockDefs;
+    const VBLaddr aItem   = pItem->r_Object().GetVBLocknn ( );
+    if ( aItem == 0 )
+      return 0;
+
+    VBLaddr aStck  = VBLockItem_GetStack ( uVBLock, VBLock_pItem(pOwner) );
+    VBLsize nDepth = 1;
+    while ( aStck )
+    {
+      if ( aStck == aItem )
+        return nDepth;
+      VBLock *pStck = (VBLock *)pItem -> r_Object().Msg2Phys ( aStck );
+      if ( pStck == nullptr || !VBLock_IsItem(pStck) )
+        return 0;
+      aStck = VBLockItem_GetStack ( pStck->oHdr.uVBLockDefs, VBLock_pItem(pStck) );
+      nDepth++;
+    }
+    return 0;
+}
+
 CString
 P3Pmsg_GetAttrPath ( const P3PmsgField *pField, VBLaddr aParent )
 {
@@ -6663,6 +7457,30 @@ P3Pmsg_GetPath ( const P3PmsgField *pItem )
     VBLock *pParent = P2PmsgField_GetVBLockParent ( pItem );
     VBLockItem *pParentItem = VBLock_pItem ( pParent );
 
+    //  Process stack parent
+    //  NOTES: A snapshot is its owner at an earlier moment, not a child of it,
+    //         so its path is the owner's plus one '^' per generation and no
+    //         name of its own -- '^' IS the component (§5 of stack_paths.md).
+    //       : MsgStck::Push left aParent zero, which the floating-item arm
+    //         above reads as "no parent" -- so every snapshot of BHP answered
+    //         ".BHP" wherever BHP actually lived, and every GENERATION
+    //         answered the same ".BHP". Not a path to this object, and a path
+    //         to a different one.
+    //       : A snapshot in an image written before that still carries zero
+    //         and still comes out of the arm above, unchanged.
+    if ( VBLock_IsItem(pParent) )
+    {
+      const VBLsize nStck = P3Pmsg_GetStckDepth ( pItem, aParent );
+      if ( nStck )
+      {
+        P3PmsgField oOwner ( pItem->GetP2PmsgHandle(), aParent, 0 );
+        strPath = P3Pmsg_GetPath ( &oOwner );
+        for ( VBLsize i = 0; i < nStck; i++ )
+          strPath += T_StckDelim;
+        return strPath;                // The name is the owner's, and said
+      }                                // once: '^' carries none of its own
+    }
+
     // Process descendent parent
     if ( VBLock_IsDesc(pParent) )
     {
@@ -6720,6 +7538,18 @@ P3Pmsg_GetPath ( const P3PmsgAttr *pAttr )
     CString strPath;
 
     // Process parent
+    //  A COLLECTION'S PARENT IS AN ITEM -- the item it hangs off -- and every
+    //  real item is a VBLock_Item block. VBLock_Field and VBLock_List are
+    //  different block TYPES, not item types, which is why every other walk in
+    //  this file spells the test "VBLock_IsX(pParent) || VBLockItem_IsX(...)".
+    //  So neither of the two arms that used to stand here could ever fire, the
+    //  path fell to the ASSERT(0) below them, and what came back was a lone
+    //  '@' with no owner in front of it. Both arms also appended a '.' before
+    //  that '@', which no spelling of an attribute path has ever carried.
+    //
+    //  Only if it got that far: P2PmsgAttr_GetVBLockParentnn was reading the
+    //  parent out of the owning item's block, so the usual outcome was a
+    //  segfault rather than a wrong string.
     VBLaddr aParent = P2PmsgAttr_GetVBLockParentnn ( pAttr );
     if ( aParent )
     {
@@ -6730,21 +7560,14 @@ P3Pmsg_GetPath ( const P3PmsgAttr *pAttr )
       //  strPath += P3Pmsg_GetPath ( &oNodeParent );
       //  strPath += _T(".");
       //}
-      if ( VBLock_IsField(pParent) )
+      if ( pParent && VBLock_IsItem(pParent) )
       {
-        P3PmsgField oFieldParent( pAttr->GetField()->GetP2PmsgHandle(), aParent, 0 );
-        strPath += P3Pmsg_GetPath ( &oFieldParent );
-        strPath += T_DescDelim; //_T(".");
-      }
-      else if ( VBLock_IsList(pParent) )
-      {
-        P3PmsgField oListParent( pAttr->GetField()->GetP2PmsgHandle(), aParent, 0 );
-        strPath += P3Pmsg_GetPath ( &oListParent );
-        strPath += T_DescDelim; //_T(".");
-      }
-      else if ( VBLock_IsRoot(pParent) )
-      {
-        ASSERT(0);
+        //  One arm for all three item types: a list and a vector carry
+        //  attributes exactly as a field does, and P3PmsgList and P3PmsgVect
+        //  both derive from P3PmsgField, so the owner's own path is built the
+        //  same way whichever it is (§6).
+        P3PmsgField oOwner( pAttr->GetField()->GetP2PmsgHandle(), aParent, 0 );
+        strPath += P3Pmsg_GetPath ( &oOwner );
       }
       else
       {
@@ -6753,7 +7576,52 @@ P3Pmsg_GetPath ( const P3PmsgAttr *pAttr )
     }
 
     // Tidy up, and
+    //  '@' with no name after it IS the component. It names the collection
+    //  itself, the way '^' with nothing after it names a snapshot (§5), and
+    //  P3Pmsg_SplitRootPath keeps it for the same reason.
     strPath += T_AttrDelim; //_T("@");
+    return strPath;
+}
+VBLaddr
+P2PmsgDesc_GetVBLockParentnn ( const P3PmsgDesc *pDesc );
+VBLock*
+P2PmsgDesc__GetVBLockParent ( const P3PmsgDesc *pDesc );
+
+//
+//  Builds the path of a DESCENDANT collection
+//  NOTES: The mirror of the P3PmsgAttr overload above, and it reads the same
+//         way: a collection's parent is the ITEM it hangs off, and the
+//         component that names it is its delimiter carrying no name.
+//       : §15 is why this can exist at all. A path could not END in a bare
+//         '.' until the splitter stopped dropping one, so until then the
+//         string this returns would not have resolved -- and §12 declined to
+//         emit a path that could not come back, which is the whole reason
+//         this overload was missing rather than merely unwritten.
+CString
+P3Pmsg_GetPath ( const P3PmsgDesc *pDesc )
+{
+    CString strPath;
+
+    // Process parent
+    VBLaddr aParent = P2PmsgDesc_GetVBLockParentnn ( pDesc );
+    if ( aParent )
+    {
+      VBLock *pParent = P2PmsgDesc__GetVBLockParent ( pDesc );
+      if ( pParent && VBLock_IsItem(pParent) )
+      {
+        //  One arm for all three item types, as above: a list and a vector
+        //  carry descendants exactly as a field does (§6).
+        P3PmsgField oOwner( pDesc->GetField()->GetP2PmsgHandle(), aParent, 0 );
+        strPath += P3Pmsg_GetPath ( &oOwner );
+      }
+      else
+      {
+        ASSERT(0);
+      }
+    }
+
+    // Tidy up, and
+    strPath += T_DescDelim; //_T(".");
     return strPath;
 }
 
@@ -6784,6 +7652,26 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
     TCHAR     nsObjectname[MAX_TNAME_SIZE];
     LPCTNAM lpszParsedname = ParseObjectPath ( lpszObjectPath, nsObjectname, ARRAYSIZE(nsObjectname) );
 
+    //  AN OBJECT THAT NAMES NO BLOCK IS AN ORDINARY ANSWER, NOT A LOGIC ERROR.
+    //  r_Attr() on an item that has no attributes hands back one of these, so
+    //  "Item@Tag" -- and now "Item@^" -- arrive here with nothing to select
+    //  against. Every arm below tests a type this object does not have, so it
+    //  used to fall all the way through to the ASSERT(0) at the end of the
+    //  function, by way of IsRoot() on the way past, which asserts a SECOND
+    //  time on a SYS-heap object (P2PmsgHeap_IsRoot has no arm for one). The
+    //  value RETURNED was already right; it was the two assertions that were
+    //  wrong, and asking a bare item for an attribute it has not got is not a
+    //  debug-build event.
+    //
+    //  Tested on the ADDRESS and not with IsVoid(), which wants m_hVBList and
+    //  m_aVBLock BOTH zero. An empty collection keeps the handle of the heap it
+    //  would have been allocated from and carries no block, so it is not void
+    //  by that test -- it was the half of the condition that made this look
+    //  handled when it was not. GetVBLocknn() is the plain accessor and
+    //  dereferences nothing, which matters here: there is nothing to read.
+    if ( pObject->IsVoid() || pObject->GetVBLocknn() == 0 )
+      return P3PmsgObject();         // Selection path broken
+
     // P3PmsgNodes
     /*if ( pObject->IsNode() )
     {
@@ -6813,13 +7701,52 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
       return P3Pmsg_SelectObjectRecurse ( &oNode.r_Curs().r_Object(), lpszParsedname );
     }*/
 
-    // Items
-    if ( pObject->IsField() )
+    // Items, lists and vectors
+    //  One arm, three item types. The VBLockItem header is the same six
+    //  addresses -- aParent, aPrev, aNext, aExtra, aStack, aDescn -- whatever
+    //  the ut union under it holds, and P3PmsgList and P3PmsgVect both derive
+    //  from P3PmsgField, so '.', '@', '^' and a descendant name mean on a list
+    //  or a vector exactly what they mean on a field. Reaching here with one is
+    //  ordinary: P3PmsgCurs::Goto connects m_oP3PmsgList / m_oP3PmsgVect for a
+    //  match of that type (MsgCurs.cpp), so any path that names a list and then
+    //  keeps going arrives in this function with IsList() true. That used to be
+    //  an ASSERT(0) below and then a void return -- no component of any kind
+    //  resolved against a list, and a vector had no arm at all and fell through
+    //  to the ASSERT(0) at the end of the function.
+    if ( pObject->IsField() || pObject->IsList() || pObject->IsVect() )
     {
       P3PmsgField oField = *pObject;
+      //  '.' with no NAME after it names the DESCENDANT collection, exactly as
+      //  '@' with nothing after it names the attribute one below. Both used to
+      //  re-enter with an empty path, look for a name that was not there and
+      //  answer void (§15).
+      //
+      //  "No name after it" is not the same as "nothing after it", and the
+      //  difference is this arm's half of §17. The '@' arm below hands the
+      //  REST of the path to the attribute collection, which is why "Item@^"
+      //  reaches the collection's snapshot. This one handed the rest back to
+      //  the ITEM, so "Item.^" re-entered here and took the '^' arm -- the
+      //  item's own snapshot, not the collection's. Two spellings a single
+      //  step apart, meaning objects two levels apart, and only one of them
+      //  the one §9 predicts.
+      //
+      //  So a following DELIMITER goes to the collection and a following NAME
+      //  goes back to the item. The second is not a detour: "Item.Last" wants
+      //  a descendant by name, and the field arm's own tail already looks one
+      //  up -- r_Desc().r_Curs().Goto -- so both routes land on the same
+      //  object and the shorter one is left alone.
       if ( *lpszObjectPath == T_DescDelim )
       {
-        return P3Pmsg_SelectObjectRecurse ( &oField.r_Object(), ++lpszObjectPath );
+        if ( P3Pmsg_IsPathDelimiter ( ++lpszObjectPath ) )
+        {
+          P3PmsgObject oDescColl = oField.r_Desc().r_Object();
+          if ( oDescColl.GetVBLocknn() == 0 )
+            return P3PmsgObject();     // No descendants; selection path broken
+          if ( *lpszObjectPath == 0 )
+            return oDescColl;
+          return P3Pmsg_SelectObjectRecurse ( &oDescColl, lpszObjectPath );
+        }
+        return P3Pmsg_SelectObjectRecurse ( &oField.r_Object(), lpszObjectPath );
         //lpszObjectPath = ParseObjectPath ( ++lpszObjectPath, nsObjectname, ARRAYSIZE(nsObjectname) );
         //if ( oField.r_name().c_wcsicmp(nsObjectname) )
         //  return P3PmsgObject();         // Selection path broken
@@ -6827,12 +7754,51 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
         //  return *pObject;
         //return P3Pmsg_SelectObjectRecurse ( pObject, lpszObjectPath );
       }
+      //  '@' with nothing after it names the COLLECTION, the way '^' with
+      //  nothing after it names the snapshot below. Recursing into it with an
+      //  empty path looked for a name that was not there and answered void, so
+      //  the one object with no other spelling could not be reached -- and it
+      //  is the object P3Pmsg_GetPath emits a path for.
       if ( *lpszObjectPath == T_AttrDelim )
-        return P3Pmsg_SelectObjectRecurse ( &oField.r_Attr().r_Object(), ++lpszObjectPath );
+      {
+        if ( *++lpszObjectPath == 0 )
+        {
+          P3PmsgObject oAttrColl = oField.r_Attr().r_Object();
+          if ( oAttrColl.GetVBLocknn() == 0 )
+            return P3PmsgObject();     // No attributes; selection path broken
+          return oAttrColl;
+        }
+        return P3Pmsg_SelectObjectRecurse ( &oField.r_Attr().r_Object(), lpszObjectPath );
+      }
+      //  '^' follows the item's stack: the aStack address a Push() wrote, so a
+      //  path can name a value the field USED to hold. The delimiter has been
+      //  in the grammar from the start -- ParseObjectPath stops on it,
+      //  P3Pmsg_IsPathDelimiter answers TRUE for it and P3Pmsg_IsValidItemname
+      //  rejects it from item names -- but this arm, the one place following it
+      //  would have happened, was never written and asserted instead.
+      //
+      //  Pushes nest (MsgStck::Push re-links the current head onto the new
+      //  item), so the delimiter repeats: "Field^" is the item as it stood
+      //  before the last push, "Field^^" before the one before that. Whatever
+      //  follows is read against the pushed item exactly as it would be against
+      //  a live one, because a pushed item IS a whole item -- Push copies name,
+      //  data, attributes and descendants -- so "Field^.Child" and
+      //  "Field^@Attr" mean inside the snapshot what they mean outside it.
       if ( *lpszObjectPath == T_StckDelim )
       {
-        ASSERT(0);
-        return P3PmsgObject();
+        if ( !oField.IsStacked() )
+          return P3PmsgObject();       // Nothing pushed; selection path broken
+        //  MsgStck keeps one accessor per item type and each THROWS if asked
+        //  for the wrong one, so the type has to be re-tested here even though
+        //  everything above this line is type-agnostic. All three arms are live:
+        //  MsgStck::Push() pushes a list and a vector as well as a field, so
+        //  "List^" reaches a real snapshot with its elements in it.
+        P3PmsgField& oStacked = pObject->IsList() ? (P3PmsgField&)oField.r_Stck().r_list()
+                              : pObject->IsVect() ? (P3PmsgField&)oField.r_Stck().r_vect()
+                              :                     (P3PmsgField&)oField.r_Stck().r_item();
+        if ( *++lpszObjectPath == 0 )
+          return oStacked.r_Object();  // Path ends on the pushed item itself
+        return P3Pmsg_SelectObjectRecurse ( &oStacked.r_Object(), lpszObjectPath );
       }
       //if ( oField.r_name().c_wcsicmp(++lpszObjectPath) == 0 )
       //  return *pObject;
@@ -6847,30 +7813,78 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
       return P3Pmsg_SelectObjectRecurse ( &oField.r_Desc().r_Curs().r_Object(), lpszParsedname );
     }
 
-    // Lists
-    if ( pObject->IsList() )
-    {
-      ASSERT(0);
-    }
-
     // Attributes
     if ( pObject->IsAttr() )
     {
       P3PmsgAttr oAttr = *pObject;
+      //  A COLLECTION HAS NO DESCENDANTS OF ITS OWN, for the same reason the
+      //  '@' arm below says it has no attributes: it is not an item. So
+      //  "Item@." names nothing -- and it is a well-formed question, reachable
+      //  since §15 made a trailing '.' a component, so the answer is the empty
+      //  object rather than a debug-build event.
       if ( *lpszObjectPath == T_DescDelim )
-      {
-        ASSERT(0);
-        return P3PmsgObject();
-      }
+        return P3PmsgObject();         // Selection path broken
+      //  A COLLECTION HAS NO ATTRIBUTES OF ITS OWN. It is not an item: a
+      //  VBLockAttr carries aParent and its members, and nothing else. So
+      //  "Item@@Tag" names nothing -- but it is a well-formed question, and
+      //  the answer to one of those is the empty object, not an assertion.
+      //  Same reasoning as the never-created collection above: what a caller
+      //  spells is the caller's business, and only what the library itself
+      //  could not have meant is a debug-build event.
+      //
+      //  Reachable before any of this: "Item@^@Tag" splits cleanly -- "@^" is
+      //  the collection at the last push (§9) -- and arrived here to assert
+      //  and then return exactly this. §14 legalises the shorter spelling,
+      //  which is what made it worth writing down.
       if ( *lpszObjectPath == T_AttrDelim )
-      {
-        ASSERT(0);
-        return P3PmsgObject();
-      }
+        return P3PmsgObject();         // Selection path broken
+      //  '^' ON THE COLLECTION ITSELF. An attribute collection has no stack of
+      //  its own -- aStack is a VBLockItem field and this block is a
+      //  VBLockAttr -- which is why this used to answer "broken path". It is
+      //  not the only thing a VBLockAttr carries, though: it carries aParent,
+      //  so the item that OWNS the collection can be found, and that item has
+      //  a stack, and its snapshot holds a copy of the whole collection --
+      //  Push copies name, data, attributes and descendants.
+      //
+      //  So "Item@^" is the attribute collection as it stood at the last push,
+      //  which IS the attribute collection inside the snapshot: "Item@^" and
+      //  "Item^@" name the same object. '^' commutes with '@' and with '.',
+      //  and it does so for the reason §3 already gives about pushed items --
+      //  a snapshot is a whole item, not a fragment of one.
+      //
+      //  NOTHING IS ADDED TO A VBLockAttr, so this costs no format change and
+      //  no image moves. aParent is already there, already maintained
+      //  (P3Pmsg_GetPath walks it to build a path), and P3PmsgObject::GetParent
+      //  already reads it. Measured: a pushed item's collections point at the
+      //  PUSHED item, not back at the live one, so "Item@^^" descends a
+      //  generation exactly as "Item^^" does rather than looping.
+      //
+      //  Note "Item@Attr^" is a different path and always worked: the Goto
+      //  below lands on the attribute ITEM, which has a stack of its own, and
+      //  the field arm above follows it.
       if ( *lpszObjectPath == T_StckDelim )
       {
-        ASSERT(0);
-        return P3PmsgObject();
+        P3PmsgObject oOwner = pObject->GetParent();
+        if ( oOwner.IsVoid() )
+          return P3PmsgObject();       // Orphaned collection; path broken
+        //  Copy-INITIALISED, not assigned: the converting constructor takes a
+        //  list and a vect as well as a field, where operator= would throw
+        //  "Invalid overloaded context". The field arm above relies on the
+        //  same distinction, and §6 is why the owner can be any of the three.
+        P3PmsgField oOwnerField = oOwner;
+        if ( !oOwnerField.IsStacked() )
+          return P3PmsgObject();       // Nothing pushed; path broken
+        P3PmsgField& oStacked = oOwner.IsList() ? (P3PmsgField&)oOwnerField.r_Stck().r_list()
+                              : oOwner.IsVect() ? (P3PmsgField&)oOwnerField.r_Stck().r_vect()
+                              :                   (P3PmsgField&)oOwnerField.r_Stck().r_item();
+        P3PmsgObject oStackedAttr = oStacked.r_Attr().r_Object();
+        //  A path that ends on a '^' answers the thing the '^' named, which is
+        //  the rule the field arm follows too. ("Item@" on its own is a
+        //  different case and still answers nothing: it ends on a '@' with an
+        //  empty name, and the Goto below is what refuses it.)
+        if ( *++lpszObjectPath == 0 )
+          return oStackedAttr;
+        return P3Pmsg_SelectObjectRecurse ( &oStackedAttr, lpszObjectPath );
       }
       if ( !oAttr.r_Curs().Goto(nsObjectname) )
         return P3PmsgObject();         // Selection path broken;
@@ -6883,7 +7897,15 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
     if ( pObject->IsDesc() )
     {
       P3PmsgDesc oDesc = *pObject;
-      if ( *lpszObjectPath == T_StckDelim )
+      //  T_DescDelim, not T_StckDelim. This is the descendant arm: it steps
+      //  over the delimiter and re-enters on the same collection, which is what
+      //  the field arm above -- and the node arm above that -- both do for '.'.
+      //  It was testing the STACK constant, so "Desc^name" descended and
+      //  "Desc.name" fell through to the Goto below carrying the empty name
+      //  ParseObjectPath had stopped at, and matched nothing. With '^' now
+      //  meaning the stack everywhere else, this could not be left reading the
+      //  same character.
+      if ( *lpszObjectPath == T_DescDelim )
       {
         return P3Pmsg_SelectObjectRecurse ( &oDesc.r_Object(), ++lpszObjectPath );
         //lpszObjectPath = ParseObjectPath ( ++lpszObjectPath, strObjectname );
@@ -6893,15 +7915,40 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
         //  return *pObject;
         //return P3Pmsg_SelectObject ( pObject, lpszObjectPath );
       }
+      //  A COLLECTION HAS NO ATTRIBUTES OF ITS OWN -- the mirror of the '.'
+      //  arm above, and the same reason: it is not an item. "Item.@" is a
+      //  well-formed question, reachable since §15 made a bare '.' a
+      //  component, and the answer is the empty object.
       if ( *lpszObjectPath == T_AttrDelim )
-      {
-        ASSERT(0);
-        return P3PmsgObject();
-      }
+        return P3PmsgObject();         // Selection path broken
+      //  As for attributes, and for the same reasons -- read that arm for the
+      //  whole of it. A VBLockDesc has no aStack either, and carries the same
+      //  aParent, so a descendant collection's '^' is the descendant collection
+      //  inside the owner's snapshot.
+      //
+      //  This arm is reached by handing a descendant collection to
+      //  P3Pmsg_SelectObject directly -- NOT by P3PmsgDesc::SelectObject,
+      //  which despite the name never parses a path at all: it is a cursor
+      //  Goto by plain name (and is defined twice, identically, in MsgDesc.cpp
+      //  and P2Pmsg.cpp). A path that goes THROUGH an item does not come here
+      //  either: the field arm's '.' re-enters on the item rather than on its
+      //  collection, so "Item.^" is the item's own stack -- the same object,
+      //  by the commuting rule above.
       if ( *lpszObjectPath == T_StckDelim )
       {
-        ASSERT(0);
-        return P3PmsgObject();
+        P3PmsgObject oOwner = pObject->GetParent();
+        if ( oOwner.IsVoid() )
+          return P3PmsgObject();       // Orphaned collection; path broken
+        P3PmsgField oOwnerField = oOwner;
+        if ( !oOwnerField.IsStacked() )
+          return P3PmsgObject();       // Nothing pushed; path broken
+        P3PmsgField& oStacked = oOwner.IsList() ? (P3PmsgField&)oOwnerField.r_Stck().r_list()
+                              : oOwner.IsVect() ? (P3PmsgField&)oOwnerField.r_Stck().r_vect()
+                              :                   (P3PmsgField&)oOwnerField.r_Stck().r_item();
+        P3PmsgObject oStackedDesc = oStacked.r_Desc().r_Object();
+        if ( *++lpszObjectPath == 0 )
+          return oStackedDesc;
+        return P3Pmsg_SelectObjectRecurse ( &oStackedDesc, lpszObjectPath );
       }
       if ( !oDesc.r_Curs().Goto(nsObjectname) )
         return P3PmsgObject();         // Selection path broken;
@@ -6923,11 +7970,63 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
 P3PmsgObject
 P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath )
 {
-    if ( *lpszObjectPath != T_DescDelim )
+    //  A LEADING '.' means "this component names the object you are standing
+    //  on", and the name after it is matched against that object's own. A path
+    //  that is nothing BUT a '.' carries no such name: it is the whole
+    //  instruction, naming the descendant collection (§15). Sent through the
+    //  matching below it was compared against the item's real name, missed,
+    //  and came back void.
+    //
+    //  AND THE SAME IS TRUE OF ANY '.' WITH NO NAME AFTER IT, not only one at
+    //  the end of the path. ".^" is a bare '.' and then a '^'; the test here
+    //  was "is the path longer than one character", so ".^" took the matching
+    //  route, ParseObjectPath stopped on the '^' with an empty name, and the
+    //  empty name was compared against the item's real one. Void, for the one
+    //  spelling §9's commuting rule most obviously predicts (§17).
+    //
+    //  P3Pmsg_IsPathDelimiter answers TRUE for the terminator as well as for
+    //  the five delimiters, so it is both halves of that question at once.
+    if ( *lpszObjectPath != T_DescDelim ||
+         P3Pmsg_IsPathDelimiter ( lpszObjectPath + 1 ) )
       return P3Pmsg_SelectObjectRecurse ( pObject, lpszObjectPath );
-    lpszObjectPath++;
-    TNAME nsObjectname[MAX_TNAME_SIZE] = {0};
-    lpszObjectPath = ParseObjectPath ( lpszObjectPath, nsObjectname, ARRAYSIZE(nsObjectname) );
+    //  The WHOLE path is kept. A leading '.' that turns out not to be the
+    //  root marker is an ordinary descendant delimiter, and the arms below
+    //  have to be able to hand it on with the delimiter still attached.
+    LPCTNAM lpszWhole = lpszObjectPath;
+    TNAME   nsObjectname[MAX_TNAME_SIZE] = {0};
+    lpszObjectPath = ParseObjectPath ( lpszObjectPath + 1, nsObjectname, ARRAYSIZE(nsObjectname) );
+
+    //  THE COLLECTIONS ARE ASKED ABOUT FIRST, for the reason §16 gives: IsAttr
+    //  and IsDesc read the block header, which every block has, while IsField,
+    //  IsList and IsVect read a VBLockItem's fields out of whatever block is
+    //  there. Asked in this order the question never reaches a block that
+    //  cannot answer it. The two arms used to stand after the item one and
+    //  were reached only because a collection's ut union happened not to look
+    //  like a field.
+    //
+    //  A leading '.' on a COLLECTION was never the root marker: both arms
+    //  descend by name, which is what Goto and Exists do. Only the empty
+    //  remainder below is new.
+    if ( pObject->IsDesc() )
+    {
+      P3PmsgDesc oDesc = *pObject;
+      if ( !oDesc.r_Curs().Goto(nsObjectname) )
+        return P3PmsgObject();         // Selection path broken
+      if ( *lpszObjectPath == 0 )
+        return oDesc.r_Curs().r_Object();
+      return P3Pmsg_SelectObjectRecurse ( &oDesc.r_Curs().r_Object(), lpszObjectPath );
+    }
+    if ( pObject->IsAttr() )
+    {
+      P3PmsgAttr oAttr = *pObject;
+      //  Exists() IS the Goto -- it positions m_pCurs and answers whether it
+      //  landed -- so r_Curs() below is the object it found.
+      if ( !oAttr.Exists(nsObjectname) )
+        return P3PmsgObject();         // Selection path broken
+      if ( *lpszObjectPath == 0 )
+        return oAttr.r_Curs().r_Object();
+      return P3Pmsg_SelectObjectRecurse ( &oAttr.r_Curs().r_Object(), lpszObjectPath );
+    }
     //if ( pObject->IsNode() )
     //{
     //  P3PmsgNode oNode = *pObject;
@@ -6935,28 +8034,49 @@ P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath )
     //  if ( oField.r_name().c_wcsicmp(nsObjectname) )
     //    return P3PmsgObject();         // Selection path broken
     //}
-    if ( pObject->IsField() )
+    //  Lists and vectors take the field test here for the same reason they
+    //  share the field arm of the recurse above: the name lives in the
+    //  VBLockField the ut union carries whichever of the three it is, so
+    //  matching the leading component against it is the same operation. They
+    //  used to reach the ASSERT(0) below and then recurse anyway, which meant
+    //  a rooted path was never checked against the object it was rooted at.
+    if ( pObject->IsField() || pObject->IsList() || pObject->IsVect() )
     {
+      //  AND ONLY WHERE A PATH COULD BE ROOTED. P3Pmsg_GetPath says what that
+      //  means in its own first comment -- "Process root. NOTES: Defined by
+      //  absence of parent" -- and emits ".item1.item2" for a root object and
+      //  ".item" for a floating one. Nothing else is where a rooted path
+      //  starts, so a leading '.' on an object that HAS a parent cannot be the
+      //  root marker and is an ordinary descendant delimiter.
+      //
+      //  Asserted at every depth instead, it made ".Last" on an item mean "are
+      //  you called Last" where the same characters descend in a root path:
+      //  ".Store.BHP.Last" resolves, P3Pmsg_SelectObject(&oBHP, L".Last") was
+      //  void. That was the last row of §17's agreement sweep still reading NO.
+      //
+      //  What goes with it: ".BHP.Last" asked OF BHP used to resolve, by
+      //  matching BHP's own name and then descending. It is the assertion
+      //  reaching where no path is rooted, and it has no caller here. The root
+      //  keeps it, which is what P2PmsgMgr::Path2Object relies on to refuse a
+      //  path rooted somewhere else.
+      if ( pObject->HasParent() )
+        return P3Pmsg_SelectObjectRecurse ( pObject, lpszWhole );
+
       P3PmsgField oField = *pObject;
       if ( oField.r_name().c_wcsicmp(nsObjectname) )
         return P3PmsgObject();         // Selection path broken
+      //  AND A MATCH WITH NOTHING AFTER IT IS THE ANSWER. It used to fall
+      //  through to the recurse below carrying an empty path, where
+      //  ParseObjectPath produced an empty name and the Goto for it matched
+      //  nothing. So the library could not resolve the path it emits for a
+      //  root: P3Pmsg_GetPath(&mgr) is ".Store", and handing ".Store" back to
+      //  the root answered void. Same for a floating item and its ".Floater",
+      //  and for either collection reached by a name with nothing after it.
+      if ( *lpszObjectPath == 0 )
+        return *pObject;
+      return P3Pmsg_SelectObjectRecurse ( pObject, lpszObjectPath );
     }
-    else if ( pObject->IsDesc() )
-    {
-      P3PmsgDesc oDesc = *pObject;
-      if ( !oDesc.r_Curs().Goto(nsObjectname) )
-        return P3PmsgObject();         // Selection path broken
-      return P3Pmsg_SelectObjectRecurse ( &oDesc.r_Curs().r_Object(), lpszObjectPath );
-    }
-    else if ( pObject->IsAttr() )
-    {
-      P3PmsgAttr oAttr = *pObject;
-      if ( !oAttr.Exists(nsObjectname) )
-        return P3PmsgObject();         // Selection path broken
-      return P3Pmsg_SelectObjectRecurse ( &oAttr.r_Curs().r_Object(), lpszObjectPath );
-    }
-    else
-      ASSERT(0);
+    ASSERT(0);
     return P3Pmsg_SelectObjectRecurse ( pObject, lpszObjectPath );
 }
 
@@ -7057,6 +8177,28 @@ P3Pmsg_IsPathDelimiter ( LPCWSTR lpszObjectPath )
    return FALSE;
 }
 
+//  A DELIMITER WITH NO NAME AFTER IT NAMES THE COLLECTION IT INTRODUCES.
+//  That is the whole rule, and every delimiter obeys it: '^' names the pushed
+//  value of whatever is to its left, '@' the attribute collection, '.' -- and
+//  its aliases '\' and '/' -- the descendant one. Each of those is an object
+//  P3Pmsg_GetPath emits a path for and nothing else can spell.
+//
+//  It arrived a delimiter at a time: '^' with §10, '@' with §12 and then §14,
+//  '.' with §15. Each step was argued from the one before it, and stating the
+//  rule once is what the last of them is really for.
+//
+//  A component is seeded with the delimiter that introduces it, so a length of
+//  one means exactly "delimiter, no name" -- there is no other way to get here
+//  with a single character.
+static bool
+P3Pmsg__IsBareComponent ( const CString& strItemname )
+{
+    return strItemname.GetLength() == 1 &&
+           ( strItemname[0] == T_StckDelim || strItemname[0] == T_AttrDelim ||
+             strItemname[0] == T_DescDelim || strItemname[0] == T_BackSlash ||
+             strItemname[0] == T_ForeSlash    );
+}
+
 //
 //  Splits passed full P3PmsgObject path into its functional components
 //  NOTES: Full path format Rootname[/|\|@|^]Componentname[/|\|@|^]etc
@@ -7096,10 +8238,38 @@ P3Pmsg_SplitRootPath ( LPCWSTR lpszObjectPath, CString& strRootname
     // NOTES: Always preceeded with [/|\|@|^]
     while ( lpszWorkingPath[0] )
     {
-      while ( !P3Pmsg_IsPathDelimiter(lpszWorkingPath) )
+      //  '^' is a delimiter, and it is the only one that introduces no NAME --
+      //  it names the pushed value of whatever stands to its left. So where it
+      //  follows a delimiter that DOES introduce one, it has not begun a new
+      //  component; it has qualified the component being read. "@^Currency" is
+      //  a single question -- the attribute Currency as it stood before the
+      //  last push -- and P3Pmsg_SelectObject answers it as one. Split at the
+      //  '^' it became a component "@" carrying no name at all, the length test
+      //  below rejected that, and the WHOLE path came back FALSE.
+      //
+      //  So the scan takes a '^' while the component is still nothing but
+      //  delimiters, and stops at one once a name has been read: "@^^Tag" is
+      //  one component, "@Tag^" is two. Pushes nest, hence the repetition.
+      bool bNamed = false;
+      while ( !P3Pmsg_IsPathDelimiter(lpszWorkingPath) ||
+              ( lpszWorkingPath[0] == T_StckDelim && !bNamed ) )
+      {
+        bNamed = bNamed || lpszWorkingPath[0] != T_StckDelim;
         strItemname += *lpszWorkingPath++;
-      if ( strItemname.GetLength() <= 1 )
-        return FALSE;
+      }
+      //  EVERY lone delimiter is now a component -- refer
+      //  P3Pmsg__IsBareComponent -- so this refusal has nothing left to refuse
+      //  and is gone. A component is seeded with its own delimiter and the
+      //  scan below stops at the next one, so a single character here is
+      //  always a delimiter and always names a collection.
+      //
+      //  What the splitter still refuses is a path that does not begin at a
+      //  root, which is the test at the top of this function and the one §10
+      //  taught RootPath2Object to honour. An empty NAME is no longer an error
+      //  because there is no longer such a thing: ".Root..Alpha" is the root's
+      //  descendant collection and then Alpha, which is Alpha -- a redundant
+      //  spelling, the way ".Root.Item@.Tag" is a redundant spelling of
+      //  "@Tag" (§14), and redundant is not malformed.
 //vvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 if(strItemname.CompareNoCase(L".pya")==0||
    strItemname.CompareNoCase(L".pys")==0||
@@ -7114,6 +8284,25 @@ strItemname=strLast;
       if ( lpszWorkingPath[0] )
         strItemname = *lpszWorkingPath++;
     }
+    //  The loop takes a trailing delimiter into strItemname and then exits on
+    //  the terminator without adding it. For '.' that discarded nothing -- a
+    //  trailing '.' is an empty name, refused above wherever it is not last --
+    //  but for '^' it discarded the whole request: ".Root.Item^" asks for the
+    //  value Item held before its last push, and it came back as the component
+    //  list for ".Root.Item", which is Item itself. A wrong object, silently,
+    //  and the shortest way to spell the question.
+    //
+    //  A trailing '@' reads exactly the same way and was discarded for exactly
+    //  as long: ".Root.Item@" asks for Item's ATTRIBUTE COLLECTION, and came
+    //  back as Item. The reason given for dropping it was that P3Pmsg_GetPath
+    //  emits one and the round-trip had to survive -- but the only overload
+    //  that emits a trailing '@' is the one for a collection, which had no
+    //  caller and crashed before it got there (§12). A path to an attribute,
+    //  "@Currency", has a name after the delimiter and never came through
+    //  here. So the drop was protecting a round-trip that could not happen,
+    //  and keeping the component is what makes one.
+    if ( P3Pmsg__IsBareComponent(strItemname) )
+      oCListItems.AddTail ( strItemname );
     return TRUE;
 }
 //

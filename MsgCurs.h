@@ -187,6 +187,11 @@ class Msgcore_EXT P3PmsgCurs
       virtual bool 
         IsEoCursor ( ) const;
 
+      //  How many references on hVBList this cursor is holding.  Refer
+      //  P3PmsgField::HeapHolders.
+      int
+        HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept;
+
     // Attributes
     protected:
       P3PmsgItem   *m_pItemParent{nullptr};

@@ -46,51 +46,51 @@
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <UseDebugLibraries>true</UseDebugLibraries>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugLib|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugLib|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <UseDebugLibraries>true</UseDebugLibraries>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseLib|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseLib|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseOfMfc>Dynamic</UseOfMfc>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -170,18 +170,15 @@
        CustomBuildStep reads $(TargetDir), and the import library goes to
        $(WDMSCS_LIB) (MSCS\lib\<Platform>\<Configuration>) via Directory.Build.props. -->
 
-  <!-- WHY EVERY CustomBuildStep BELOW DECLARES <Inputs>, and it is a
+  <!-- WHY EVERY CustomBuildStep BELOW DECLARES <AdditionalInputs>, and it is a
        correctness fix rather than tidiness. The step copies $(TargetPath) into
        the shared bin\<Cfg><Arch> tree, but until 2026-08-22 it declared only an
-       <Outputs>, and the input added that day was spelled <AdditionalInputs>,
-       which this step does not read - see THE NAME below - so the behaviour
-       described here survived unchanged until 2026-09-12. With no input naming
-       the thing being copied, MSBuild's incremental check compares the staged
-       DLL against THE PROJECT FILE:
+       <Outputs>. With no input naming the thing being copied, MSBuild's
+       incremental check compares the staged DLL against THE PROJECT FILE:
 
          Skipping target "CustomBuildStep" because all output files are
          up-to-date with respect to the input files.
-           Input files:  Msgcore(2026).vcxproj
+           Input files:  Msgcore(2022).vcxproj
            Output files: ...\bin\Debug64\..\Debug64\Msgcore.dll
 
        A .vcxproj that has not been edited in a week is older than any staged
@@ -203,23 +200,6 @@
        - so the step re-runs on an ordinary incremental build and not only after
        a Clean.
 
-       THE NAME. It has to be <Inputs>. Microsoft.CppCommon.targets declares
-
-         <Target Name="CustomBuildStep"
-                 Inputs="%(CustomBuildStep.Inputs);$(ProjectFileName)" ...>
-
-       and nothing anywhere folds AdditionalInputs into that. AdditionalInputs
-       is the per-file CustomBuild item's metadata; on the project-level build
-       step it is accepted, written, and inert. The diagnosis above was right
-       on 2026-08-22 and the fix still did nothing, because a wrong metadata
-       name fails silently - there is no warning for metadata no one reads.
-       To check rather than assume, ask MSBuild what it compared:
-
-         msbuild <proj> -p:Configuration=Release -p:Platform=x64
-                 -v:diag -t:CustomBuildStep | findstr /C:"Input files"
-
-       A line naming only the .vcxproj means the input never arrived.
-
        KNOWN AND ACCEPTED: this makes the step run on EVERY build rather than
        only when the DLL changed. IW_CustomBuildStep.bat stages with `copy /y`,
        which preserves the source timestamp, so the staged copy is never
@@ -239,7 +219,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <CustomBuildStep>
       <Command>IF DEFINED WDMSCS_VSUTILS CALL "$(WDMSCS_VSUTILS)\IW_CustomBuildStep.bat" "$(TargetDir)" "$(TargetFileName)" "$(TargetExt)" "$(Configuration)$(PlatformArchitecture)"</Command>
-      <Inputs>$(TargetPath);%(Inputs)</Inputs>
+      <AdditionalInputs>$(TargetPath);%(AdditionalInputs)</AdditionalInputs>
       <Outputs>$(WDMSCS_DEBUG)\..\$(Configuration)$(PlatformArchitecture)\$(TargetName)$(TargetExt);%(Outputs)</Outputs>
     </CustomBuildStep>
     <ClCompile>
@@ -282,7 +262,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <CustomBuildStep>
       <Command>IF DEFINED WDMSCS_VSUTILS CALL "$(WDMSCS_VSUTILS)\IW_CustomBuildStep.bat" "$(TargetDir)" "$(TargetFileName)" "$(TargetExt)" "$(Configuration)$(PlatformArchitecture)"</Command>
-      <Inputs>$(TargetPath);%(Inputs)</Inputs>
+      <AdditionalInputs>$(TargetPath);%(AdditionalInputs)</AdditionalInputs>
       <Outputs>$(WDMSCS_DEBUG)\..\$(Configuration)$(PlatformArchitecture)\$(TargetName)$(TargetExt);%(Outputs)</Outputs>
     </CustomBuildStep>
     <ClCompile>
@@ -326,7 +306,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <CustomBuildStep>
       <Command>IF DEFINED WDMSCS_VSUTILS CALL "$(WDMSCS_VSUTILS)\IW_CustomBuildStep.bat" "$(TargetDir)" "$(TargetFileName)" "$(TargetExt)" "$(Configuration)$(PlatformArchitecture)"</Command>
-      <Inputs>$(TargetPath);%(Inputs)</Inputs>
+      <AdditionalInputs>$(TargetPath);%(AdditionalInputs)</AdditionalInputs>
       <Outputs>$(WDMSCS_DEBUG)\..\$(Configuration)$(PlatformArchitecture)\$(TargetName)$(TargetExt);%(Outputs)</Outputs>
     </CustomBuildStep>
     <ClCompile>
@@ -365,7 +345,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <CustomBuildStep>
       <Command>IF DEFINED WDMSCS_VSUTILS CALL "$(WDMSCS_VSUTILS)\IW_CustomBuildStep.bat" "$(TargetDir)" "$(TargetFileName)" "$(TargetExt)" "$(Configuration)$(PlatformArchitecture)"</Command>
-      <Inputs>$(TargetPath);%(Inputs)</Inputs>
+      <AdditionalInputs>$(TargetPath);%(AdditionalInputs)</AdditionalInputs>
       <Outputs>$(WDMSCS_DEBUG)\..\$(Configuration)$(PlatformArchitecture)\$(TargetName)$(TargetExt);%(Outputs)</Outputs>
     </CustomBuildStep>
     <ClCompile>

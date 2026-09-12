@@ -932,6 +932,34 @@ const VBLock    soVBLock = { 0 };
 //  that a corrupt free list otherwise produces. See P2PmsgHeap_AllocBSTRio.
 static const int kMaxAllocResizes = 2;
 
+//  How many blocks that ALREADY FIT the request the allocator will look at
+//  before settling for the best of them.
+//
+//  This allocator was first-fit from the head of a LIFO free list, and the two
+//  together are worse than either: a freed block goes to the head, so the head
+//  is whichever block was freed last, and first-fit takes it whatever its size.
+//  Free an 800-byte block and then a 50-byte one, ask for 50, and the 800 is
+//  split -- the 50 sits on the list untouched, and the next 800-byte request
+//  cannot be served by what is left of the block that used to serve it. The
+//  boundary tag (refer the note above VBHeap_FootMagic) repairs the case where
+//  two such blocks are ADJACENT, by merging them back into one. It cannot
+//  repair this one: live data sits between them and no merge is possible, so
+//  the only repair left is to choose better among the blocks that exist.
+//
+//  BOUNDED, because "best fit" across a whole free list is a walk of the whole
+//  free list on every single allocation, and this list can be long. Eight is
+//  chosen against the list's own order rather than as a round number: the list
+//  is LIFO, so the blocks nearest the head are the most recently freed, which
+//  in a container being emptied and refilled -- the workload that produced the
+//  824-bytes-a-round drift this and the boundary tag were found by -- are
+//  exactly the blocks about to be asked for again. A walk of the whole list
+//  would spend most of its time on the part least likely to help.
+//
+//  Blocks too small to serve the request do NOT count against this budget:
+//  they were walked past before this change and are walked past after it. What
+//  is budgeted is only the walking this change ADDS.
+static const VBLsize kMaxFitWalk = 8;
+
 ///////////////////////////////////////////////////////////////////////
 //  VBHeap private operations
 //  NOTES: Used to expose VBHeap size etc
@@ -955,6 +983,178 @@ VBList_VBHeapMin ( UCHAR uVBLaddr )
                            + sizeof(VBHeap::ud.oHeap08);
     ASSERT(0);
     return 0;
+}
+
+///////////////////////////////////////////////////////////////////////
+//  Boundary tags
+//  NOTES: This heap could only ever coalesce FORWARDS. Collate merges a freed
+//         block with its next physical neighbour, and there was no way to go
+//         the other way: a block is found by its address, its header sits at
+//         the front, and nothing in the image says how far back the previous
+//         block began. So a run of frees reclaimed its space only if it ran
+//         high address to low. Low to high -- which is what almost everything
+//         does, P3PmsgDesc::Truncate deleting child 0 over and over being the
+//         obvious one -- every block's neighbour was still allocated at the
+//         moment it was freed, nothing merged, and the list filled with
+//         separate blocks that first-fit then walked straight past, because the
+//         one that had absorbed the image tail sat at its head and satisfied
+//         everything. Measured before this: five children into a container,
+//         Truncate, refill, repeat -- 824 bytes a round, for ever.
+//
+//       : A FOOTER IN THE FREE BLOCK, NOT IN EVERY BLOCK, and that is the whole
+//         reason this costs no format change. The classic boundary tag puts a
+//         size footer on every block, allocated ones included, which would move
+//         every byte of every image and break the golden byte-identity gate
+//         along with every .p2p already written. It is not needed: the footer
+//         is only ever READ when the predecessor turns out to be free, so it
+//         only ever needs to EXIST in a free block -- and a free block's tail
+//         is dead space nothing else uses. An allocated block is untouched,
+//         byte for byte, so a tree that is built and saved without freeing
+//         anything serialises exactly as it did before.
+//
+//       : A STALE FOOTER CANNOT CAUSE A WRONG MERGE. The tag is a hint and the
+//         predecessor's own header is the authority: PrevFree recomputes the
+//         candidate address from the recorded size and then requires the block
+//         it lands on to declare the same size, the same addressing mode, and
+//         to be free, linked and allocated. Anything else -- a footer left
+//         behind inside a block that has since been handed out, a coincidence
+//         in payload bytes, a heap read off the wire -- fails that and the
+//         answer is simply "no predecessor", which is where this started.
+//
+//       : Blocks too small to hold a footer behind their free-list links do not
+//         get one. They keep the old behaviour, which is correct, just not
+//         improved.
+#define VBHeap_FootMagic 0x46544246u   // 'FBTF', little-endian on disk
+
+#pragma pack(push,1)
+typedef struct VBHeapFoot__
+{
+    UINT32 uMagic;                     // VBHeap_FootMagic
+    UINT64 nSize;                      // Size of the block this sits at the end of
+} VBHeapFoot;
+#pragma pack(pop)
+
+//  Smallest free block that can carry a tag without treading on the nPrev and
+//  nNext links at its front.
+static inline VBLsize
+P2PmsgHeap_FootMin ( UCHAR uAddrType ) noexcept
+{
+    return VBList_VBHeapMin ( uAddrType ) + sizeof(VBHeapFoot);
+}
+
+//  Writes the tag at the end of a free block. Silent no-op when the block is
+//  too small to carry one, or is not free.
+static void
+P2PmsgHeap_StampFoot ( P2PmsgHANDLE hVBList, VBLaddr aVBLock ) noexcept
+{
+    const VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    if ( aVBLock == 0 || aVBLock >= pHandle->nSizeofAlloc )
+      return;
+    VBHeap *pVBLock = VBList2PhysVBHeap ( hVBList, aVBLock );
+    if ( pVBLock == nullptr || !VBHeap_IsFree(pVBLock) )
+      return;
+    const VBLsize nSizeof = VBHeap_Sizenn ( pVBLock );
+    if ( nSizeof < P2PmsgHeap_FootMin(pHandle->uAddrType) )
+      return;
+    if ( aVBLock + nSizeof > pHandle->nSizeofAlloc )
+      return;                          // Declared size leaves the image
+    VBHeapFoot *pFoot = (VBHeapFoot *)( (char *)pVBLock + nSizeof - sizeof(VBHeapFoot) );
+    pFoot -> uMagic = VBHeap_FootMagic;
+    pFoot -> nSize  = (UINT64)nSizeof;
+}
+
+//  Answers the address of the free block physically BEFORE aVBLock, or 0 when
+//  there is none to be had. Every field it reads is cross-checked against the
+//  candidate's own header; see the note above on why a stale tag is harmless.
+static VBLaddr
+P2PmsgHeap_PrevFree ( P2PmsgHANDLE hVBList, VBLaddr aVBLock ) noexcept
+{
+    const VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    const VBLsize nHdr = P2PmsgHeap_Sizeof_Hdr ( hVBList );
+    if ( nHdr == 0 || aVBLock <= nHdr + sizeof(VBHeapFoot) )
+      return 0;                        // No room for a block and a tag before us
+    if ( aVBLock > pHandle->nSizeofAlloc )
+      return 0;
+
+    const VBHeapFoot *pFoot =
+      (const VBHeapFoot *)( (char *)P2PmsgHeap_Addr2Phys(hVBList,aVBLock)
+                          - sizeof(VBHeapFoot) );
+    if ( pFoot == nullptr || pFoot->uMagic != VBHeap_FootMagic )
+      return 0;
+
+    const UINT64 nSize = pFoot -> nSize;
+    if ( nSize < P2PmsgHeap_FootMin(pHandle->uAddrType) || nSize >= aVBLock )
+      return 0;                        // Nonsense, or it would start before the image
+    const VBLaddr aPrev = aVBLock - (VBLaddr)nSize;
+    if ( aPrev < nHdr )
+      return 0;
+
+    const VBHeap *pPrev = VBList2PhysVBHeap ( hVBList, aPrev );
+    if ( pPrev == nullptr )
+      return 0;
+    if ( !VBHeap_IsAddr(pPrev,pHandle->uAddrType) ||
+         !VBHeap_IsAlloc(pPrev)                   ||
+         !VBHeap_IsLinked(pPrev)                  ||
+         !VBHeap_IsFree(pPrev)                       )
+      return 0;
+    if ( (UINT64)VBHeap_Sizenn(pPrev) != nSize )
+      return 0;                        // The tag and the block disagree: believe the block
+    return aPrev;
+}
+
+//  Takes the tags back out of the free blocks, and puts them back.
+//  NOTES: A TAG MUST NOT REACH AN IMAGE ON DISK. It lives in the tail of a free
+//         block, which is dead space in memory but is still written out when
+//         the arena is serialised -- and this tree keeps its serialised slack
+//         DETERMINISTIC on purpose (the zeroed grown tail in ResizeIOMAGE,
+//         byte_order.md 4.2), with MscsUnitTests/golden_ref.p2p gating it byte
+//         for byte across operating systems. Persisting the tag would not
+//         corrupt anything: free-block contents are never read back, an old
+//         build loads a new image and a new build loads an old one, the only
+//         cost being no backward merge until the block is freed again. What it
+//         WOULD do is make an image saved by a patched build differ from one
+//         saved by an unpatched build, which is precisely the drift that gate
+//         exists to catch. So the tag stays in memory, where it belongs: Save
+//         scrubs, writes, and re-stamps.
+//       : Bounded like every other walk of this list -- the links come off the
+//         wire and can be made cyclic. Refer P2PmsgHeap_AllocBSTRio.
+void
+P2PmsgHeap_ScrubFoots ( P2PmsgHANDLE hVBList, bool bRestore ) noexcept
+{
+    if ( hVBList == nullptr )
+      return;
+    VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    VBLaddr aFree = 0;
+    if ( pHandle->uVBListType == P2PmsgHeap_IOMAGE )
+      aFree = VBHeapRoot_GetFree ( pHandle->u.IOMAGE.pRoot );
+    else if ( pHandle->uVBListType == P2PmsgHeap_BSTRio )
+      aFree = pHandle->u.BSTRio.pBSTRio->oKeys.aFree;
+    else
+      return;                          // SYS heaps are never serialised
+
+    const VBLsize nMaxFree = P2PmsgHeap_MaxBlocks ( hVBList );
+    VBLsize       nWalked  = 0;
+    while ( aFree )
+    {
+      if ( ++nWalked > nMaxFree )
+        return;                        // Cyclic; say nothing, this is a courtesy pass
+      VBHeap *pFree = VBList2PhysVBHeap ( hVBList, aFree );
+      if ( pFree == nullptr )
+        return;
+      if ( bRestore )
+      {
+        P2PmsgHeap_StampFoot ( hVBList, aFree );
+      }
+      else
+      {
+        const VBLsize nSizeof = VBHeap_Sizenn ( pFree );
+        if ( VBHeap_IsFree(pFree)                             &&
+             nSizeof >= P2PmsgHeap_FootMin(pHandle->uAddrType) &&
+             aFree + nSizeof <= pHandle->nSizeofAlloc             )
+          memset ( (char *)pFree + nSizeof - sizeof(VBHeapFoot), 0, sizeof(VBHeapFoot) );
+      }
+      aFree = VBHeap_GetNext ( pFree, 0 );
+    }
 }
 
 UINT
@@ -1178,23 +1378,58 @@ P2PmsgHeapSYS_AssertValid ( P2PmsgHANDLE hP2PmsgHeap ) noexcept
 //  Returns:     bResult
 //                 true... Validated
 //                 false.. Failed
-bool
-P2PmsgHeap_AssertValidAllocSYS ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
+//
+//  TWO ENTRY POINTS, ONE BODY, and the parameter below is what separates them.
+//
+//  P2PmsgHeap_AssertValidAllocSYS is not a predicate and never has been: when
+//  the block is not Linked it SETS THE BIT and carries on, which is the hack
+//  its own TODO admits to. VBLock_Init (P2PmsgVBLock.cpp:327) stamps
+//  `uVBLock | VBLock_Alloc` and no Linked bit at all, so the repair is live
+//  code on a fresh block rather than a theoretical arm. Wrapped in ASSERT(...)
+//  -- which is how P2Pmsg.cpp called it -- what Release loses is therefore not
+//  a check but a WRITE, and the two builds leave different bytes in the block.
+//
+//  So a caller that wants to REFUSE on the answer cannot use it: promoting the
+//  call out of the ASSERT would start running an image write in Release. The
+//  split is what makes the promotion available. bRepair gates the write AND the
+//  assertions together, because they are the same job -- a developer aid on a
+//  heap this process owns, where a broken invariant is our bug and stopping on
+//  it is right. The pure form is for the other job: a caller about to say no by
+//  name, which wants an answer and nothing else, in every build.
+//
+//  The pure form is exactly this body with bRepair false, rather than a second
+//  copy of the checks, so the two cannot drift apart and answer differently.
+static bool
+P2PmsgHeap_ValidAllocSYS ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock, bool bRepair )
 {
     bool          bResult = true;
     VBListHANDLE *pHandle = (VBListHANDLE *)hP2PmsgHeap;
     if ( IsBadWritePtr((void*)aVBLock,4) )
-    {  ASSERT(0); return false; }      // Out of range
+    {  if (bRepair) ASSERT(0); return false; }      // Out of range
     VBLock       *pVBLock = (VBLock *)P2PmsgHeap_Addr2Phys ( hP2PmsgHeap, aVBLock );
     if ( !VBLock_IsLinked(pVBLock) )   // TODO:LJM this hack needs tidying up
-    { bResult = false; ASSERT(bResult);if(!VBLock_IsFree(pVBLock)&&VBLock_IsAddr(pVBLock,pHandle->uAddrType)&&VBLock_IsAlloc(pVBLock))pVBLock->oHdr.uVBLockDefs|=VBLock_Linked;}
+    { bResult = false; if (bRepair) { ASSERT(bResult);if(!VBLock_IsFree(pVBLock)&&VBLock_IsAddr(pVBLock,pHandle->uAddrType)&&VBLock_IsAlloc(pVBLock))pVBLock->oHdr.uVBLockDefs|=VBLock_Linked; } }
     if ( !VBLock_IsAlloc(pVBLock) )
-    { bResult = false; ASSERT(0); }
+    { bResult = false; if (bRepair) ASSERT(0); }
     if (  VBLock_IsFree(pVBLock) )
-    { bResult = false; ASSERT(0); }
+    { bResult = false; if (bRepair) ASSERT(0); }
     if ( !VBLock_IsAddr(pVBLock,pHandle->uAddrType) )
-    { bResult = false; ASSERT(0); }
+    { bResult = false; if (bRepair) ASSERT(0); }
     return bResult;
+}
+//  The repairing form. Unchanged in behaviour, name and every byte it writes.
+bool
+P2PmsgHeap_AssertValidAllocSYS ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
+{
+    return P2PmsgHeap_ValidAllocSYS ( hP2PmsgHeap, aVBLock, true );
+}
+//  The pure form. No write on any path, and no assertion either: its callers
+//  refuse by name, and §38 deleted two assertions for sitting four lines above
+//  a correct named refusal.
+bool
+P2PmsgHeap_IsValidAllocSYS ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
+{
+    return P2PmsgHeap_ValidAllocSYS ( hP2PmsgHeap, aVBLock, false );
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -1283,6 +1518,10 @@ P2PmsgHeap_AssertValidIOMAGE(hVBList);
       VBHeap *pFreeLast = (VBHeap *)P2PmsgHeap_Addr2Phys ( hVBList, aFreeLast );
       VBHeap_SetNext ( pFreeLast, aVBLockExtra );
     }
+
+    //  The grown tail is a free block like any other, and it is the one most
+    //  worth tagging: it is what the block below it merges into.
+    P2PmsgHeap_StampFoot ( hVBList, aVBLockExtra );
 
     // Tidy up, and
 ASSERT(VBHeap_IsLinked(pVBLockExtra));
@@ -1705,29 +1944,45 @@ P2PmsgHeap_AssertValidFree ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
 //  Returns:     bResult
 //                 true... Validated
 //                 false.. Failed
-bool
-P2PmsgHeap_AssertValidAllocBSTRio ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
+//  The same split as the SYS arm above, for the same reason and with one extra
+//  guard on the write: this arm judges IMAGE bytes, so the repair was already
+//  skipped inside P2PmsgHeap_UntrustedGate. bRepair is the second condition on
+//  it, not a replacement for the first -- a gate says "these bytes are not ours
+//  to fix", bRepair says "this caller did not ask anyone to fix anything".
+static bool
+P2PmsgHeap_ValidAllocBSTRio ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock, bool bRepair )
 {
     bool          bResult = true;
     VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hP2PmsgHeap);
     if ( !P2PmsgHeap_BlockFits ( hP2PmsgHeap, aVBLock ) )
-    {  VBHEAP_ASSERT0(); return false; }      // Out of range, or straddling the end
+    {  if (bRepair) VBHEAP_ASSERT0(); return false; }  // Out of range, or straddling the end
     VBLock       *pVBLock = (VBLock *)P2PmsgHeap_Addr2Phys ( hP2PmsgHeap, aVBLock );
     if ( !VBLock_IsAlloc(pVBLock) )
-    { bResult = false; VBHEAP_ASSERT0(); }
+    { bResult = false; if (bRepair) VBHEAP_ASSERT0(); }
     //  The repair below sets a flag bit IN THE IMAGE. On a heap we own that is
     //  the hack its comment says it is; on an image off a socket it is the
     //  validator writing to the bytes it was asked to judge, so it is skipped
     //  inside a gate and the block is simply refused.
     if ( !VBLock_IsLinked(pVBLock) )   // TODO:LJM this hack needs tidying up
-    { bResult = false; VBHEAP_ASSERT0();if(!P2PmsgHeap_InUntrustedGate()&&!VBLock_IsFree(pVBLock)&&VBLock_IsAddr(pVBLock,pHandle->uAddrType)&&VBLock_IsAlloc(pVBLock))pVBLock->oHdr.uVBLockDefs|=VBLock_Linked;}
+    { bResult = false; if (bRepair) { VBHEAP_ASSERT0();if(!P2PmsgHeap_InUntrustedGate()&&!VBLock_IsFree(pVBLock)&&VBLock_IsAddr(pVBLock,pHandle->uAddrType)&&VBLock_IsAlloc(pVBLock))pVBLock->oHdr.uVBLockDefs|=VBLock_Linked; } }
     if (  VBLock_IsFree(pVBLock) )
-    { bResult = false; VBHEAP_ASSERT0(); }
+    { bResult = false; if (bRepair) VBHEAP_ASSERT0(); }
     if ( !VBLock_IsAddr(pVBLock,pHandle->uAddrType) )
-    { bResult = false; VBHEAP_ASSERT0(); }
+    { bResult = false; if (bRepair) VBHEAP_ASSERT0(); }
     return bResult;
 }
+bool
+P2PmsgHeap_AssertValidAllocBSTRio ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
+{
+    return P2PmsgHeap_ValidAllocBSTRio ( hP2PmsgHeap, aVBLock, true );
+}
+bool
+P2PmsgHeap_IsValidAllocBSTRio ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
+{
+    return P2PmsgHeap_ValidAllocBSTRio ( hP2PmsgHeap, aVBLock, false );
+}
 #define P2PmsgHeap_AssertValidAllocIOMAGE P2PmsgHeap_AssertValidAllocBSTRio
+#define P2PmsgHeap_IsValidAllocIOMAGE     P2PmsgHeap_IsValidAllocBSTRio
 
 bool
 P2PmsgHeap_AssertValidBSTRio ( P2PmsgHANDLE hP2PmsgHeap )
@@ -2122,6 +2377,10 @@ P2PmsgHeap_ResizeBSTRio( P2PmsgHANDLE hVBList, VBLsize nSizeofExtra, bool bOvers
       VBHeap_SetNext ( pFreeLast, aVBLockExtra );
     }
 
+    //  The grown tail is a free block like any other, and it is the one most
+    //  worth tagging: it is what the block below it merges into.
+    P2PmsgHeap_StampFoot ( hVBList, aVBLockExtra );
+
     // Tidy up, and
 ASSERT(VBHeap_IsLinked(pVBLockExtra));
 ASSERT(VBHeap_IsAlloc(pVBLockExtra));
@@ -2399,8 +2658,11 @@ TOP:VBLsize nSizeof     = VBLock_Hdr_u_SizeNN ( pVBLock );
       else if ( uVBLock == VBLock_Addr08 )
         pVBLock->oHdr.u.nSize08 += pVBLockNext->oHdr.u.nSize08;
       pVBLockNext->oHdr.uVBLockDefs = 0;       
+      //  The block just grew, so its tag moved with its end.
+      P2PmsgHeap_StampFoot ( hVBList, aVBLock );
       goto TOP;
     }
+    P2PmsgHeap_StampFoot ( hVBList, aVBLock );
     return nSizeof;
 }
 VBLsize
@@ -2474,8 +2736,11 @@ TOP:VBLsize nSizeof     = VBLock_Hdr_u_SizeNN ( pVBLock );
       else if ( uVBLock == VBLock_Addr08 )
         pVBLock->oHdr.u.nSize08 += pVBLockNext->oHdr.u.nSize08;
       pVBLockNext->oHdr.uVBLockDefs = 0;       
+      //  The block just grew, so its tag moved with its end.
+      P2PmsgHeap_StampFoot ( hVBList, aVBLock );
       goto TOP;
     }
+    P2PmsgHeap_StampFoot ( hVBList, aVBLock );
     return nSizeof;
 }
 
@@ -2543,6 +2808,9 @@ ASSERT(VBHeap_IsFree(pVBLockFree));
       VBHeap_SetNext ( VBList2PhysVBHeap(hVBList,aVBLockPrev), aVBLockExtra );
     if ( aVBLockNext )
       VBHeap_SetPrev ( VBList2PhysVBHeap(hVBList,aVBLockNext), aVBLockExtra );
+    //  A brand new free block, so it needs a tag of its own. Without this the
+    //  remainder of every split is invisible to the block after it.
+    P2PmsgHeap_StampFoot ( hVBList, aVBLockExtra );
 //ASSERT(VBHeap_IsAddr(pVBLockExtra,pHandle->uAddrType));
 //ASSERT(VBHeap_IsFree(pVBLockExtra));
 //ASSERT(VBHeap_IsAlloc(pVBLockExtra));
@@ -2632,6 +2900,9 @@ ASSERT(VBHeap_IsFree(pVBLockFree));
       VBHeap_SetNext ( VBList2PhysVBHeap(hVBList,aVBLockPrev), aVBLockExtra );
     if ( aVBLockNext )
       VBHeap_SetPrev ( VBList2PhysVBHeap(hVBList,aVBLockNext), aVBLockExtra );
+    //  A brand new free block, so it needs a tag of its own. Without this the
+    //  remainder of every split is invisible to the block after it.
+    P2PmsgHeap_StampFoot ( hVBList, aVBLockExtra );
 //ASSERT(VBHeap_IsAddr(pVBLockExtra,pHandle->uAddrType));
 //ASSERT(VBHeap_IsFree(pVBLockExtra));
 //ASSERT(VBHeap_IsAlloc(pVBLockExtra));
@@ -2702,6 +2973,30 @@ P2PmsgHeap_AssertValidAlloc ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock )
     if ( pHandle->uVBListType == P2PmsgHeap_BSTRio )
       return P2PmsgHeap_AssertValidAllocBSTRio(hVBHeap,aVBLock);
     ASSERT(0);
+    return false;
+}
+//
+//  The same question, asked by a caller that is about to act on the answer.
+//  Answers TRUE only where AssertValidAlloc would have answered true WITHOUT
+//  repairing anything first, writes nothing on any arm, and raises nothing:
+//  every caller of this one refuses by name, and an assertion four lines above
+//  a correct named refusal is what §38 deleted two sites for.
+//
+//  An unrecognised heap type answers false here rather than ASSERT(0)-ing.
+//  The repairing form keeps its marker because it has nothing else to say; this
+//  one has a caller that will say it properly.
+bool
+P2PmsgHeap_IsValidAlloc ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock )
+{
+    const VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBHeap);
+    if ( pHandle == nullptr )
+      return false;
+    if ( pHandle->uVBListType == P2PmsgHeap_IOMAGE )
+      return P2PmsgHeap_IsValidAllocIOMAGE(hVBHeap,aVBLock);
+    if ( pHandle->uVBListType == P2PmsgHeap_SYSTEM )
+      return P2PmsgHeap_IsValidAllocSYS(hVBHeap,aVBLock);
+    if ( pHandle->uVBListType == P2PmsgHeap_BSTRio )
+      return P2PmsgHeap_IsValidAllocBSTRio(hVBHeap,aVBLock);
     return false;
 }
 
@@ -3305,10 +3600,13 @@ P2PmsgHeap_CreateBSTRio ( VBListBSTRio *pBSTRio, VBLsize nBufferLen )
     // that is the C4 mistake exactly: the structure is checked in the build
     // nobody ships.
     //
-    // Only this overload is changed. The single-argument one keeps its ASSERT,
-    // because it is for images this process just built, where the walk is a
-    // developer aid and not a gate -- and because running it there would make
-    // every ordinary heap creation pay for a full block walk.
+    // The single-argument overload KEEPS that ASSERT, because it is for images
+    // this process just built, where the walk is a developer aid and not a gate
+    // -- and because running it unconditionally would make every ordinary heap
+    // creation pay for a full block walk. What it no longer does is run it
+    // inside this gate: see the note at the ASSERT itself. THIS is the only
+    // structural gate on the untrusted BSTRio path, and the walk now happens
+    // exactly once per load rather than twice.
     if ( !P2PmsgHeap_AssertVBlocksBSTRio ( hVBList ) )
     {
       // Free the handle but NOT the image. P2PmsgHeap_Close deletes
@@ -3338,10 +3636,32 @@ P2PmsgHeap_CreateBSTRio ( VBListBSTRio *pBSTRio )
       EVERR->MODULE
            ->Message("Not BSTRio heap type")
            ->Throw();
-    if ( !P2PmsgHeap_AssertValidBSTRio(pBSTRio) )
-      EVERR->MODULE
-           ->Message("Corrupted BSTRio heap")
-           ->Throw();
+    // BUGFIX: removed P2PmsgHeap_AssertValidBSTRio(pBSTRio) and the "Corrupted
+    // BSTRio heap" refusal that hung off it. It is the BSTRio twin of the type
+    // confusion P2PmsgHeap_InitIOMAGE removed for the Linux port, and it was
+    // not merely usually a no-op here, it was ALWAYS one -- P2PmsgHANDLE is
+    // `void *` (Msgcore.h:35), so passing a VBListBSTRio* compiles silently,
+    // and the validator's first act is static_cast<VBListHANDLE*> followed by
+    // an early `return true` when the byte at the uVBListType offset is not
+    // P2PmsgHeap_BSTRio. That byte is offset 4, which in VBListHANDLE is
+    // uVBListType (after the 4-byte atomic nRefCount) and in a VBListBSTRio is
+    // the low byte of oDefs.uComp2 -- the COMPLEMENT of the type byte. The
+    // IsBSTRio test two lines above has just insisted that uComp2 == ~uDefs1
+    // exactly, so the byte read is ~P2PmsgHeap_BSTRio, and no 8-bit value is
+    // its own complement. The early return was therefore unconditional and the
+    // refusal below it unreachable, on every image, in every build.
+    //
+    // Measured before removing, over §32's nineteen-image corpus: answered
+    // `true` with zero assertions and zero bytes changed on all fifteen BSTRio
+    // images, the four corrupt ones included. And measured the other way too,
+    // which is what decides the shape of the fix: handed the HANDLE it is
+    // contracted to take, the same walk still answers `true` on all thirteen it
+    // can be run on, because outside a gate its VBHEAP_DIAGs assert and REPAIR
+    // rather than setting bResult false -- on f11_collate_nogrow.dat it
+    // rewrites the image's free-list keys. So the correctly-typed call is not a
+    // refusal this path was missing; it is a WRITE this path does not want. The
+    // structural gate on the untrusted path is the walk at the call site above,
+    // and on this path it is the assertion at the end of this function.
     // The BSTRio half of the same check (M6). aSize1 and the addressing width
     // both come off the wire; nSizeofMax below is derived from the second and
     // nSizeofAlloc from the first, so without this they can disagree from the
@@ -3386,7 +3706,30 @@ P2PmsgHeap_CreateBSTRio ( VBListBSTRio *pBSTRio )
     // TODO: Delete above sequence ^^^
 
     // Tidy up, and
-    ASSERT(P2PmsgHeap_AssertVBlocksBSTRio(pHandle));
+    //  NOT inside a gate -- the BSTRio half of the note the IOMAGE twin carries
+    //  at the same place above, and the last call site on either arm that did
+    //  not have it.
+    //
+    //  The assertion is kept, because a TRUSTED caller handing this overload a
+    //  corrupt image is a bug in that caller and worth stopping on. What it must
+    //  not do is fire for the length-validated overload, which opens a gate and
+    //  is about to run this very walk again and refuse on its answer. Two things
+    //  went wrong when it did, and the second is the sharper one:
+    //
+    //    * the image was walked TWICE per load, once to assert about it and once
+    //      to decide about it; and
+    //    * every check INSIDE the walk is already gate-aware -- VBHEAP_ASSERT0
+    //      and VBHEAP_DIAG stay silent inside a gate and feed bResult instead --
+    //      so the walk's own diagnostics were correctly quiet and this one
+    //      ungated ASSERT on its RETURN VALUE fired in their place. The gate did
+    //      not merely fail to suppress the noise: it CREATED it. Outside a gate
+    //      the same walk rewrites the key block to agree with the blocks it
+    //      counted and answers true, so the assertion does not fire; inside a
+    //      gate it refuses to rewrite, answers false, and the assertion fires on
+    //      exactly the images the gate was about to reject by name. Four of the
+    //      nineteen images in the corpus did that, all four at this line.
+    if ( !P2PmsgHeap_InUntrustedGate() )
+      ASSERT(P2PmsgHeap_AssertVBlocksBSTRio(pHandle));
     return pHandle;
 }
 
@@ -3411,6 +3754,28 @@ P2PmsgHeap_AddRef ( P2PmsgHANDLE hVBHeap )
     VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBHeap);
                   pHandle -> nRefCount++;
     return hVBHeap;
+}
+//
+//  How many holders this heap has
+//  NOTES: The count AddRef raises and Close lowers, read rather than changed.
+//         One means the caller asking is the only holder there is: nothing
+//         else in the process can reach this heap, so nothing else can be
+//         looking at anything on it.
+//       : IT COUNTS HOLDERS OF THE HEAP, NOT NAMES FOR A BLOCK. Two holders
+//         may name two different blocks, so >1 does not establish that any
+//         particular block is shared -- it establishes only that the question
+//         is open. ==1 is the half that settles, and it settles it for every
+//         block on the heap at once. Refer P3PmsgObject::IsSole, which is the
+//         reason this is readable.
+//       : A null handle answers 0, which is neither: there is no heap, and
+//         where the block is instead is a question for the object.
+int
+P2PmsgHeap_RefCount ( P2PmsgHANDLE hVBHeap ) noexcept
+{
+    if ( hVBHeap == nullptr )
+      return 0;
+    const VBListHANDLE *pHandle = static_cast<const VBListHANDLE *>(hVBHeap);
+    return pHandle -> nRefCount.load ( );
 }
 
 BOOL
@@ -3705,6 +4070,14 @@ P2PmsgHeap_FreeBSTRio ( P2PmsgHANDLE hVBList, VBLaddr aVBLock )
     pVBHeap->oHdr.uVBLockDefs &= ~VBLock_TypeMask;
     nSizeof = P2PmsgHeap_CollateBSTRio ( hVBList, aVBLock );
 
+    //  BACKWARDS -- refer P2PmsgHeap_FreeIOMAGE for the whole of it. Same
+    //  defect, same repair, and deliberately the same shape: both arms walk
+    //  and merge by the same rules, so a fix that lands on one of them and not
+    //  the other is how they drift.
+    VBLaddr aPrevFree = P2PmsgHeap_PrevFree ( hVBList, aVBLock );
+    if ( aPrevFree )
+      P2PmsgHeap_CollateBSTRio ( hVBList, aPrevFree );
+
     // Triggers
     CMapTriggers *pTriggers = pHandle->u.BSTRio.pCMapTriggers;
     if ( pTriggers )
@@ -3753,6 +4126,17 @@ P2PmsgHeap_FreeIOMAGE ( P2PmsgHANDLE hVBList, VBLaddr aVBLock )
     pHandle->nFreeEntries++;
     pVBHeap->oHdr.uVBLockDefs &= ~VBLock_TypeMask;
     nSizeof = P2PmsgHeap_CollateIOMAGE ( hVBList, aVBLock );
+
+    //  BACKWARDS, which is the half this heap never had. Collate only ever
+    //  looks forward, so the line above merges anything free that sits AFTER
+    //  this block and stops. If the block before it is also free, the two are
+    //  adjacent and should be one -- and now that a free block carries its size
+    //  in its tail, the predecessor can be found. Collating FROM it absorbs
+    //  this block by the same forward path, so there is no second merge routine
+    //  to keep in step with the first.
+    VBLaddr aPrevFree = P2PmsgHeap_PrevFree ( hVBList, aVBLock );
+    if ( aPrevFree )
+      P2PmsgHeap_CollateIOMAGE ( hVBList, aPrevFree );
 
     // Tidy up, and
     pHandle -> bDirty = true;          // Triggers dirty flag
@@ -4018,6 +4402,11 @@ ASSERT(VBHeap_IsFree(pVBLock));
 ASSERT(VBHeap_IsAddr(pVBLock,pHandle->uAddrType));
 ASSERT(VBHeap_IsAlloc(pVBLock));
 ASSERT(VBHeap_IsLinked(pVBLock));
+      //  Still first-fit, unlike the two live arms, and deliberately so: the
+      //  closer-fit walk is an IMPROVEMENT, so a revived copy of this function
+      //  would merely allocate the way the library used to. F11b's bound is a
+      //  SAFETY property and had to be carried here for the reason its note
+      //  gives; a better choice of block does not.
       if ( VBHeap_Sizenn(pVBLock) < nSizeof )
       {
         aVBLockFree = VBHeap_GetNext ( pVBLock, 0 );
@@ -4067,10 +4456,15 @@ P2PmsgHeap_AllocIOMAGE ( P2PmsgHANDLE hVBList, VBLsize& nSizeof )
     // NOTES: Normal behaviour is to simply allocate and fall
     //        through.  Re-sizing is the exception
 //P2PmsgHeap_AssertValidBSTRio(hVBHeap);
-    int     nResizes = 0;              // F10; see AllocBSTRio
-    VBLsize nWalked  = 0;              // F11b; see AllocBSTRio
+    int     nResizes  = 0;             // F10; see AllocBSTRio
+    VBLsize nWalked   = 0;             // F11b; see AllocBSTRio
+    bool    bFirstFit = false;         // see the re-check below, and kMaxFitWalk
     const VBLsize nMaxFree = P2PmsgHeap_MaxBlocks ( hVBList );
 TOP:nWalked = 0;                       // per pass -- the walk restarts at the head
+    //  Closer fit, reset per pass. Refer kMaxFitWalk.
+    VBLaddr aVBLockBest = 0;
+    VBLsize nSizeofBest = 0;
+    VBLsize nFits       = 0;
     VBLaddr aVBLockFree = VBHeapRoot_GetFree(pHandle->u.IOMAGE.pRoot);
 //TOP:VBLaddr aVBLockFree = pHandle->u.BSTRio.pBSTRio->oKeys.aFree;
     while ( aVBLockFree )
@@ -4093,10 +4487,75 @@ ASSERT(VBHeap_IsAddr(pVBLock,pHandle->uAddrType));
 ASSERT(VBHeap_IsAlloc(pVBLock));
 ASSERT(VBHeap_IsLinked(pVBLock));
 ASSERT(VBHeap_IsAddr(pVBLock,pHandle->uAddrType));
-      if ( VBHeap_Sizenn(pVBLock) < nSizeof )
+      const VBLsize nSizeofFree = VBHeap_Sizenn ( pVBLock );
+      if ( nSizeofFree < nSizeof )
       {
         aVBLockFree = VBHeap_GetNext ( pVBLock, 0 );
         continue;
+      }
+
+      //  CLOSER FIT. A block that cannot be split is taken at once: the
+      //  remainder would be too small to be a free block, so SplitAlloc hands
+      //  the whole of it over (refer its "VBLock adoption" branch) and nothing
+      //  further along the list can better no waste at all.
+      if ( bFirstFit ||
+           nSizeofFree - nSizeof < VBList_VBHeapMin(pVBLock->oHdr.uVBLockDefs) )
+      {
+        aVBLockBest = aVBLockFree;
+        break;
+      }
+      if ( aVBLockBest == 0 || nSizeofFree < nSizeofBest )
+      {
+        aVBLockBest = aVBLockFree;
+        nSizeofBest = nSizeofFree;
+      }
+      if ( ++nFits >= kMaxFitWalk )
+        break;
+      aVBLockFree = VBHeap_GetNext ( pVBLock, 0 );
+    }
+
+    if ( aVBLockBest )
+    {
+      //  THE CHOSEN BLOCK IS RE-CHECKED, because the walk that chose it also
+      //  collates, and collating absorbs the block that physically FOLLOWS the
+      //  one collated. The free list is in no address order, so a block visited
+      //  late in the walk can sit immediately before a block chosen early in
+      //  it, and swallow it. An absorbed block has its defs byte zeroed (refer
+      //  the assignment in P2PmsgHeap_CollateIOMAGE), so the predicates below
+      //  catch it rather than allocating from the middle of another block.
+      //
+      //  The answer is one more pass with bFirstFit set, which takes the first
+      //  block that fits the moment it finds it. THAT pass cannot go stale --
+      //  nothing is collated between finding the block and allocating it -- so
+      //  the retry is taken at most once, and the throw below cannot be reached
+      //  by any heap this allocator built.
+      //
+      //  There is no ASSERT on the retry flag here. Reaching the second pass
+      //  with it already set means the free list does not describe this image,
+      //  which is a condition that matters outside Debug -- so it throws, by
+      //  name, four lines below. Asserting it as well only puts a dialog in
+      //  front of a refusal that is already correct. Refer the register's
+      //  item 19: if the condition matters in Release, throw; if it does not,
+      //  do not assert it either.
+      aVBLockFree = aVBLockBest;
+      pVBLock     = VBList2PhysVBHeap ( hVBList, aVBLockFree );
+      if ( pVBLock == nullptr                         ||
+           !VBHeap_IsAddr(pVBLock,pHandle->uAddrType) ||
+           !VBHeap_IsAlloc(pVBLock)                   ||
+           !VBHeap_IsLinked(pVBLock)                  ||
+           !VBHeap_IsFree(pVBLock)                    ||
+           VBHeap_Sizenn(pVBLock) < nSizeof              )
+      {
+        if ( !bFirstFit )
+        {
+          bFirstFit = true;
+          goto TOP;
+        }
+        EVERR->MODULE->AFP(aVBLockFree)
+             ->Message(L"P2PmsgHeap_AllocIOMAGE: the chosen free block did not"
+                      L" survive the walk -- free list does not describe this"
+                      L" image" )
+             ->Throw();
       }
 
       // Allocated
@@ -4186,10 +4645,15 @@ P2PmsgHeap_AllocBSTRio ( P2PmsgHANDLE hVBList, VBLsize& nSizeof )
     //  and a cycle must revisit one. Same argument and same helper as the
     //  free-list walk in P2PmsgHeap_AssertValidIOMAGE -- this is that guard
     //  applied to the allocator, not a new idea.
-    int     nResizes = 0;
-    VBLsize nWalked  = 0;
+    int     nResizes  = 0;
+    VBLsize nWalked   = 0;
+    bool    bFirstFit = false;         // see the re-check below, and kMaxFitWalk
     const VBLsize nMaxFree = P2PmsgHeap_MaxBlocks ( hVBList );
 TOP:nWalked = 0;                       // per pass -- the walk restarts at the head
+    //  Closer fit, reset per pass. Refer kMaxFitWalk.
+    VBLaddr aVBLockBest = 0;
+    VBLsize nSizeofBest = 0;
+    VBLsize nFits       = 0;
     VBLaddr aVBLockFree = pHandle->u.BSTRio.pBSTRio->oKeys.aFree;
     while ( aVBLockFree )
     {
@@ -4205,10 +4669,75 @@ ASSERT(VBHeap_IsFree(pVBLock));
 ASSERT(VBHeap_IsAddr(pVBLock,pHandle->uAddrType));
 ASSERT(VBHeap_IsAlloc(pVBLock));
 ASSERT(VBHeap_IsLinked(pVBLock));
-      if ( VBHeap_Sizenn(pVBLock) < nSizeof )
+      const VBLsize nSizeofFree = VBHeap_Sizenn ( pVBLock );
+      if ( nSizeofFree < nSizeof )
       {
         aVBLockFree = VBHeap_GetNext ( pVBLock, 0 );
         continue;
+      }
+
+      //  CLOSER FIT. A block that cannot be split is taken at once: the
+      //  remainder would be too small to be a free block, so SplitAlloc hands
+      //  the whole of it over (refer its "VBLock adoption" branch) and nothing
+      //  further along the list can better no waste at all.
+      if ( bFirstFit ||
+           nSizeofFree - nSizeof < VBList_VBHeapMin(pVBLock->oHdr.uVBLockDefs) )
+      {
+        aVBLockBest = aVBLockFree;
+        break;
+      }
+      if ( aVBLockBest == 0 || nSizeofFree < nSizeofBest )
+      {
+        aVBLockBest = aVBLockFree;
+        nSizeofBest = nSizeofFree;
+      }
+      if ( ++nFits >= kMaxFitWalk )
+        break;
+      aVBLockFree = VBHeap_GetNext ( pVBLock, 0 );
+    }
+
+    if ( aVBLockBest )
+    {
+      //  THE CHOSEN BLOCK IS RE-CHECKED, because the walk that chose it also
+      //  collates, and collating absorbs the block that physically FOLLOWS the
+      //  one collated. The free list is in no address order, so a block visited
+      //  late in the walk can sit immediately before a block chosen early in
+      //  it, and swallow it. An absorbed block has its defs byte zeroed (refer
+      //  the assignment in P2PmsgHeap_CollateBSTRio), so the predicates below
+      //  catch it rather than allocating from the middle of another block.
+      //
+      //  The answer is one more pass with bFirstFit set, which takes the first
+      //  block that fits the moment it finds it. THAT pass cannot go stale --
+      //  nothing is collated between finding the block and allocating it -- so
+      //  the retry is taken at most once, and the throw below cannot be reached
+      //  by any heap this allocator built.
+      //
+      //  There is no ASSERT on the retry flag here. Reaching the second pass
+      //  with it already set means the free list does not describe this image,
+      //  which is a condition that matters outside Debug -- so it throws, by
+      //  name, four lines below. Asserting it as well only puts a dialog in
+      //  front of a refusal that is already correct. Refer the register's
+      //  item 19: if the condition matters in Release, throw; if it does not,
+      //  do not assert it either.
+      aVBLockFree = aVBLockBest;
+      pVBLock     = VBList2PhysVBHeap ( hVBList, aVBLockFree );
+      if ( pVBLock == nullptr                         ||
+           !VBHeap_IsAddr(pVBLock,pHandle->uAddrType) ||
+           !VBHeap_IsAlloc(pVBLock)                   ||
+           !VBHeap_IsLinked(pVBLock)                  ||
+           !VBHeap_IsFree(pVBLock)                    ||
+           VBHeap_Sizenn(pVBLock) < nSizeof              )
+      {
+        if ( !bFirstFit )
+        {
+          bFirstFit = true;
+          goto TOP;
+        }
+        EVERR->MODULE->AFP(aVBLockFree)
+             ->Message(L"P2PmsgHeap_AllocBSTRio: the chosen free block did not"
+                      L" survive the walk -- free list does not describe this"
+                      L" image" )
+             ->Throw();
       }
 
       // Allocated
@@ -4526,7 +5055,24 @@ static int nCount = 1;
       ASSERT(VBHeap_IsLinked(pVBHeap));//TODO: delete
       ASSERT(VBHeap_IsFree(pVBHeap));//TODO: delete
       ASSERT(VBHeap_IsAddr(pVBHeap,uVBLock));
-      P2PmsgHeap_AssertValidBSTRio ( pBSTRio );
+      // BUGFIX: removed P2PmsgHeap_AssertValidBSTRio(pBSTRio) here. It is the
+      // line-for-line twin of the call P2PmsgHeap_InitIOMAGE removed below, and
+      // the note there applies word for word: the image BUFFER is passed to a
+      // validator that expects a VBListHANDLE*, which static_casts it and reads
+      // uVBListType/uAddrType out of the image's own bytes. The IOMAGE form
+      // early-returned "usually"; this one early-returns ALWAYS, because the
+      // byte at the uVBListType offset of a VBListBSTRio is the low byte of
+      // oDefs.uComp2 and this function has just written it as ~uDefs1, whose
+      // low byte is ~P2PmsgHeap_BSTRio. Not a sampled developer aid firing one
+      // time in a hundred: nothing at all, one time in a hundred.
+      //
+      // Nothing replaces it. The four ASSERTs above already test this block,
+      // and they test it through the block pointer rather than through a
+      // handle-shaped reading of the image. Calling the validator on a real
+      // handle is not available here -- there is no handle at this point, the
+      // caller has not built one yet -- and it would be the wrong thing anyway:
+      // outside a gate that walk REPAIRS the keys this function has just
+      // written, which is a validator undoing the initialiser.
       nCount = 1;
     }
 }

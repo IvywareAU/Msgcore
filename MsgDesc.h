@@ -132,12 +132,19 @@ class Msgcore_EXT P3PmsgDesc
       virtual P3PmsgItem&
         operator [] ( LPCTNAM lpszName );
 
+      //  `if ( oDesc )` and nothing else.  Refer P3PmsgObject::operator bool.
+      explicit
         operator bool ( ) const;
 
     // Chained reference exposures
     public:
       const P3PmsgObject&
         r_Object ( ) const noexcept;
+
+      //  How many references on hVBList this collection and the cursor it owns
+      //  are holding.  Refer P3PmsgField::HeapHolders.
+      int
+        HeapHolders ( P2PmsgHANDLE hVBList ) const noexcept;
 
     // Memory management
     public:

@@ -1,0 +1,56 @@
+=== BUILD (dll) ===
+C4LoadTest.cpp
+
+=== RUN ===
+[1 ] round-trip      : Save=OK Load=OK
+[2 ] evil IOMAGE     : file=4096 bytes, header declares 16777215
+
+[ERROR] []P2PmsgMgr::Load(lpszFilename=c4_evil.iom)
+Pre-sentinel message image (layout generation 0)
+ADVICE	: Parsed under this build's layout, unverified
+[2 ] Load(evil)      : rejected FALSE (OK)
+[3 ] read while saver alive: OK (shared) (Save=OK)
+[4 ] Load while saver alive: OK (concurrent) (Save=OK)
+[5 ] save-back after load : Load=OK Save()=OK
+[6 ] atomic save         : Save=OK tempLeft=no(OK) Load=OK
+
+[ERROR] []P2PmsgMgr::Save((LPCTSTR)strTarget=Z:\no_such_dir_xyz\c4_bad.dat)
+The system cannot find the path specified.
+[HRESULT=3]
+
+Save: could not acquire write lock (concurrent writer?)
+[7 ] save to bad path    : failed cleanly (OK)
+
+[ERROR] []P2PmsgMgr::Save((LPCTSTR)strTarget=c4_lock.dat)
+The process cannot access the file because it is being used by another process.
+[HRESULT=32]
+
+Save: could not acquire write lock (concurrent writer?)
+[8 ] save blocked by lock: held=yes Save=blocked (OK)
+[9 ] F1 BSTRio       : file=49 bytes, header declares 2032, aAlloc=0x30
+[9 ] Load(F1)        : rejected FALSE (OK)
+[10] oversize BSTRio : file=4096 bytes, header declares 131072
+[10] Load(oversize)  : rejected FALSE (OK)
+C:\_Dev\_ClaudeCode\MSCS\Msgcore\MsgVBHeap.cpp(3609) : Assertion failed!
+[11] zero-filled BSTRio : rejected (OK)
+[12] M6 Addr16 churn : refused at 65535 bytes -> 'Attempt to exceed maximum P2PmsgHeap size of 65535 bytes'
+
+[ERROR] []P2PmsgHeap_Alloc(uVBLock=0x04, nSizeofBlock=150u)
+Attempt to exceed maximum P2PmsgHeap size of 65535 bytes
+
+[ERROR] []P2PmsgHeap_CheckCreateWidth(uAddrType=0x00)
+Addr08 is not a supported heap addressing width (use VBLock_Addr16, VBLock_Addr32 or VBLock_Addr64)
+[12b] Addr08 create  : refused -> 'Addr08 is not a supported heap addressing width (use VBLock_Addr16, VBLock_Addr32 or VBLock_Addr64)'
+[13] F2 walk OOB     : file=519 bytes, header declares 516
+C:\_Dev\_ClaudeCode\MSCS\Msgcore\MsgVBHeap.cpp(3609) : Assertion failed!
+[13] Load(F2)        : rejected (OK)
+[14] Addr16 arena    : file=65537 bytes, header declares Addr16 over 65537
+[14] Load(Addr16)    : rejected -> 'Image declares a 0x10001-byte arena, past the 0xffff addressable by the Addr16 width it also declares'
+[15] F3 IOMAGE walk  : file=4096 bytes, header declares 4096 (truthful)
+
+[ERROR] []P2PmsgMgr::Load(lpszFilename=c4_f3_iomage_walk.iom)
+Pre-sentinel message image (layout generation 0)
+ADVICE	: Parsed under this build's layout, unverified
+[15] Load(F3)        : rejected -> 'IOMAGE block structure is corrupt'
+
+C4 Save/Load test: PASS

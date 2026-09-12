@@ -90,6 +90,10 @@
 #include "wtypes.h"
 #include "P2Pmsg.h"
 #include "MsgAttr.h"
+//  P3PmsgDesc must be COMPLETE here: P2Pos2Path takes the address of
+//  r_Desc() for P3Pmsg_GetPath. It arrived transitively through MsgCurs.h
+//  and now says so.
+#include "MsgDesc.h"
 #include "MsgList.h"
 #include "MsgVect.h"
 #include "MsgCurs.h"
@@ -295,6 +299,52 @@ class Msgcore_EXT P2PmsgMgr : public P3PmsgItem
 
     // Attributes
     protected:
+      //  THE STORE'S OWN REFERENCE ON ITS HEAP, and the one holder
+      //  P3PmsgField::HeapHolders does not account for.
+      //  NOTES: P2PmsgMgr IS a P3PmsgField (P3PmsgItem is a typedef for one) and
+      //         inherits HeapHolders and IsSole unchanged, which is correct: no
+      //         member declared below is a P3PmsgObject or holds one, and
+      //         nothing in P2PmsgMgr.cpp news a P3Pmsg sub-object and caches it.
+      //         The inherited walk is therefore already complete over every VIEW
+      //         a manager owns -- its attributes, its descendants, its stack and
+      //         the cursors those keep.
+      //       : WHAT IS LEFT OVER IS THIS HANDLE. P2PmsgHeap_Create* mints it at
+      //         nRefCount == 1 and ~P2PmsgMgr closes it, so a manager holds its
+      //         heap once MORE than the walk claims and P2PmsgHeap_RefCount is
+      //         exactly HeapHolders() + 1 for a store nobody else is holding.
+      //         That is an undercount, which leaves IsSole() FALSE, which
+      //         promises nothing -- the safe direction, since TRUE is a
+      //         guarantee and FALSE is not the opposite one.
+      //       : IT IS NOT SUBTRACTED, DELIBERATELY. The rule the walk rests on is
+      //         an object rule: every path that gives a P3PmsgObject a non-zero
+      //         m_hVBList AddRefs it, so a live object whose handle is this
+      //         handle IS one reference, and refs minus mine is the number of
+      //         OTHER VIEWS. This handle is not a view -- it is not a
+      //         P3PmsgObject, it was never Connect()ed and it names no block --
+      //         and counting it would change what the equality means. It would
+      //         also report the guarantee for the one block on the heap that
+      //         needs no counted reference to name it. Measured, this is worse
+      //         than "a function of the handle": the store root is at the
+      //         literal constant 48 on every store, at every addressing width,
+      //         with or without a tree -- P2PmsgHeap_Connect() returns it and
+      //         GetP2Pos() answers 48. So P3PmsgField(h,48,0), built from an
+      //         exported handle and nothing else, reaches this manager's own
+      //         item and can write a grandchild one statement after a
+      //         subtracting store answered sole=true. The premise the count
+      //         rests on everywhere else -- that a block cannot be named
+      //         without a counted reference to reach it through -- is the one
+      //         premise that does not hold here, and it fails by a constant
+      //         rather than by a derivation.
+      //       : EVERY OTHER SOLE OBJECT IS ON A SYSTEM HEAP, where that premise
+      //         holds without exception: P2PmsgHeap_Connect and
+      //         P2PmsgHeap_IsRoot fall through to ASSERT(0) and hand back ~0u,
+      //         so a SYS handle names nothing. The store is the only case, and
+      //         it is the case the subtraction would have covered. A raw handle
+      //         held without an AddRef is already outside the count; refer the
+      //         NOTES on P3PmsgObject::IsSole.
+      //       : Pinned by Test_SoleManagerHoldsItsHeap in tests/MsgcoreSuite.cpp,
+      //         which asserts the shortfall is exactly one and the numbers that
+      //         make it up.
       P2PmsgHANDLE     m_hMgr{NULL};
       HANDLE           m_hFile{INVALID_HANDLE_VALUE};
       CString          m_strFilename;
