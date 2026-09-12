@@ -443,18 +443,34 @@ P3PmsgBSTR::r_data  ( )
     return m_oItem;
 }
 
+// Declared in P2PmsgBSTR.h beside Sizeof but never defined - any caller was
+// an unresolved external at link time. The same one-line delegation to the
+// heap that Sizeof and IsDirty are: the packed image this object wraps.
+void*
+P3PmsgBSTR::VBLockBSTR_vp ( )
+{
+    return P2PmsgHeap_pIOmage ( m_hBSTR );
+}
+
 VBLsize
 P3PmsgBSTR::Sizeof ( ) const
 {
     return P2PmsgHeap_Sizeof ( m_hBSTR );
 }
 
-// Declared in P2PmsgBSTR.h beside Sizeof but never defined - any caller was
-// an unresolved external at link time. It is the same one-line delegation to
-// the heap that Sizeof is. (IsFragmented, declared next to it, still has no
-// definition: unlike dirtiness there is no P2PmsgHeap primitive behind it,
-// so supplying one would be inventing a policy rather than wiring an
-// existing one.)
+// As VBLockBSTR_vp: declared beside Sizeof and never defined, any caller an
+// unresolved external. This one delegates to BSTR_INITIAL_SiZE, the constant
+// every constructor above already uses as the size a P3PmsgBSTR gets when
+// none is given explicitly - wiring an existing policy rather than inventing
+// one. (IsFragmented, declared next to it, was deleted rather than defined:
+// unlike this and Sizeof there is no P2PmsgHeap primitive or existing
+// constant behind it. P3PmsgVect::IsName's precedent, section 37.)
+VBLsize
+P3PmsgBSTR::SetDefaultSizeof ( )
+{
+    return BSTR_INITIAL_SiZE;
+}
+
 bool
 P3PmsgBSTR::IsDirty ( )
 {

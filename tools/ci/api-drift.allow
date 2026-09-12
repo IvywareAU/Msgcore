@@ -842,15 +842,15 @@ cxx-to-c  P2PmsgMgr::TriggerDELETE    # as TriggerINSERT, with MSGCORE_TRIGGER_D
 #  Msgcore_c.cpp:250-255); a second export would be the same capability under a
 #  second name, and the flat surface has one way to make each thing on purpose.
 #
-#  SharedMode is the interesting one and it is not a decision about the C API at
-#  all. Its body compares its argument to m_dwSharedMode and returns the argument,
-#  assigning nothing (P2PmsgMgr.cpp:519-526). Binding it would export a no-op with a
-#  name that promises file sharing. That is a defect in P2PmsgMgr.cpp recorded as
-#  one, the same way section 37 recorded P3PmsgVect::IsName -- and it is why
-#  Factory's dwSharedMode overload cannot be treated as carrying share modes either.
+#  SharedMode WAS the interesting one: it used to compare its argument to
+#  m_dwSharedMode and return the argument, assigning nothing (P2PmsgMgr.cpp:519-526).
+#  That no-op was recorded as a defect (What is left, §44) and is now fixed --
+#  it assigns m_dwSharedMode and returns TRUE. It stays off the flat surface
+#  regardless: no C caller has a use for it, since the active Load/Save paths
+#  do not consult m_dwSharedMode either (see the note at their CreateFile calls).
 cxx-to-c  P2PmsgMgr::Attacheap    # the ctor's heap-attach step, reached from the inside by msgcore_mgr_create; takes a P3PmsgData&
 cxx-to-c  P2PmsgMgr::Factory    # msgcore_mgr_open_file is this call (Msgcore_c.cpp:253); a static returning an owning raw pointer adds nothing
-cxx-to-c  P2PmsgMgr::SharedMode    # assigns nothing and returns its argument (P2PmsgMgr.cpp:519-526); a binding would export a no-op
+cxx-to-c  P2PmsgMgr::SharedMode    # a real setter now (What is left, §44); no C caller has a use for m_dwSharedMode today
 #
 #  16. RewindCurs DROPS THE SUB-OBJECTS A FIELD CACHES, AND A FLAT CALLER HAS NONE
 #  OF THEM. Its body deletes m_pP3PmsgAttr, m_pP3PmsgDesc and m_pMsgStck
@@ -891,10 +891,14 @@ cxx-to-c  P3PmsgField::RewindCurs    # deletes the field's cached attr/desc/stck
 #  release; it is written down here so the next reader does not have to rediscover
 #  it. Not carried today.
 #
-#  Three of these are declared and never defined -- IsFragmented, SetDefaultSizeof
-#  and VBLockBSTR_vp have no body in any .cpp in the repository, and P2PmsgBSTR.cpp:450-456
-#  says so about IsFragmented in its own words. They are P3PmsgVect::IsName's case
-#  from section 37, three more times: a binding would not link.
+#  Three of these were declared and never defined -- IsFragmented, SetDefaultSizeof
+#  and VBLockBSTR_vp had no body in any .cpp in the repository, P3PmsgVect::IsName's
+#  case from section 37, three more times (What is left, §44). IsFragmented is now
+#  deleted outright, on IsName's own precedent: there is no P2PmsgHeap primitive
+#  behind it, so defining one would have been inventing a policy rather than wiring
+#  an existing one. SetDefaultSizeof and VBLockBSTR_vp are now defined -- each a
+#  one-line delegation, like Sizeof and IsDirty beside them -- and stay off this
+#  surface for the ordinary reasons below rather than for failing to link.
 cxx-to-c  P3PmsgBSTR::Init    # takes P2PmsgHANDLE or P3PmsgData&; the surface spells no msgcore_bstrio_ function of any kind
 cxx-to-c  P3PmsgBSTR::InitData    # as Init, with a P3PmsgData&
 cxx-to-c  P3PmsgBSTR::InitItem    # as Init, with a VBLockBSTR type code and a P3PmsgData&
@@ -911,6 +915,5 @@ cxx-to-c  P3PmsgBSTR::GetP2Pmsgnn    # the image's addressing-width code; the st
 cxx-to-c  P3PmsgBSTR::SetDefaultP2Pmsgnn    # a static default for the above; process-wide state the flat ABI has no call shape for
 cxx-to-c  P3PmsgBSTR::GetDefaultP2Pmsgnn    # as SetDefaultP2Pmsgnn, reading
 cxx-to-c  P3PmsgBSTR::IsDirty    # asks P2PmsgHeap_IsDirty of the image's heap handle (P2PmsgBSTR.cpp:457-463); msgcore_mgr_is_dirty is the store's version
-cxx-to-c  P3PmsgBSTR::IsFragmented    # declared at P2PmsgBSTR.h:208 and defined nowhere (see P2PmsgBSTR.cpp:450-456); a binding would not link
-cxx-to-c  P3PmsgBSTR::SetDefaultSizeof    # declared at P2PmsgBSTR.h:206 and defined nowhere; as IsFragmented
-cxx-to-c  P3PmsgBSTR::VBLockBSTR_vp    # declared at P2PmsgBSTR.h:202 and defined nowhere; and it returns a void* into the packed image
+cxx-to-c  P3PmsgBSTR::SetDefaultSizeof    # returns BSTR_INITIAL_SiZE (P2PmsgBSTR.cpp), process-wide state the flat ABI has no call shape for, as SetDefaultP2Pmsgnn above
+cxx-to-c  P3PmsgBSTR::VBLockBSTR_vp    # returns a void* into the packed image; exporting it publishes the wire layout as ABI, as PrepareP2Piomage above

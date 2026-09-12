@@ -518,11 +518,8 @@ P2PmsgMgr::Save ( LPCTSTR lpszFilename, bool bDefragment )
 BOOL
 P2PmsgMgr::SharedMode ( DWORD dwSharedMode )
 {
-    
-    if ( dwSharedMode == m_dwSharedMode )
-      return dwSharedMode;
-
-    return dwSharedMode;
+    m_dwSharedMode = dwSharedMode;
+    return TRUE;
 }
 
 BOOL

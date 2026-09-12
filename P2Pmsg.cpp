@@ -3167,13 +3167,13 @@ P3PmsgObject::Msg2Size ( VBLaddr aVBLockAddr ) const
 P2Pos
 P3PmsgObject::GetP2Pos ( ) const noexcept
 {
-    ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock)); //TODO:LJM 64bit
+    ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_IsValidAlloc(m_hVBList,m_aVBLock)); //TODO:LJM 64bit
     return m_aVBLock;
 }
 char*
 P3PmsgObject::GetVBLock ( ) const
 {
-    ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock));
+    ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_IsValidAlloc(m_hVBList,m_aVBLock));
     if ( m_aVBLock == (VBLaddr)&m_oVBLock[0] )
       return (char*)&m_oVBLock[0];
     if ( m_hVBList )
@@ -3183,7 +3183,7 @@ P3PmsgObject::GetVBLock ( ) const
 VBLaddr
 P3PmsgObject::GetVBLocknn ( ) const
 {
-    ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock));
+    ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_IsValidAlloc(m_hVBList,m_aVBLock));
     return m_aVBLock;
 }
 VBLsize
@@ -3282,8 +3282,10 @@ P3PmsgObject::AssertValid ( ) const
       EVERR -> Module ( __FUNCTION__ )
             -> Message("Encountered unlinked VBLock object" )
             -> Throw();
-    if ( m_hVBList )
-      P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock);
+    if ( m_hVBList && !P2PmsgHeap_IsValidAlloc(m_hVBList,m_aVBLock) )
+      EVERR -> Module ( __FUNCTION__ )
+            -> Message("Corrupted allocation" )
+            -> Throw();
     if ( m_aVBLock                           &&
          m_aVBLock != (VBLaddr)&m_oVBLock[0] &&
          m_hVBList ==           NULL            )
@@ -3313,7 +3315,7 @@ BOOL
 P3PmsgObject::AssertValidAddr ( VBLaddr aVBLockAddr )
 {
     if ( m_hVBList )
-      return P2PmsgHeap_AssertValidAlloc ( m_hVBList, aVBLockAddr );
+      return P2PmsgHeap_IsValidAlloc ( m_hVBList, aVBLockAddr );
     return aVBLockAddr == (VBLaddr)&m_oVBLock[0] ? TRUE : FALSE;
 }
 

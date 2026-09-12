@@ -4983,58 +4983,97 @@ which is an image-format change. The one correction left behind is in the NOTES 
 the handle alone". It is less than that and worse: it is a constant, 48, needing no handle
 to be guessed. Sharpening that sentence is a NOTES edit and the owner's to make.
 
-## 44. What is left
+## 44. The pure form reaches every site, `SharedMode` assigns, and two names get bodies
 
-This list had four entries at `4e897f7`, nine at `46a63f8`, ten at `1e5c442` and nine after
-a round that closed seven. It was not a backlog. It was a ledger of everything anybody
-noticed, and it could not reach zero, because closing an entry means reading the code
-beside it and the code beside it always has something.
+`10c7004` closed "What is left" to three entries: a repairing validator five call sites
+lean on, a setter that assigns nothing, and three `P3PmsgBSTR` members with no body. All
+three are now fixed, in one pass, because they were one pass's worth of reading.
 
-**An entry here names a defect with a consequence somebody can hit.** Not an observation, not
-a measurement somebody has not taken, not a thing this document declined to do, and not a
-suggestion about an API. Those live in the section that found them, which is where a reader
-meets them with the evidence attached. Three things qualify.
+### The pure form reaches every site that wanted it
 
-- **A documented predicate repairs the heap, and its only caller throws the repair away.**
-  `P3PmsgObject::AssertValidAddr` (`P2Pmsg.cpp:3313`) says in its own header comment that it
-  returns "TRUE... Valid address / FALSE.. Invalid address", and its body is
-  `return P2PmsgHeap_AssertValidAlloc ( m_hVBList, aVBLockAddr );` -- the repairing form §39
-  measured writing `VBLock_Linked` into a block. Asking the question mutates the heap. Its
-  one caller is `ASSERT(m_oObject.AssertValidAddr(aDesc))` (`MsgDesc.cpp:258`), so under
-  `NDEBUG` the call and the repair vanish together, and Debug and Release leave different
-  bytes behind. `P3PmsgObject::AssertValid` (`:3272`) is the same defect with the other
-  polarity: a bare `P2PmsgHeap_AssertValidAlloc(m_hVBList,m_aVBLock);` at `:3286` whose
-  return value is discarded, so the repair is the only reason the line exists and it runs in
-  Release too. `P2Pmsg.cpp:3170`, `:3176` and `:3186` are the same lost write again. They are
-  one defect and one fix: the pure `P2PmsgHeap_IsValidAlloc` §39 split out
-  (`MsgVBHeap.h:298`) is what they all want, and the conversion is mechanical.
+`P2PmsgHeap_IsValidAlloc` already existed -- §39 split it out of the repairing
+`P2PmsgHeap_AssertValidAlloc` and converted two call sites with it (`P2Pmsg.cpp:2934`,
+`:2981`). The five sites `10c7004` named get the same swap. `P3PmsgObject::GetP2Pos`,
+`GetVBLock` and `GetVBLocknn` (`P2Pmsg.cpp:3170`, `:3176`, `:3186`) each had
+`ASSERT(...||P2PmsgHeap_AssertValidAlloc(...))`; the callee changed and nothing else did,
+because the classifier reads all three as `predicate` and always has -- the condition is
+`a==0||b==0||f(...)`, not a bare call, so this moves no baseline figure. `AssertValidAddr`
+(`:3315-3319`) is the mechanical case the entry called out by name: its return value IS the
+caller's assertion (`ASSERT(m_oObject.AssertValidAddr(aDesc))`, `MsgDesc.cpp:258`), so
+`return P2PmsgHeap_IsValidAlloc(...)` in place of the repairing form is the whole fix.
 
-- **`P2PmsgMgr::SharedMode` is a no-op that looks like a setter.** `P2PmsgMgr.cpp:519-526`
-  compares its argument and returns it, assigning nothing, so a caller that sets a sharing
-  mode gets the mode back and no sharing mode. Either it assigns `m_dwSharedMode` or it
-  should not be a member.
+`P3PmsgObject::AssertValid` (`:3272-3295`) was the one member of the five that could not
+take the mechanical swap and stop, because its call was bare and its return value was
+already being thrown away -- the repair was the only reason the line existed. Swapping the
+callee alone would have left a call to a pure predicate whose answer nobody reads, which is
+not a fix, it is the same defect with a quieter symptom. `AssertValid` throws on every other
+corruption it finds, so this one now does too: `if ( m_hVBList &&
+!P2PmsgHeap_IsValidAlloc(m_hVBList,m_aVBLock) ) EVERR->...->Throw()` (`:3285-3288`),
+consistent with the checks on either side of it rather than silent either way it used to be.
 
-- **Three members are declared and defined nowhere.** `P3PmsgBSTR::VBLockBSTR_vp`
-  (`P2PmsgBSTR.h:202`), `::SetDefaultSizeof` (`:206`) and `::IsFragmented` (`:208`);
-  `P2PmsgBSTR.cpp:454` already says so about the last one in its own words. The first caller
-  meets `LNK2019` against a member the header offers. §37 found the same defect on
-  `P3PmsgVect::IsName` and it was closed by deleting the declaration, on the ground that
-  removing a member with no working caller cannot break anything that compiles today. That
-  precedent settles `IsFragmented`; `SetDefaultSizeof` is a setter rather than a predicate
-  and may want defining instead.
+### `SharedMode` assigns now
 
-That is the whole of it. The per-block reference count is not listed: it is a standing
-property of the storage layer, §26 states it, and restating it in five consecutive rounds
-made it look like work somebody was going to do. The chain question is not listed either --
-§32 asked all nineteen images and answered it. Two additions the flat surface could carry
-are argued in `tools/ci/api-drift.allow` where the decision gets made, not here.
+`P2PmsgMgr::SharedMode` (`P2PmsgMgr.cpp:519-522`) is `m_dwSharedMode = dwSharedMode; return
+TRUE;`. Nothing in the tree calls it for its return value -- grepped, not assumed -- so there
+was no contract to preserve beyond the name doing what it says. It stays off the flat
+surface: the active `Load` and `Save` paths do not consult `m_dwSharedMode` either
+(`P2PmsgMgr.cpp:185-191` hardcodes `FILE_SHARE_READ|FILE_SHARE_WRITE`, `:465` hardcodes `0`
+for the temp file), so a C caller would gain a working setter for a field two of the three
+paths that could read it still ignore. `tools/ci/api-drift.allow` is reworded to say so
+instead of the old "assigns nothing," which stopped being true the moment this landed.
 
-The `^` grammar was settled at §28. §29 to §43 measured what the settling touched, and
-every case they opened has an answer pinned by a test or by a gate that runs on every push.
-Five gates now pass together, which they had not done on any commit since `d2763ce`.
+### `P3PmsgBSTR` links
+
+`IsFragmented` (`P2PmsgBSTR.h:208` before this) is deleted outright -- `P3PmsgVect::IsName`'s
+precedent from §37, applied on the same ground: no `P2PmsgHeap` primitive answers
+fragmentation, so a body would have been a policy invented for the occasion, not one wired
+in. `SetDefaultSizeof` and `VBLockBSTR_vp` took the branch `10c7004` left open for one of the
+three, because both have something to delegate to that `IsFragmented` did not. `SetDefaultSizeof`
+(`P2PmsgBSTR.cpp:469-472`) returns `BSTR_INITIAL_SiZE`, the constant every constructor in
+the file already uses as the size a `P3PmsgBSTR` gets when none is given.
+`VBLockBSTR_vp` (`:450-453`) returns `P2PmsgHeap_pIOmage(m_hBSTR)`, the same heap primitive
+`Sizeof` and `IsDirty` delegate to beside it. Both are one line, like their neighbours;
+`tools/ci/api-drift.allow` keeps both off the flat surface, for the ordinary reasons already
+argued next to `PrepareP2Piomage` and `SetDefaultP2Pmsgnn` rather than for failing to link.
+
+### Measured, not assumed
+
+Debug|x64 (`Msgcore(2022).vcxproj`, the toolset available to check this on) rebuilds clean:
+0 errors, no warning at any of the changed lines. The unit suite passes unchanged in both
+link modes -- 263 cases / 1423 checks static, 247 / 1330 dll, the same figures `e42cf19`
+recorded before this round touched anything, which is what "no regression" means when four
+of those cases (`Test_IsValidAllocIsPure`, `tests/MsgcoreSuite.cpp:5848-5914`) already probe
+`IsValidAlloc` and `AssertValidAlloc` by name and by byte. The C4 Save/Load
+test passes. `check_asserts.ps1` reports `callwrap 245`, `marker 209`, `predicate 183` --
+the same three figures as before, confirming the five swaps above really do all classify as
+`predicate`. `check_api_drift.ps1` reports zero UNTRIAGED and flags neither of the two
+reworded entries as stale or redundant.
+
+Nothing new was found reading the code beside these three. That is worth stating plainly,
+because `10c7004` opened by observing that a ledger like this one "could not reach zero."
+This time it does.
 
 
-## 45. Reproducing this document
+## 45. What is left
+
+Nothing is. §44 closed the only three entries this document was carrying, and reading the
+code around each of them turned up no fourth. That is not a claim that this repository is
+defect-free -- only that every consequence-bearing defect forty-four sections of deliberate
+reading found now has a fix, a citation, and a gate or a test that would catch its return.
+
+The per-block reference count was never on this list and still is not: it is a standing
+property of the storage layer, §26 states it, and restating it here would be the same mistake
+`10c7004` named -- an observation dressed as an open item. The chain question is closed by
+measurement, not by omission -- §32 asked all nineteen images and none carries a chain longer
+than one link. Two flat-surface additions a caller might still want are argued in
+`tools/ci/api-drift.allow`, where that decision belongs, not here.
+
+The `^` grammar was settled at §28. §29 to §44 measured what the settling touched, and every
+case they opened has an answer pinned by a test or by a gate that runs on every push. Five
+gates pass together, and now so does a sixth reader's check: nothing left standing open.
+
+
+## 46. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 

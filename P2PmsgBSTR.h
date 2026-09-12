@@ -205,8 +205,6 @@ class Msgcore_EXT P3PmsgBSTR
       static VBLsize
         SetDefaultSizeof ( );
       bool
-        IsFragmented ( );
-      bool
         IsDirty ( );
 
     // Attributes
