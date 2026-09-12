@@ -733,6 +733,7 @@
 ?SetAccess@P3PmsgField@@QEAAEEE@Z
 ?SetAttr@P3PmsgData@@UEAAEEE@Z
 ?SetDefaultP2Pmsgnn@P3PmsgBSTR@@SAXE@Z
+?SetDefaultSizeof@P3PmsgBSTR@@SA_KXZ
 ?SetDirty@P2PmsgMgr@@UEAAHH@Z
 ?SetFParam@P2Pevent@@QEAAPEAV1@PEAV1@@Z
 ?SetFParam@P2Pevent@@QEAAPEAV1@PEB_WAEBVP3PmsgData@@@Z
@@ -769,6 +770,7 @@
 ?Truncate@P3PmsgList@@UEAAXXZ
 ?Truncate@P3PmsgVect@@UEAAXXZ
 ?UsesTextOutput@P2Pevent@@SA_NXZ
+?VBLockBSTR_vp@P3PmsgBSTR@@QEAAPEAXXZ
 ?VBLockItem_pData@@YAPEAUVBLockData@@EPEAUVBLockItem@@@Z
 ?VBLockItem_pField@@YAPEAUVBLockField@@EPEAUVBLockItem@@@Z
 ?VBLockItem_pName@@YAPEAUVBLockName@@EPEAUVBLockItem@@@Z
