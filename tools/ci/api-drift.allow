@@ -917,3 +917,46 @@ cxx-to-c  P3PmsgBSTR::GetDefaultP2Pmsgnn    # as SetDefaultP2Pmsgnn, reading
 cxx-to-c  P3PmsgBSTR::IsDirty    # asks P2PmsgHeap_IsDirty of the image's heap handle (P2PmsgBSTR.cpp:457-463); msgcore_mgr_is_dirty is the store's version
 cxx-to-c  P3PmsgBSTR::SetDefaultSizeof    # returns BSTR_INITIAL_SiZE (P2PmsgBSTR.cpp), process-wide state the flat ABI has no call shape for, as SetDefaultP2Pmsgnn above
 cxx-to-c  P3PmsgBSTR::VBLockBSTR_vp    # returns a void* into the packed image; exporting it publishes the wire layout as ABI, as PrepareP2Piomage above
+
+
+# ---------------------------------------------------------------------------------
+#  THE FOUR Sizeof MEMBERS, which this file could not have carried until now.
+# ---------------------------------------------------------------------------------
+#  These arrived together, and not because anybody wrote them: check_api_drift.ps1's
+#  own extractor had been dropping them since the day it was written. Its keyword
+#  guard rejected candidates named in a C++ keyword list using PowerShell's
+#  -notcontains, which is case-INSENSITIVE, so Sizeof went out with sizeof and Delete
+#  with delete -- eleven public members across the nine headers that were never
+#  scanned, never bound and never banked. stack_paths.md section 37 measured the
+#  Sizeof half and named the line, and nothing closed it; the Delete half was never
+#  reported at all, and both were found again auditing that entry. Seven of the eleven
+#  bound on the first corrected run with no work at all (P2PmsgMgr::Sizeof against
+#  msgcore_mgr_sizeof, and six Delete members against msgcore_attr_delete,
+#  msgcore_curs_delete, msgcore_desc_delete, msgcore_vect_delete,
+#  msgcore_field_delete_item and msgcore_list_delete_at). These four are the residue,
+#  and they are triaged on arrival rather than banked as UNTRIAGED, because a backlog
+#  entry created by a tooling bug on the day the bug is fixed would be the check
+#  lying about its own history.
+#
+#  WHY NOT SIMPLY EXPORT THEM, when msgcore_mgr_sizeof exists and is the same shape.
+#  Because the two shapes are not the same, and the difference is what the store's
+#  version is safe to publish and these are not. P2PmsgMgr::Sizeof is
+#  P2PmsgHeap_Sizeof(m_hMgr) (P2PmsgMgr.cpp:1504-1508) -- how many bytes the store's
+#  heap allocation occupies. That number says nothing about how anything inside it is
+#  arranged, so it cannot be read as a promise about layout, and a host budgeting a
+#  buffer has an honest use for it. The three below are the opposite: each computes
+#  the size of a PACKED VBLock RECORD out of the struct definitions, so the number IS
+#  the layout, one field at a time. Exporting it publishes the wire format as ABI and
+#  freezes it for 1.x, which is the reason already recorded for PrepareP2Piomage and
+#  P2PiomageSize above, and it is worth more here because a size is easy to mistake
+#  for a harmless integer. The fourth is a family question, not a layout one.
+#
+#  If a flat caller ever does need a per-object footprint, the thing to export is a
+#  heap-allocation byte count in msgcore_mgr_sizeof's mould, not these. That is an
+#  addition to the supported surface and a version bump, as msgcore_field_is_sole and
+#  the buffer-serialisation pair above are, and it belongs to whoever owns the
+#  release. Not carried today.
+cxx-to-c  P3PmsgField::Sizeof    # sizeof(VBLockField) arithmetic over VBLockName and VBLockData (P2Pmsg.cpp:4315-4321); the number IS the packed record layout, as P2PiomageSize above
+cxx-to-c  P3PmsgList::Sizeof    # VBLockList_Sizeof(uVBLock) + the field's (MsgList.cpp:706-711); same layout argument, and it is keyed on a whole VBLock type byte of which only VBLock_AddrMask is read
+cxx-to-c  P3PmsgVect::Sizeof    # VBLockVect_Sizeof(uVBLock) + the field's (MsgVect.cpp:1104-1109); as P3PmsgList::Sizeof
+cxx-to-c  P3PmsgBSTR::Sizeof    # P2PmsgHeap_Sizeof of the image's heap handle (P2PmsgBSTR.cpp:456-459), so the layout argument does NOT apply -- it is off the surface for the reason its whole class is, the surface spells no msgcore_bstrio_ function at all

@@ -1,6 +1,6 @@
 # The `^` stack path operator
 
-> Status: current as of 2026-09-12. Describes `T_StckDelim` — the third path delimiter —
+> Status: current as of 2026-09-14. Describes `T_StckDelim` — the third path delimiter —
 > what it was for, why no path could use it, and what it resolves to now. Every listing and
 > every line of output below was run against this tree; §6, §7 and §40 say how to
 > reproduce them. §8 is a heap finding that is not about `^` at all.
@@ -5054,26 +5054,220 @@ because `10c7004` opened by observing that a ledger like this one "could not rea
 This time it does.
 
 
-## 45. What is left
+## 45. The check's own extractor, and the eleven members it never scanned
 
-Nothing is. §44 closed the only three entries this document was carrying, and reading the
-code around each of them turned up no fourth. That is not a claim that this repository is
-defect-free -- only that every consequence-bearing defect forty-four sections of deliberate
-reading found now has a fix, a citation, and a gate or a test that would catch its return.
+§44 ended by saying that a ledger which "could not reach zero" had reached it. It had not.
+The entry that was still open is in §37, written down, measured, and never closed: the API
+drift gate's extractor had been dropping members since the day it was written, and one of
+the things it dropped was the question it exists to ask.
 
-The per-block reference count was never on this list and still is not: it is a standing
-property of the storage layer, §26 states it, and restating it here would be the same mistake
-`10c7004` named -- an observation dressed as an open item. The chain question is closed by
-measurement, not by omission -- §32 asked all nineteen images and none carries a chain longer
-than one link. Two flat-surface additions a caller might still want are argued in
-`tools/ci/api-drift.allow`, where that decision belongs, not here.
+### What §37 saw, and the half it missed
 
-The `^` grammar was settled at §28. §29 to §44 measured what the settling touched, and every
-case they opened has an answer pinned by a test or by a gate that runs on every push. Five
-gates pass together, and now so does a sixth reader's check: nothing left standing open.
+§37's last paragraph (`stack_paths.md:3884-3890`) reads *"And `Sizeof` has never been
+scanned, on any class"*, names the line, names the cause, and closes with the observation
+that makes the omission sting: *"the check's own extractor is the last place anybody
+looks."* Nothing in §38 to §44 went back for it. §45 then declared the ledger empty, which
+is how an entry that was found, understood and written out in full ends up outliving four
+sections that were each looking for exactly this kind of thing.
+
+It also missed half of itself. The guard throws out more than `Sizeof`.
+
+### The mechanism, in one operator
+
+`check_api_drift.ps1` is line-based rather than a C++ parser, so `if (`, `return (` and
+`sizeof(` all look like member declarations to it. It rejects them against a keyword list:
+
+```powershell
+$kw = @('if','for','while','switch','return','sizeof','catch',
+        'throw','new','delete','static_cast', ... )
+if ($kw -notcontains $cand) { $name = $cand }      # <-- this one
+```
+
+**PowerShell's comparison operators are case-insensitive by default.** `-notcontains` is
+not a spelling of `-cnotcontains` with the same meaning; it is a different test, and the
+difference is the whole defect:
+
+```
+Sizeof             -notcontains=False   -cnotcontains=True
+sizeof             -notcontains=False   -cnotcontains=False
+Delete             -notcontains=False   -cnotcontains=True
+SetDefaultSizeof   -notcontains=True    -cnotcontains=True
+Deleted            -notcontains=True    -cnotcontains=True
+```
+
+Only whole-name collisions are hit, which is why this never looked like a wholesale
+failure: `SetDefaultSizeof` and `Deleted` were scanned all along, and `Sizeof` beside them
+was not. Two keywords in the list have a member of the same name in these headers —
+`sizeof` and `delete` — and a member is not required to avoid a keyword's spelling in a
+different case, so nothing about the code being scanned was ever wrong.
+
+This is the third instance of one shape. `ConvertTo-Snake` broke a word at a digit and
+spelled `GetP2Pos` as `get_p2_pos` (§42); `check_asserts.ps1`'s classifier matched a letter
+case-insensitively and mis-sorted a seventh form (§40); the guard above rejects a name for
+a keyword it only resembles. All three are matcher **false negatives**, and the script's own
+header says why that is the error to hunt for: false negatives inflate the backlog and look
+like honest work outstanding, which is the more flattering of the two mistakes. These
+eleven did not even inflate the backlog — they left both sides of the ledger, so the gate
+reported green over a scope quietly eleven members smaller than the one it claimed.
+
+### Sixteen declarations, eleven in scope
+
+Sixteen declarations across the nine configured headers are named `Sizeof` or `Delete`,
+eight of each. Five are outside the extractor's scope for reasons that are correct:
+`P3PmsgData::Sizeof` (`P2Pmsg.h:337`) and `P3PmsgName::Sizeof` (`:483`) belong to classes
+`api-drift.config.psd1` deliberately maps to no family, and `P3PmsgField16::Sizeof`
+(`:1048`) and `::Delete` (`:1016`) to a class it does not map at all. `P3PmsgDesc::Delete`
+is declared twice (`MsgDesc.h:174` and `:176`, two overloads under one name) and counts
+once.
+
+Eleven unique members remain, and the gate's own figure agrees to the member: **286 scanned
+before the fix, 297 after.**
+
+### Seven had a binding waiting
+
+The corrected guard needed no other work to find them:
+
+```
+P2PmsgMgr::Sizeof   -> msgcore_mgr_sizeof
+P3PmsgAttr::Delete  -> msgcore_attr_delete        P3PmsgCurs::Delete -> msgcore_curs_delete
+P3PmsgDesc::Delete  -> msgcore_desc_delete        P3PmsgVect::Delete -> msgcore_vect_delete
+P3PmsgField::Delete -> msgcore_field_delete_item     (prefix fallback)
+P3PmsgList::Delete  -> msgcore_list_delete_at        (prefix fallback)
+```
+
+Bound moves 85 to 92. §37 predicted one of these by name — *"one has an exact binding
+waiting, `P2PmsgMgr::Sizeof` against `msgcore_mgr_sizeof`, so the honest count is really
+82"* — and the arithmetic it did then is the arithmetic that comes out now, against a
+denominator §42 has since moved.
+
+### The four that did not, and why a size is not a size
+
+`P3PmsgField::Sizeof`, `P3PmsgBSTR::Sizeof`, `P3PmsgList::Sizeof` and `P3PmsgVect::Sizeof`
+reach no binding, and they are triaged in `tools/ci/api-drift.allow` on arrival rather than
+banked as UNTRIAGED. A backlog entry created by a tooling bug, on the day that bug is fixed,
+would be the check lying about its own history.
+
+The obvious objection is that `msgcore_mgr_sizeof` exists and these are the same shape, so
+the surface should simply carry them. The shapes are not the same, and the difference
+decides it. `P2PmsgMgr::Sizeof` is `P2PmsgHeap_Sizeof(m_hMgr)` (`P2PmsgMgr.cpp:1504-1508`)
+— how many bytes the store's heap allocation occupies. That number says nothing about how
+anything inside it is arranged, so it cannot be read as a promise about layout, and a host
+budgeting a buffer has an honest use for it. Three of the four are the opposite:
+
+```cpp
+P3PmsgField::Sizeof ( ) const                       // P2Pmsg.cpp:4315-4321
+{
+    VBLsize nSizeof = sizeof(VBLockField)
+                    - sizeof(VBLockName) + P3PmsgName::Sizeof()
+                    - sizeof(VBLockData) + P3PmsgData::Sizeof();
+    return nSizeof;
+}
+```
+
+The number IS the packed record layout, computed one member at a time out of the struct
+definitions; `P3PmsgList::Sizeof` and `P3PmsgVect::Sizeof` are `VBLockList_Sizeof(uVBLock)`
+and `VBLockVect_Sizeof(uVBLock)` plus that (`MsgList.cpp:706-711`, `MsgVect.cpp:1104-1109`).
+Exporting any of them publishes the wire format as ABI and freezes it for 1.x, which is the
+reason already recorded beside `PrepareP2Piomage` and `P2PiomageSize`, and it is worth more
+here because a size looks like a harmless integer in a way a `void*` into a packed image
+does not.
+
+The fourth is not a layout question and is not triaged as one. `P3PmsgBSTR::Sizeof` is
+`P2PmsgHeap_Sizeof(m_hBSTR)` (`P2PmsgBSTR.cpp:456-459`) — the same allocation-size shape
+as the manager's, so the argument above does not reach it. It stays off the surface for the
+reason its entire class does: `Msgcore_c.h` spells no `msgcore_bstrio_` function of any
+kind, which is already the recorded reason for fifteen of its siblings. Writing one reason
+for all four would have been tidier and false.
+
+If a flat caller ever does need a per-object footprint, the thing to export is a
+heap-allocation byte count in `msgcore_mgr_sizeof`'s mould, not these three. That is an
+addition to the supported surface and a version bump, like `msgcore_field_is_sole` (§37)
+and the buffer-serialisation pair, and it belongs to whoever owns the release. Not carried
+today, and argued in the allowlist where that decision belongs.
+
+### Measured
+
+```
+                          before        after
+check_api_drift  scanned     286          297
+                 bound        85           92
+                 allowlisted 201          205
+                 UNTRIAGED     0            0
+```
+
+No allowlist entry went stale or redundant — the gate reports both, and reported neither.
+The other five gates are untouched and were re-run rather than assumed: `check_asserts`
+holds at `callwrap 245 / marker 209 / predicate 183`, all three at baseline;
+`check_exports` matches on both platforms at 283 flat and 771 mangled; `check_md_citations`
+goes from 43 resolved citations to 45, the two new ones being this section's reference back
+to §37 and the allowlist block's.
+
+No C++ changed, so the library is byte-identical and the suites cannot have moved; they
+were run anyway, because "cannot have moved" is the sentence this section exists to be
+suspicious of. 263 cases / 1423 checks static, 247 / 1330 dll, C4 Save/Load PASS —
+the same figures §44 recorded.
+
+### What this says about a ledger reaching zero
+
+§44 closed by observing that `10c7004` had called a document like this one one that "could
+not reach zero," and claimed that this time it did. The claim was wrong, and it was wrong
+in the most ordinary way available: not a defect nobody had found, but one that had been
+found, measured, written out in full, and then read past forty-four times, because it lived
+in the tooling rather than in the library and the tooling was the thing doing the reading.
+
+The check whose entire purpose is to notice what nobody is watching was not watching itself.
+That is not an argument against the check — it found eleven members the moment it was
+asked the question correctly, and seven of them turned out to be work already done and never
+credited. It is an argument against the sentence "nothing is left," which §46 no longer
+makes.
 
 
-## 46. Reproducing this document
+## 46. What is left
+
+Two entries, and the more useful half of this section is now the paragraph explaining why
+it does not say "nothing."
+
+**The `AssertValidBSTRio` type confusion (§35).** Measured, and a no-op: the "Corrupted
+BSTRio heap" refusal it appears to provide has never once been the thing that refused an
+image, because the structural verdict on that path comes entirely from the check above it.
+Repairing it is not a tidy-up — it would introduce a refusal where there is none today,
+ahead of the walk, and change which message names a bad image. That is a question about the
+member's contract and it wants the argument §29 and §34 wanted for members like it. It has
+been carried openly since §35 and is carried openly here; §45's predecessor did not list it,
+on the reasoning that a measured no-op is not a consequence-bearing defect, which is true
+and was still the wrong call. An item with a written argument for deferring it is exactly
+the kind that should appear on a list, because the argument is what a later reader needs.
+
+**`P3PmsgField::SelectObject`, still not a binding (§37).** One of the surviving prefix
+fallback matches scores against `msgcore_field_select_list` because `select_list` and
+`select_vect` have no exact C++ counterpart and the rule takes one that is free. Telling two
+nouns apart under one verb is beyond a name comparison, and the split stays printed on every
+run so the residue stays countable rather than forgotten. §45 raised the fallback count from
+8 to 10 without changing this: the two additions are `P3PmsgField::Delete` and
+`P3PmsgList::Delete`, and both are correct bindings that the exact test missed only because
+C spells them `_delete_item` and `_delete_at`.
+
+Two flat-surface additions a caller might want — `msgcore_field_is_sole` and a
+buffer-serialisation pair — are argued in `tools/ci/api-drift.allow`, where a release
+decision belongs, and a third joined them in §45. They are not defects and are not listed
+here as such.
+
+The per-block reference count is not on this list and never was: it is a standing property
+of the storage layer, §26 states it, and restating it here would dress an observation as an
+open item. The chain question is closed by measurement — §32 asked all nineteen images and
+none carries a chain longer than one link.
+
+**On the sentence this section used to end with.** It said "Nothing is," and §44 before it
+said a ledger that "could not reach zero" had reached it. Both were written in good faith
+off a full sweep of the library, and both were wrong, because the defect that outlived them
+was in the tooling that does the sweeping (§45). Six gates now pass together, forty-five
+sections have a fix and a citation each, and none of that licenses the claim that the count
+is zero — only that every defect anybody has found has an answer pinned by a test or by a
+gate that runs on every push. That is a smaller sentence and it is the one the evidence
+supports.
+
+
+## 47. Reproducing this document
 
 The listings above are excerpts from one program. In full:
 

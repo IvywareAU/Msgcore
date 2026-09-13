@@ -186,7 +186,21 @@ function Get-CxxTypes([string[]]$files) {
                         $kw = @('if','for','while','switch','return','sizeof','catch',
                                 'throw','new','delete','static_cast','reinterpret_cast',
                                 'const_cast','dynamic_cast','defined','assert','ASSERT')
-                        if ($kw -notcontains $cand) { $name = $cand }
+                        # -cnotcontains, NOT -notcontains. PowerShell's comparison
+                        # operators are case-INSENSITIVE by default, so the plain
+                        # form threw out every member whose name differed from a
+                        # keyword only by case: Sizeof went out with sizeof and
+                        # Delete with delete, eleven public members across the nine
+                        # headers, never once asked the question this check exists
+                        # to ask. Seven of them had a binding waiting all along
+                        # (msgcore_mgr_sizeof, msgcore_attr_delete and five more).
+                        # stack_paths.md section 37 found the Sizeof half and named
+                        # this line; the Delete half went unreported. This is
+                        # the same defect as ConvertTo-Snake's digit break above and
+                        # check_asserts.ps1's classifier letter -- a matcher's false
+                        # NEGATIVES are invisible, because a member that was never
+                        # scanned reads exactly like a member nobody wrote.
+                        if ($kw -cnotcontains $cand) { $name = $cand }
                     }
                     if ($name) {
                         $kind = if ($name -eq $top.Name) { 'ctor' }
