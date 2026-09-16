@@ -35,7 +35,7 @@
 static  TCHAR s_szServiceName[32]  = { 0 };
 static  DWORD s_nEventNo           =   0;
 //  THE DEFAULT NOTIFICATION MASK.  ERROR and WARNING.
-//  NOTES: WARNING joined it on 2026-08-20, closing TargetCore's F-S6-4.
+//  NOTES: WARNING joined it on 2026-08-20, closing Targetcore's F-S6-4.
 //         Until then this was P2Pevotn_ERROR alone, which meant every
 //         EVWRN->Display() in these repositories was raised into nothing
 //         on every build - the diagnostic ran, formatted its text and its

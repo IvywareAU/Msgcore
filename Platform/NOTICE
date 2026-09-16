@@ -1,4 +1,4 @@
-Platform (p2pplatform) — the Win32→POSIX shim layer for Msgcore + TargetCore
+Platform (p2pplatform) — the Win32→POSIX shim layer for Msgcore + Targetcore
 Copyright © 2026 Khrustal & Mann
              MELBOURNE, VICTORIA, AUSTRALIA, 3000
 

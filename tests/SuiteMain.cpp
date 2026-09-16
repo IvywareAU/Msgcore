@@ -24,7 +24,7 @@
 // else: the C++ surface and the flat C ABI.
 //
 // WHAT IS DELIBERATELY NOT HERE:
-//   * RunTargetCoreSuite -- tests TargetCore, a sibling component this
+//   * RunTargetcoreSuite -- tests Targetcore, a sibling component this
 //     repository does not contain.
 //   * The COleTime cases from the upstream Msgcore suite -- DATE2Normalised and
 //     Normalised2DATE live in MsgcoreMFC, another component that is not here.

@@ -241,7 +241,7 @@ P2PmsgMgr::Load ( LPCTSTR lpszFilename )
         {
             // THE STORE ACCEPTS A PRE-SENTINEL IMAGE AND THE WIRE DOES NOT,
             // and the asymmetry is the decision rather than an oversight
-            // (TargetCore's versioning note, §6, byte_order.md §4.3).
+            // (Targetcore's versioning note, §6, byte_order.md §4.3).
             // A frame is a peer, and a peer can be upgraded; a file is
             // data somebody already has, and there is no conversation to
             // have with it.

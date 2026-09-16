@@ -27,7 +27,7 @@
 //
 // What is NOT carried over is the runner lifecycle. Upstream's
 // tf_runner_startup calls StartupP2Pmsg(16) and WSAStartup, both of which live
-// in TargetCore -- a sibling component that is NOT part of this repository and
+// in Targetcore -- a sibling component that is NOT part of this repository and
 // is not published with it. A published Msgcore cannot depend on an unpublished
 // sibling to run its own tests; that is B1 in a different coat. So this copy
 // keeps the CWinApp anchor and the assert trap, which Msgcore genuinely needs,
@@ -93,7 +93,7 @@ int  tf_runner_finish(int nSkipped);
 // Suite entry points, defined in their respective .cpp files.
 //
 // Only the suites THIS repository owns are declared. Upstream also declares
-// RunTargetCoreSuite(); that suite tests TargetCore and is deliberately not
+// RunTargetcoreSuite(); that suite tests Targetcore and is deliberately not
 // carried here rather than being left as a dangling declaration, which would
 // read as though this runner still had it.
 void RunMsgcoreSuite();

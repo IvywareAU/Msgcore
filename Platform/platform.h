@@ -15,7 +15,7 @@
 //
 //  Platform layer — umbrella header.
 //
-//  Part of the Msgcore + TargetCore Linux port (see the Linux port plan §4).
+//  Part of the Msgcore + Targetcore Linux port (see the Linux port plan §4).
 //
 //  This is the single include the legacy stdafx.h files will route through (a Phase-1
 //  build-gated step, NOT done yet). Including it on _WIN32 is equivalent to including the

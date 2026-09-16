@@ -49,8 +49,8 @@
 //  3.1.0.0. The 3.x number was set by the project rather than derived from
 //  this tree's own release history: the development identity that preceded it
 //  here was 1.0.0, and no binary carrying it was published. It is deliberately
-//  INDEPENDENT of TargetCore's, which happened to share 3.0.0 and is under no
-//  obligation to keep doing so - TargetCore links Msgcore but does not ship
+//  INDEPENDENT of Targetcore's, which happened to share 3.0.0 and is under no
+//  obligation to keep doing so - Targetcore links Msgcore but does not ship
 //  as it, and a shared number would force a lockstep release neither wants.
 //
 //  MINOR, because the SUPPORTED surface GREW and nothing on it moved. The flat

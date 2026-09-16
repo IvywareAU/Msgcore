@@ -15,7 +15,7 @@
 //
 //  Platform layer — crypto backend selector for P2PCngCrypto.
 //
-//  Part of the Msgcore + TargetCore Linux port (see the Linux port plan §6.2, Risk #5).
+//  Part of the Msgcore + Targetcore Linux port (see the Linux port plan §6.2, Risk #5).
 //
 //  P2PCngCrypto keeps its header/namespace (p2pcng, void* handles). Backends:
 //    Windows -> cng.cpp     (BCrypt: AES-256-GCM, ECDH P-256, HKDF/HMAC-SHA256, RNG)

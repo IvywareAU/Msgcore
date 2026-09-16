@@ -13,7 +13,7 @@
     MSBuild imports only the NEAREST Directory.Build.props walking up from the project, so
     this file shadows the outer one for Msgcore(2026).vcxproj and com\MsgcoreCom(2026).vcxproj.
     That would silently move the staging directory for anyone building inside the MSCS tree,
-    where sibling projects (TargetCore, MsgcoreMFC) link against MSCS\lib\... — so if an outer
+    where sibling projects (Targetcore, MsgcoreMFC) link against MSCS\lib\... — so if an outer
     Directory.Build.props exists, chain to it and let it win. The standalone defaults below
     apply only when there is no outer file, i.e. in a real standalone clone.
   -->

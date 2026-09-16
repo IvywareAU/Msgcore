@@ -85,7 +85,7 @@ endif()
 
 # Phase 2: standalone IOCP-over-io_uring shim test (the Linux port plan §5/§8). Opt-in and
 # gated on liburing being available, so it never touches the Msgcore-only build path
-# (p2piocp.cpp + liburing are pulled only by this target and, later, TargetCore).
+# (p2piocp.cpp + liburing are pulled only by this target and, later, Targetcore).
 if(NOT WIN32)
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)

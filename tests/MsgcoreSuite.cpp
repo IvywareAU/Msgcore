@@ -934,7 +934,7 @@ static void Test_StackDrop()
     //  nothing left pointing at them. Every caller wants the storage back:
     //  P3PmsgField::Drop, P3PmsgList::Drop and P3PmsgVect::Drop all reach it
     //  while dismantling an item, MsgFacade's FacadeNode exposes it as the COM
-    //  "drop the stack" verb, and TargetCore's P2PeerMsg calls it when it
+    //  "drop the stack" verb, and Targetcore's P2PeerMsg calls it when it
     //  replaces one stack with another.
     //
     //  The observable is address reuse: a block that was freed goes back on the
@@ -5346,7 +5346,7 @@ static void Test_IOmageEndianSentinel()
 }
 
 // ---------------------------------------------------------------------------
-// LAYOUT GENERATION (TargetCore's versioning note, §6, gate 2).
+// LAYOUT GENERATION (Targetcore's versioning note, §6, gate 2).
 // The six sentinel bits are the message image's only version story. ONE code
 // is defined - the one this build writes - and every OTHER non-zero pattern
 // classifies as VBLockSync_Gen, "a layout this build does not implement".
@@ -5541,7 +5541,7 @@ static void Test_VBLockItem_UnknownType()
 // That is also the honest bound on F8 and F9. They are NOT reachable through
 // the exported surface: they need code linked against the static archive, or
 // code inside the DLL itself -- which is exactly what the P3PmsgField
-// constructor is, and what TargetCore's receive path reaches through. The
+// constructor is, and what Targetcore's receive path reaches through. The
 // defects are live where they matter and unreachable to an external consumer of
 // the flat C ABI, which is the supported surface in 1.x.
 #ifdef Msgcore_STATIC

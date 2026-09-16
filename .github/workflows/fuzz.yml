@@ -19,7 +19,7 @@
 # newer fuzz_recv_image drives the receive path -- heap-from-image, then
 # traversal -- which is where F4 to F7 were and which nothing in this repository
 # could fuzz before it existed. Those four were all found by p2p_fuzzframe,
-# which lives in TargetCore, so the path responsible for the majority of this
+# which lives in Targetcore, so the path responsible for the majority of this
 # library's known memory unsafety had no harness here and every "cumulative
 # clean hour" this document has quoted was an hour of the other path.
 #
@@ -36,7 +36,7 @@
 #      : WEEKLY, not nightly, and that is a billing decision rather than a
 #        coverage one. windows-2025-vs2026 bills at the 2x multiplier, so an hour a
 #        night is ~3,660 minutes a month against the 2,000 a private repository
-#        gets free -- a quota shared with TargetCore and MscsUnitTests. Weekly
+#        gets free -- a quota shared with Targetcore and MscsUnitTests. Weekly
 #        costs ~520 and fits. Publishing the repository makes Actions free on
 #        standard runners and makes nightly affordable again; restore
 #        '20 14 * * *' when it does.

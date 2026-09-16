@@ -31,10 +31,10 @@
 #  LINKAGE.md's is different in kind -- it is a pointer to the matching rule in the
 #  sibling's own linkage document, and the sentence stands without it.
 
-LINKAGE.md       -> TargetCore/LINKAGE.md  # sibling's copy of the same rule; sentence stands without it
+LINKAGE.md       -> Targetcore/LINKAGE.md  # sibling's copy of the same rule; sentence stands without it
 byte_order.md    -> p2p_BrowserHub.md      # sibling component, not published
 byte_order.md    -> p2p_PhpHub.md          # sibling component, not published
-byte_order.md    -> VERSIONING.md          # sibling TargetCore's versioning note. A DESIGN-NOTE
+byte_order.md    -> VERSIONING.md          # sibling Targetcore's versioning note. A DESIGN-NOTE
                                            # exemption and deliberately not a source-comment one:
                                            # the five source and test citations of this same
                                            # document were reworded to name it instead, which is

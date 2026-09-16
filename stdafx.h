@@ -46,7 +46,7 @@
 // AdditionalIncludeDirectories at all and needs none.
 //
 // The other two consumers reach this same single copy from where they sit, as
-// "../Msgcore/Platform/..." -- TargetCore/stdafx.h and MscsUnitTests/stdafx.h. And a
+// "../Msgcore/Platform/..." -- Targetcore/stdafx.h and MscsUnitTests/stdafx.h. And a
 // clone of THIS repository alone compiles again, which is the property the sibling
 // layout had to buy back with a two-repository CI checkout and a cross-repository PAT.
 #include "Platform/platform.h"

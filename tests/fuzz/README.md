@@ -5,7 +5,7 @@ The release-readiness register item 14, fourth job. **Two harnesses**, selected 
 | `-Harness` | Entry point | Why |
 |---|---|---|
 | `iomage_load` (default) | `P2PmsgMgr::Load` | C4 was a parser trusting a size it read out of the buffer it was parsing, and `../C4LoadTest.cpp` pins one input against it. This drives the same entry point with inputs nobody wrote by hand |
-| `recv_image` | heap-from-image, **then traversal** | where **F4–F7** lived. All four were found by `p2p_fuzzframe`, which is in TargetCore and cannot run here — so the path behind most of this library's known memory unsafety had no harness of its own until this one |
+| `recv_image` | heap-from-image, **then traversal** | where **F4–F7** lived. All four were found by `p2p_fuzzframe`, which is in Targetcore and cannot run here — so the path behind most of this library's known memory unsafety had no harness of its own until this one |
 
 ```powershell
 pwsh tests\fuzz\build_run_fuzz.ps1                                   # iomage_load, 60s

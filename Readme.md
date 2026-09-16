@@ -192,7 +192,7 @@ seventy declarations and included nothing that defines it: in C++ `wchar_t` is a
 every consumer in this solution compiled it without complaint, and MSVC makes it native in C as
 well, so the platform where the header is used most was the platform that could not report the
 fault. A C compiler on Linux gave *unknown type name 'wchar_t'* seventy times. It now includes
-`<wchar.h>`, as its sibling `TargetCore_c.h` always has. It was found by the TargetCore install
+`<wchar.h>`, as its sibling `Targetcore_c.h` always has. It was found by the Targetcore install
 gate, which was the first thing anywhere to compile a shipped header from C off Windows — the
 export check above measures which names leave the DLL, and cannot see whether the header that
 declares them parses.
@@ -265,7 +265,7 @@ is how a deadlock gets built.
 with an explicit path. Two rules govern what the file may do, both stated in full in
 `Msgexception.h`: `ErrToMessageBox` can only ever move the policy **towards** text, never back to
 the dialog; and a configured `LogFile` loses to a sink installed with `SetTextSink()`. Why either
-matters is `TargetCore`'s story rather than this library's — see its `Readme.md`, *Hosting a hub
+matters is `Targetcore`'s story rather than this library's — see its `Readme.md`, *Hosting a hub
 where nobody can see a dialog* — because the thing a dialog blocks is a hub's pump.
 
 The log file is **UTF-8, no byte order mark, on both platforms**, opened and closed per entry and
@@ -310,7 +310,7 @@ Neither cost survives, because there is no second copy and no upstream to drift 
 `Platform` repository is retired, `MSCS/Platform/` is deleted, and the parent tree adds
 this directory as its `p2pplatform`. No macro, no manifest, no drift check. The other two
 consumers reach this same tree from where they sit, as `"../Msgcore/Platform/..."` —
-`TargetCore/stdafx.h` and `MscsUnitTests/stdafx.h`.
+`Targetcore/stdafx.h` and `MscsUnitTests/stdafx.h`.
 
 What this bought back is CI that checks out one repository. The build, test and fuzz
 workflows no longer assemble `mscs/Platform` beside `mscs/Msgcore`, and no longer need the
@@ -348,7 +348,7 @@ something else would reject them anyway.
 Everything either script produces goes to `tests\out\`, which `.gitignore` already covers.
 
 The suites were ported from `MSCS\MscsUnitTests\`, which is not published here. What
-stayed behind tests something else — TargetCore, and two date-normalisation cases whose
+stayed behind tests something else — Targetcore, and two date-normalisation cases whose
 implementation lives in MsgcoreMFC. See the release-readiness register item 15.
 
 ## Versioning
@@ -391,7 +391,7 @@ disclosure process and for a specific statement of what is and is not in scope.
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | how to contribute, and the sign-off requirement |
 
 Both design notes describe MSCS as a whole, so they reference sibling components
-(`TargetCore`, `MscsUnitTests`, the DSP and hub subsystems) that are not published here.
+(`Targetcore`, `MscsUnitTests`, the DSP and hub subsystems) that are not published here.
 Their Msgcore-relevant sections stand on their own; the cross-references are left intact
 rather than edited out, because a design note with its context removed is worth less than
 one with a few names you cannot look up.

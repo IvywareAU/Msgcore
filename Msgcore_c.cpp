@@ -44,7 +44,7 @@
 // the pointer to check it, which is the defect itself rather than a fix for it:
 // a hostile or merely stale value crashes (or worse) AT THE CHECK.
 //
-// This is the backport of the registry that closed M1 for TargetCore's flat C
+// This is the backport of the registry that closed M1 for Targetcore's flat C
 // ABI in session 24. That surface has since been deleted from the tree; THIS one
 // has not -- Msgcore_c is built into Msgcore.dll and still has consumers -- so
 // the identical defect was still live here: nine helpers static_cast<>ing

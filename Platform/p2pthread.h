@@ -15,7 +15,7 @@
 //
 //  Platform layer — threads, critical sections, events.
 //
-//  Part of the Msgcore + TargetCore Linux port (see the Linux port plan §5.3, §6.1/6.2).
+//  Part of the Msgcore + Targetcore Linux port (see the Linux port plan §5.3, §6.1/6.2).
 //
 //  _WIN32 : pass-through (CreateThread/CRITICAL_SECTION/CreateEvent from windows.h).
 //  Linux  : CRITICAL_SECTION -> std::recursive_mutex (Win32 CS is RECURSIVE — a plain

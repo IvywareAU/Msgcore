@@ -15,7 +15,7 @@
 //
 //  Platform layer — serial ports: DCB/SetCommState/WaitCommEvent -> termios.
 //
-//  Part of the Msgcore + TargetCore Linux port (see the Linux port plan §5.1, §6.2).
+//  Part of the Msgcore + Targetcore Linux port (see the Linux port plan §5.1, §6.2).
 //
 //  _WIN32 : pass-through. Linux: DCB/SetCommState -> termios (cfsetspeed + cs5..8 /
 //  parity / stop-bit mapping); SetCommMask(EV_RXCHAR)+WaitCommEvent(overlapped) ->
@@ -36,7 +36,7 @@
   #include <cstring>
   #include <cerrno>
 
-  //  Async POLLIN wait — provided weakly by p2piocp.cpp (linked into TargetCore, not
+  //  Async POLLIN wait — provided weakly by p2piocp.cpp (linked into Targetcore, not
   //  Msgcore); the overlapped WaitCommEvent routes here (guarded by an address test).
   extern "C" BOOL p2p_iocp_poll(int fd, void* ov) __attribute__((weak));
 

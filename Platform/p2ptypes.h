@@ -15,7 +15,7 @@
 //
 //  Platform layer — Win32 scalar types + HANDLE/SOCKET model.
 //
-//  Part of the Msgcore + TargetCore Linux port (see the Linux port plan §4.1).
+//  Part of the Msgcore + Targetcore Linux port (see the Linux port plan §4.1).
 //
 //  _WIN32 : pure pass-through. Includes the real Windows headers; defines nothing
 //           that alters the ABI. The Windows binary stays bit-for-bit identical.
@@ -150,7 +150,7 @@
 
   //  MSVC 64-bit time types + the _time64 CRT function (P2Peer.h: `typedef __time64_t
   //  P2Pmsecs_t`, the pump's millisecond clock — the single most cascaded type in
-  //  TargetCore). __time64_t is a 64-bit signed seconds-since-epoch, same shape as the
+  //  Targetcore). __time64_t is a 64-bit signed seconds-since-epoch, same shape as the
   //  Linux 64-bit time_t; _time64(&t) mirrors CRT semantics (returns + optionally stores).
   using __time64_t = long long;
   using __time32_t = int;
@@ -501,7 +501,7 @@
       }
   }
   //  Thread-id / sleep. GetCurrentThreadId must return the SAME value CreateThread
-  //  (p2pthread.h) writes to *lpThreadId for that thread: the TargetCore pump keys its
+  //  (p2pthread.h) writes to *lpThreadId for that thread: the Targetcore pump keys its
   //  per-thread pump/hub registries on it (s_ThreadID_P2PmsgPump.Lookup(GetCurrentThreadId()))
   //  AND P2PeerHub::RunHub asserts m_nHubID==GetCurrentThreadId(). pthread_self() truncated
   //  to DWORD is per-thread-unique but does NOT equal the synthetic id CreateThread hands

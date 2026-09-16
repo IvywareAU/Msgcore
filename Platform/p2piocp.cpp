@@ -94,7 +94,7 @@ struct IoRing {
     //  cancels reference them, so they are closed only once a submit has actually reached
     //  the kernel (ring_submit). Guarded by their OWN mutex rather than qmx, and never
     //  taken before it, because the drain loop touches them while holding qmx -- and
-    //  because TargetCore's teardown drains (P2Pwin32.cpp CloseP2PmsgHub and the con
+    //  because Targetcore's teardown drains (P2Pwin32.cpp CloseP2PmsgHub and the con
     //  sweep) call GetQueuedCompletionStatus from a thread that is NOT the pump, so
     //  "only the owner ever gets here" is not an assumption worth building on.
     std::mutex                          dupmx;
@@ -585,7 +585,7 @@ BOOL p2p_iocp_destroy(HANDLE Port) {
 
 // ---------------------------------------------------------------------------
 //  extern "C" hooks the p2pfile.h shims call weakly (§5.3, §5.6). Defined here so
-//  they exist only in an image that links this TU (TargetCore + the shim test); in a
+//  they exist only in an image that links this TU (Targetcore + the shim test); in a
 //  Msgcore-only image they stay unresolved-weak -> null, and p2pfile.h guards the call.
 // ---------------------------------------------------------------------------
 extern "C" BOOL p2p_iocp_submit_rw(int fd, void* buf, DWORD n, void* ov, int isWrite) {

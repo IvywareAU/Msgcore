@@ -1,6 +1,6 @@
-# Platform/ — the Win32→POSIX shim layer for Msgcore + TargetCore
+# Platform/ — the Win32→POSIX shim layer for Msgcore + Targetcore
 
-Maps the Win32 subset Msgcore + TargetCore actually use, so one source tree builds on both
+Maps the Win32 subset Msgcore + Targetcore actually use, so one source tree builds on both
 Windows (genuine IOCP / CNG / MFC) and Linux (io_uring / OpenSSL 3 / pthreads).
 
 This is the **platform layer** of the Linux port plan, §4. The `§`-references throughout these
@@ -22,7 +22,7 @@ genuine SDK/ATL/MFC header and stops (`p2ptypes.h:34`, `p2psock.h:33`, `p2pexpor
 
 The legacy `stdafx.h` files **do** route through `platform.h` — that was the Phase-1 wiring
 step and it is done: `Msgcore/stdafx.h:53` (via `MSGCORE_PLATFORM_FROM_PARENT`, see
-*Vendoring*) and `TargetCore/stdafx.h:32`, plus `mfcshim.h` on Linux only. Because
+*Vendoring*) and `Targetcore/stdafx.h:32`, plus `mfcshim.h` on Linux only. Because
 `platform.h` is pass-through on Windows, that wiring leaves the `(2026).vcxproj` output
 unchanged.
 
@@ -85,7 +85,7 @@ place** — land the change here, then re-vendor and regenerate the manifest in 
 
 `p2pfile.h` lists the mapping in one line; this is what it actually costs, because a named
 pipe and a Unix socket are not the same object and the differences are load-bearing for the
-one transport that uses them (`TargetCore/P2PeerConPipe.cpp`).
+one transport that uses them (`Targetcore/P2PeerConPipe.cpp`).
 
 A pipe name maps to a filesystem path: `\\.\pipe\Name` -> `$XDG_RUNTIME_DIR/p2pmsg/Name.sock`,
 falling back to `/tmp/p2pmsg/` when `XDG_RUNTIME_DIR` is unset. `p2p_pipe_path`
@@ -106,12 +106,12 @@ inside the target handle, installs the accepted fd in its place, and copies the 
 socket's completion key onto it (`p2piocp.cpp:460-470`). That is not the shim inventing
 semantics: the legacy transport already documents the same behaviour on Windows - *"pipes are
 different whereby the listening P2PeerCon morphs into the accepted connection"*
-(`TargetCore/P2PeerConPipe.cpp:390`). The shim reproduces a property the design already had.
+(`Targetcore/P2PeerConPipe.cpp:390`). The shim reproduces a property the design already had.
 
 **Message mode is ignored, and that is safe here.** `PIPE_TYPE_MESSAGE` /
 `PIPE_READMODE_MESSAGE` are defined so call sites compile, then discarded - the shim always
 uses `SOCK_STREAM`. This is not a compromise: the only caller creates its pipe
-`PIPE_TYPE_BYTE | PIPE_READMODE_BYTE` (`TargetCore/P2PeerConPipe.cpp:395`) and frames itself
+`PIPE_TYPE_BYTE | PIPE_READMODE_BYTE` (`Targetcore/P2PeerConPipe.cpp:395`) and frames itself
 with length prefixes, so no boundary guarantee is owed. `SOCK_SEQPACKET` would supply one if a
 future framing layer ever wanted it.
 
@@ -137,7 +137,7 @@ future framing layer ever wanted it.
 5. **Connect failure is remapped deliberately.** `ENOENT` and `ECONNREFUSED` both become
    `ERROR_FILE_NOT_FOUND` (`p2psock.h:395`) so the client's existing failure path matches
    Win32. Note that the caller neither retries nor uses `WaitNamedPipe`
-   (`TargetCore/P2PeerConPipe.cpp:639`) - a failed connect throws.
+   (`Targetcore/P2PeerConPipe.cpp:639`) - a failed connect throws.
 6. **`SIGPIPE` has no Win32 counterpart.** `p2p_ignore_sigpipe()` (`p2ptypes.h:491`) installs
    `SIG_IGN` so a write to a departed peer returns `EPIPE` - which `win32_from_errno` turns
    into `ERROR_BROKEN_PIPE` - instead of killing the process.
@@ -147,7 +147,7 @@ future framing layer ever wanted it.
 **In the parent MSCS tree — the canonical path.** `CMakeLists.txt` here has no `project()` and
 this repository carries no presets; it is consumed by `add_subdirectory(Platform)`, which defines
 the `p2pplatform` INTERFACE target (headers + include dirs). `p2piocp.cpp` is compiled by the
-consumers that need the ring (`TargetCore/CMakeLists.txt`) and by the iocp test — not into a
+consumers that need the ring (`Targetcore/CMakeLists.txt`) and by the iocp test — not into a
 library of its own. From the parent tree:
 
 ```sh
@@ -180,7 +180,7 @@ finds liburing.
 - **`checks/header_check.cpp`** — includes the umbrella plus `mfcshim.h` and ODR-uses the
   HANDLE model. On Windows it proves the shims resolve cleanly to the genuine headers (the
   original Phase-0 exit criterion); on Linux it proves the subset parses under GCC/C++23. It is
-  the gate that would have caught `adb8f2f` (a missing `CList::FindIndex` stopped TargetCore
+  the gate that would have caught `adb8f2f` (a missing `CList::FindIndex` stopped Targetcore
   building on Linux entirely). It does **not** reach `p2psvc.h`.
 - **`checks/iocp_test.cpp`** — the §5.2 semantics suite: async completion with byte count and
   key, the Fix-4 invariant (data already buffered at submit time still posts a CQE), cross-thread

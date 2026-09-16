@@ -15,7 +15,7 @@
 //
 //  Platform layer — symbol visibility / DLL export control.
 //
-//  Part of the Msgcore + TargetCore Linux port (see the Linux port plan §4, §6.1/6.2).
+//  Part of the Msgcore + Targetcore Linux port (see the Linux port plan §4, §6.1/6.2).
 //  Unifies the three legacy export-macro idioms behind one portable spelling.
 //
 //  On _WIN32  : P2P_EXPORT / P2P_IMPORT expand to __declspec, exactly as today.
@@ -24,7 +24,7 @@
 //               (the Linux port plan §6.2, "dllmain.cpp, exports").
 //
 //  This header defines NOTHING that changes the Windows ABI: the legacy macros
-//  (Msgcore_EXT/_API, TargetCore_EXT, MSGCORE_C_API) continue
+//  (Msgcore_EXT/_API, Targetcore_EXT, MSGCORE_C_API) continue
 //  to be defined in their original headers. P2P_EXPORT is offered as the forward
 //  spelling for NEW platform-layer symbols only.
 //

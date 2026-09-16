@@ -15,7 +15,7 @@
 //
 //  Platform layer — Windows Service Control Manager (WinSvc.h) shim.
 //
-//  Part of the Msgcore + TargetCore Linux port (see the Linux port plan §6.2). P2PeerService
+//  Part of the Msgcore + Targetcore Linux port (see the Linux port plan §6.2). P2PeerService
 //  bridges a P2PeerHub to the Windows SCM. The plan splits it: the protocol-neutral console/
 //  daemon path (Init/Run/RunConsoleModeAttachment/PostP2PeerHub) is the Linux entry, while
 //  SCM install/uninstall/status is Windows-only.

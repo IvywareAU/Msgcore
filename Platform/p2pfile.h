@@ -15,7 +15,7 @@
 //
 //  Platform layer — file I/O (sync + async CreateFile/ReadFile/WriteFile).
 //
-//  Part of the Msgcore + TargetCore Linux port (see the Linux port plan §5, §6.1).
+//  Part of the Msgcore + Targetcore Linux port (see the Linux port plan §5, §6.1).
 //
 //  _WIN32 : pass-through. Linux: sync store/lock-file I/O in P2PmsgMgr.cpp maps to
 //  open/pread/pwrite/unlink (O_CLOEXEC); lock-file semantics (GENERIC_WRITE|DELETE +
@@ -42,7 +42,7 @@
   #include <cerrno>
 
   // -------------------------------------------------------------------------
-  //  IOCP async hooks, provided by p2piocp.cpp (linked into TargetCore + the shim
+  //  IOCP async hooks, provided by p2piocp.cpp (linked into Targetcore + the shim
   //  test, NOT into Msgcore). Declared *weak* so a Msgcore-only shared library —
   //  which never issues overlapped I/O and never links liburing — resolves them to
   //  null and links cleanly; every call below is guarded by an address test.
@@ -123,7 +123,7 @@
     #define INVALID_SET_FILE_POINTER ((DWORD)-1)
   #endif
 
-  //  MSVC low-level CRT I/O (TargetCoreLog uses _open/_write/_close on a raw int fd,
+  //  MSVC low-level CRT I/O (TargetcoreLog uses _open/_write/_close on a raw int fd,
   //  not the tagged HANDLE). Flags map to POSIX; _O_BINARY is a no-op on Linux. The
   //  functions forward straight to the POSIX syscalls (same int-fd contract).
   #ifndef _O_RDONLY

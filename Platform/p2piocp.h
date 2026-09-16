@@ -15,7 +15,7 @@
 //
 //  Platform layer — IOCP API surface over io_uring.  THE CORE OF THE PORT.
 //
-//  Part of the Msgcore + TargetCore Linux port (see the Linux port plan §5 in full).
+//  Part of the Msgcore + Targetcore Linux port (see the Linux port plan §5 in full).
 //
 //  _WIN32 : pass-through — the genuine NT IOCP API (CreateIoCompletionPort,
 //           GetQueuedCompletionStatus, PostQueuedCompletionStatus, OVERLAPPED) is used
@@ -67,7 +67,7 @@
       //  p2p_iocp_on_close_fd() erases the fd -> key association BEFORE those
       //  cancellations complete. So every ERROR_OPERATION_ABORTED the cancel
       //  produced arrived with completion key 0 instead of the key of the
-      //  object that owned the I/O. Measured in TargetCore's production plan
+      //  object that owned the I/O. Measured in Targetcore's production plan
       //  at Stage 2 step 6: dropping one timed-out connection delivered an
       //  unattributable completion, the service read it as a failure of the
       //  LISTENER, and a single silent peer took the whole listener down. That

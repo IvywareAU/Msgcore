@@ -500,7 +500,7 @@ P2Piomage_ValidateSync ( const P2Piomage *pP2Piomage )
     //  fallback classifier: a layout this build does not implement is reported
     //  with its code rather than as "invalid", for EVERY future generation and
     //  not only for one somebody remembered to enumerate
-    //  (TargetCore's versioning note, §6.1).
+    //  (Targetcore's versioning note, §6.1).
     if ( nForm == VBLockSync_Gen )
       EVERR->MODULE
            ->Message ( "VBListIOmage layout generation 0x%02X is not implemented "
@@ -679,10 +679,10 @@ P2Piomage_Release ( P2Piomage *pP2Piomage )
     // five times across the security label -- p2p_authpsk, p2p_authrelay,
     // p2p_replayguard, p2p_bigreport -- on the ordinary send and drop paths
     // (P2Peerio::Reset -> P2PeerCon::Drop), so it is reached by any connection
-    // that closes, not by some exotic input. Found by TargetCore's production
+    // that closes, not by some exotic input. Found by Targetcore's production
     // plan, Stage 1 step 5 -- the first run of the security label under a
     // sanitiser. (Named rather than linked: that plan is in the sibling
-    // TargetCore repository, so a path from here would not resolve.)
+    // Targetcore repository, so a path from here would not resolve.)
     if ( pP2Piomage )
       delete [] (char *)pP2Piomage;
     return nullptr;

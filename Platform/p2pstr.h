@@ -15,7 +15,7 @@
 //
 //  Platform layer — strings: CString subset, TCHAR/_T, wide helpers.
 //
-//  Part of the Msgcore + TargetCore Linux port (see the Linux port plan §4.2).
+//  Part of the Msgcore + Targetcore Linux port (see the Linux port plan §4.2).
 //
 //  Decision (§4.2): the in-memory API surface keeps wchar_t. On _WIN32 this is the
 //  real MFC/ATL CString and the real <tchar.h>. On Linux, p2pstr provides a CString
@@ -152,7 +152,7 @@
   //  -fpermissive, that is a warning rather than an error. It compiles, and
   //  then writes a completely different string.
   //
-  //  This was not theoretical: TargetCoreSuite's IdTempPath produced "/tmp/"
+  //  This was not theoretical: TargetcoreSuite's IdTempPath produced "/tmp/"
   //  instead of "/tmp/p2pid_suite_id_<pid>.tmp", so every identity-store case
   //  was handed a DIRECTORY as its file path - 18 failed checks across 7 cases,
   //  all of which read as "the identity store is broken on Linux" and none of

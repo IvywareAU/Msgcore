@@ -15,7 +15,7 @@
 //
 //  Platform layer — sockets: BSD/Winsock shims over the tagged SOCKET.
 //
-//  Part of the Msgcore + TargetCore Linux port (see the Linux port plan §4.1, §5.1, §6.2).
+//  Part of the Msgcore + Targetcore Linux port (see the Linux port plan §4.1, §5.1, §6.2).
 //
 //  _WIN32 : pass-through (WinSock2 + mswsock). Linux: SOCKET == HANDLE == P2PHandle*
 //  (§4.1), so socket-returning calls allocate a P2PHandle{Fd} and BSD-call shims unwrap

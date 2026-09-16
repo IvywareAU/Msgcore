@@ -20,7 +20,7 @@
 //  WHY THIS EXISTS, and it is the uncomfortable half of the F4-F7 record.
 //  Four of this repository's seven memory-safety findings -- F4, F5, F6 and F7
 //  -- are on this path, and every one of them was found by `p2p_fuzzframe`,
-//  which lives in TargetCore. It is not in this repository and this
+//  which lives in Targetcore. It is not in this repository and this
 //  repository's CI cannot run it. `p2p_fuzzframe` appears here only as comments
 //  in P2Pmsg.cpp and MsgVBHeap.cpp naming the replay that found each defect.
 //  So until this file existed, the path that produced the MAJORITY of Msgcore's

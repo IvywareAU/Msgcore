@@ -191,7 +191,7 @@
        is worth knowing. Clean deletes outputs recorded in the previous build's
        write log; a step that has never run recorded nothing, so Clean leaves the
        stale file, so the step skips again. It is a latch: never run -> never
-       logged -> never cleaned -> never run. TargetCore escaped only because its
+       logged -> never cleaned -> never run. Targetcore escaped only because its
        step had run once long ago, which is why Rebuild re-staged that one DLL
        and not this one - the projects were equally broken, not different.
 

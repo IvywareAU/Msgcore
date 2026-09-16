@@ -15,7 +15,7 @@
 //
 //  Platform layer — narrow MFC shim.
 //
-//  Part of the Msgcore + TargetCore Linux port (see the Linux port plan §4.3).
+//  Part of the Msgcore + Targetcore Linux port (see the Linux port plan §4.3).
 //
 //  The two libraries use MFC narrowly: CObject + DECLARE/IMPLEMENT_DYNCREATE (on
 //  P2PeerConPlc), CList/CMap/CListP2PeerMsg, CString, ASSERT/VERIFY/AfxCheckMemory/
@@ -141,7 +141,7 @@
       int GetSecond() const { return m_tm.tm_sec; }
   };
 
-  //  MFC COleDateTime subset (TargetCoreLog timestamps). Only the local-time field
+  //  MFC COleDateTime subset (TargetcoreLog timestamps). Only the local-time field
   //  getters + the static GetCurrentTime() the logging path uses; a std::tm backs it,
   //  same as CTime.
   class COleDateTime {
@@ -233,7 +233,7 @@
       //  MFC's contract, and O(n) there too - it walks. Added when P2Pwin32.cpp's hub-teardown
       //  loop started re-deriving its cursor from an index each pass (the fix for holding a
       //  POSITION across Destroy()/Drop()), which is a call site the shim's original inventory
-      //  predates. Found by building the current TargetCore on Linux for the PHP hub note's
+      //  predates. Found by building the current Targetcore on Linux for the PHP hub note's
       //  P6 MSCS leg; nothing else in the compiled set uses it yet.
       POSITION FindIndex(INT_PTR nIndex) const {
           if (nIndex < 0 || (std::size_t)nIndex >= m_n) return nullptr;

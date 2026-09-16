@@ -930,7 +930,7 @@ P3PmsgData::c_vBlob ( ) const
 //         variable-length, so a payload starts wherever the running sum puts
 //         it.  Reading those bytes through a type that needs alignment is
 //         undefined: it works on x86, UBSan reports it on Linux, and it
-//         faults on a strict-alignment target.  This is TargetCore's finding
+//         faults on a strict-alignment target.  This is Targetcore's finding
 //         F-S5-3.
 //       : memcpy is the whole mechanism, and it is the right one - it is
 //         defined for any alignment and compiles to the same loads once the

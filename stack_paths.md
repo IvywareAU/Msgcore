@@ -107,7 +107,7 @@ the library itself writes, §11), `d31f2c4` (the collection's own path, §12) an
 `2a03161` (the descendant collection, and the rule stated once, §15) and `0888659`
 (one arm per block kind, §16) and `c0409cb` (a bare `.` wherever it stands, §17) and `2de26ac`
 (the root marker only where a path is rooted, §18) and `48ff002` (a floating item is one
-object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21) and `da22f93` (where the block is, not whether there is a heap, §22) and `f77bb97` (copying the value and not the address of one, §23) and `a42f207` (the guarantee asked of the storage, §24) and `09adc6c` (the safe pointer's own conversions, §25) and `eca8cd1` with `2109c8a` in TargetCore (the three entries What-is-left was carrying, §26-§28) and `f600c52` (the cursor, and a chain of three, §29-§30).
+object, §19) and `c8f1af6` (one question, one answer, §20) and `4f4c334` (one question per operator, §21) and `da22f93` (where the block is, not whether there is a heap, §22) and `f77bb97` (copying the value and not the address of one, §23) and `a42f207` (the guarantee asked of the storage, §24) and `09adc6c` (the safe pointer's own conversions, §25) and `eca8cd1` with `2109c8a` in Targetcore (the three entries What-is-left was carrying, §26-§28) and `f600c52` (the cursor, and a chain of three, §29-§30).
 
 ## 2. The stack itself — unchanged, and always worked
 
@@ -471,7 +471,7 @@ and pop was the only shape anything in the tree had exercised.
 `aStack` on the way back up, and returned — so every pushed item block, and the name and
 data blocks hanging off it, stayed allocated with nothing pointing at them. Every caller
 wants the storage back: the three `Drop()`s above all reach it while dismantling an item,
-MsgFacade's `FacadeNode` exposes it as the COM *drop the stack* verb, and TargetCore's
+MsgFacade's `FacadeNode` exposes it as the COM *drop the stack* verb, and Targetcore's
 `P2PeerMsg` calls it when it replaces one stack with another.
 
 The explicit recursion went with the fix. The `Drop()` it now calls on the generation
@@ -1636,7 +1636,7 @@ The same two probes against the fixed library:
 ```
 
 **Nothing that exists changes behaviour, and that is measured twice.** Marking every
-`operator bool` explicit and compiling Msgcore, MsgcoreMFC, TargetCore, TargetCoreMFC,
+`operator bool` explicit and compiling Msgcore, MsgcoreMFC, Targetcore, TargetcoreMFC,
 MsgcoreUtils, MsgFacade, TargetFacade, MscsUnitTests and Chartboard in both
 configurations produced **0 errors**. Declaring `==` and `!=` between two of these
 objects as `= delete` and repeating the sweep produced **0 errors**. Not one call site in

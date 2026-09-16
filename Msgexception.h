@@ -66,8 +66,8 @@ const DWORD P2Pevotn_ERROR =  (1<<P2Pevent_ERROR);
 // that was not a cosmetic gap: the default mask was P2Pevotn_ERROR only, so
 // every EVWRN->Display() in these repositories was invisible out of the box,
 // and the one place that wanted them had to write (1 << P2Pevent_WARNING) by
-// hand (_TargetCore_UseExamples/.../DialogOrLogFile.cpp).  Found while closing
-// the TargetCore finding F-S6-3 - recorded in that repository's production
+// hand (_Targetcore_UseExamples/.../DialogOrLogFile.cpp).  Found while closing
+// the Targetcore finding F-S6-3 - recorded in that repository's production
 // plan, which is not published here - whose "make the omission loud" half
 // turned out to be a warning nobody would have seen.
 //
@@ -417,11 +417,11 @@ typedef P2PSafePtr<P2Pevent> P2PeventSP;
 #define Advice_T(str)  Advice(_T(str))
 
 //
-//  Diagnostic, DiagnosticA and TargetCorelogA were removed here (item 17).
+//  Diagnostic, DiagnosticA and TargetcorelogA were removed here (item 17).
 //  All three formatted into a CString and then passed the RESULT as a format
 //  string, so any '%' in the formatted text was re-interpreted -- the same
 //  format-string sink M3 fixed in the live diagnostics. They had no call site
-//  anywhere in this repository, and TargetCorelogA was unusable in Release
+//  anywhere in this repository, and TargetcorelogA was unusable in Release
 //  besides: its #else branch defined DiagnosticA rather than itself, so the
 //  name simply did not exist outside a Debug build. Use EVLOG / the P2Pevent
 //  chain (Module/Message/Advice above) instead; it takes an already-formatted

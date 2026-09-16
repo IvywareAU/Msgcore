@@ -34,13 +34,13 @@
 // type in C as well, so the one platform where the header was routinely used
 // was also the one platform that could not report the defect.
 //
-// Found by the TargetCore install gate (its ctest test p2p_installtree), which
+// Found by the Targetcore install gate (its ctest test p2p_installtree), which
 // is the first thing anywhere to compile a shipped header from C on Linux. That
 // is what an install tree is for: the flat C API exists precisely so that
 // somebody who is not us, on a toolchain that is not ours, can include it --
 // and it had never once been asked to.
 //
-// TargetCore_c.h has included <wchar.h> all along. The two flat C surfaces must
+// Targetcore_c.h has included <wchar.h> all along. The two flat C surfaces must
 // agree, or "the C API" means something different depending which half of it a
 // consumer reaches for.
 #include <wchar.h>

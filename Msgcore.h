@@ -192,9 +192,9 @@ MsgcoreWildcard ( LPCTSTR lpszWildcard, LPCTSTR lpszName ) noexcept;
 #define VBLock_SyncMask 0xFC           // Endian sentinel  (Bits 2-7 of the oSync top byte)
 
 ///////////////////////////////////////////////////////////////////////
-//  LAYOUT GENERATION  (TargetCore's versioning note, §6, gate 2)
+//  LAYOUT GENERATION  (Targetcore's versioning note, §6, gate 2)
 //  NOTES: That note is NAMED rather than linked: it lives in the sibling
-//         TargetCore repository, so a path from here would not resolve.
+//         Targetcore repository, so a path from here would not resolve.
 //       : These six bits are also the message image's ONLY version story,
 //         and they are its only one because nothing else in the header has
 //         room: bits 0-23 are the size and bits 24-25 the addressing mode,

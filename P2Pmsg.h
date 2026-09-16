@@ -1372,7 +1372,7 @@ class P2Pc_vBlob
     //  with an int, a pointer, a double or a wchar_t in it - so, most things)
     //  every access through these is undefined behaviour.  It works on x86,
     //  which is why it has always appeared to; UBSan reports it on Linux and a
-    //  strict-alignment target faults.  TargetCore's finding F-S5-3.
+    //  strict-alignment target faults.  Targetcore's finding F-S5-3.
     //
     //  PREFER Load() and Store() below.  They are the same bytes through a
     //  memcpy, and they are defined everywhere.

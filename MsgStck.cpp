@@ -537,7 +537,7 @@ MsgStck__AllocItem ( MsgStck *pThis, const P3PmsgField& oField )
 //         nothing left pointing at them. Every caller wants the storage back:
 //         P3PmsgField::Drop, P3PmsgList::Drop and P3PmsgVect::Drop all reach
 //         here while dismantling an item, MsgFacade's FacadeNode exposes it as
-//         the COM "drop the stack" verb, and TargetCore's P2PeerMsg calls it
+//         the COM "drop the stack" verb, and Targetcore's P2PeerMsg calls it
 //         when it replaces one stack with another.
 //         Measured on a single push of a 272-byte item: push, record the
 //         snapshot's P2Pos, Drop, push an identical item again, and the second

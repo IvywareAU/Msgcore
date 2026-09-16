@@ -59,14 +59,14 @@ None of this is a link error. Pick a shape per process and hold it.
 
 ## Corollaries
 
-**1. Static Msgcore pairs with static TargetCore.** TargetCore sits directly on this
-heap; see `TargetCore/LINKAGE.md`, which carries the same rule for the hub and pump
+**1. Static Msgcore pairs with static Targetcore.** Targetcore sits directly on this
+heap; see `Targetcore/LINKAGE.md`, which carries the same rule for the hub and pump
 state. Pair `DebugLib`↔`DebugLib`, `ReleaseLib`↔`ReleaseLib`.
 
 **2. A consumer of the archives must define BOTH macros:**
 
 ```
-/DMsgcore_STATIC /DTargetCore_STATIC
+/DMsgcore_STATIC /DTargetcore_STATIC
 ```
 
 Defining only one compiles the other core's headers in `dllimport` mode. Most symbols

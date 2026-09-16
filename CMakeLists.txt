@@ -94,7 +94,7 @@ if(WIN32)
     # Msgcore_version.h) and the IDS_APP_TITLE string. Without it a CMake-built DLL has no
     # .rsrc section at all, so it reported EMPTY company and copyright to Explorer and to an
     # installer while the vcxproj-built one reported the full block - the same binary by two
-    # routes disagreeing about who owns it. Mirrors TargetCore/CMakeLists.txt, which has
+    # routes disagreeing about who owns it. Mirrors Targetcore/CMakeLists.txt, which has
     # compiled its .rc all along.
     # project() above declares LANGUAGES CXX only, so RC must be enabled before a .rc can be
     # attached to a target.
@@ -123,7 +123,7 @@ add_library(msgcore SHARED ${MSGCORE_SOURCES})
 #
 # PUBLIC is still correct at 17: it declares the MINIMUM a consumer needs, and
 # targetcore asks for cxx_std_23 and still gets it. The headers already have to
-# be valid under both -- TargetCore(2026).vcxproj is stdcpplatest and includes
+# be valid under both -- Targetcore(2026).vcxproj is stdcpplatest and includes
 # them -- so this is not a new constraint on them.
 target_compile_features(msgcore PUBLIC cxx_std_17)
 set_target_properties(msgcore PROPERTIES
@@ -182,11 +182,11 @@ endif()
 #
 # Read out of Msgcore(2026).vcxproj rather than guessed: those configurations are
 # ConfigurationType=StaticLibrary with UseOfMfc still Dynamic, and their preprocessor set is
-# WIN32;_WINDOWS;_DEBUG;Msgcore_STATIC;TargetCore_STATIC -- so Msgcore_STATIC REPLACES
+# WIN32;_WINDOWS;_DEBUG;Msgcore_STATIC;Targetcore_STATIC -- so Msgcore_STATIC REPLACES
 # Msgcore_EXPORTS (there is nothing to export from an archive) and _AFXEXT is absent, because
 # _AFXEXT marks an MFC EXTENSION DLL and this is not a DLL. Msgcore.h already has the arm:
 # `#if defined(Msgcore_STATIC)` -> neither dllexport nor dllimport. Same TU list either way;
-# unlike TargetCore there is no dllmain.cpp here to exclude.
+# unlike Targetcore there is no dllmain.cpp here to exclude.
 #
 # Not installed and not exported. The install/export set below describes the shared library a
 # consumer links at run time; adding a second archive to it would put two artifacts under one
@@ -218,7 +218,7 @@ endif()
 #
 # Added 2026-08-19, as the Msgcore half of the sibling repository's "install tree
 # that loads" work. Until then this file had NO install() rule of any kind.
-# TargetCore had
+# Targetcore had
 # had one since 2026-08-16 and its own comment said what that meant: the library
 # it stages links THIS one, so `cmake --install` produced an artifact that could
 # not load. That is the hole this closes, and it is the reason the step exists.
@@ -227,7 +227,7 @@ endif()
 # licence pair.
 #
 # Msgcore_version.h is not optional and its absence was a real defect on the
-# TargetCore side: Msgcore_c.h opens with #include "Msgcore_version.h", so a
+# Targetcore side: Msgcore_c.h opens with #include "Msgcore_version.h", so a
 # staged Msgcore_c.h without it does not preprocess. A header that cannot be
 # included is not a shipped header, whatever the install manifest says.
 #
@@ -238,7 +238,7 @@ endif()
 # wrapped in $<BUILD_INTERFACE:> below for exactly this reason, and the install()
 # rules here name their files one by one rather than globbing, so a new directory
 # in the source tree cannot leak into the package by accident. Shipping a header that
-# cannot be included is worse than shipping none -- the same call TargetCore
+# cannot be included is worse than shipping none -- the same call Targetcore
 # makes, for the same reason, and the two must agree or the flat C API is the
 # only usable surface on one side and not the other.
 include(GNUInstallDirs)

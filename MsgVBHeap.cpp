@@ -3274,7 +3274,7 @@ P2PmsgHeap_CreateIOMAGE ( VBListIOmage *pIOmage )
     // Likewise before the size is read, and for the same reason one step on:
     // bits 0-23 are the size in generation 1, and nothing promises that of a
     // layout this build has never seen. Refused with its code
-    // (TargetCore's versioning note, §6).
+    // (Targetcore's versioning note, §6).
     if ( P2PmsgHeap_IOMAGEform(pIOmage) == VBLockSync_Gen )
       EVERR->Module ( __FUNCTION__ )
            ->Message ( "IOMAGE layout generation 0x%02X is not implemented by "
