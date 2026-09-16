@@ -13,7 +13,8 @@
 # implied. See the License for the specific language governing
 # permissions and limitations under the License.
 #
-# Msgcore CI -- the release-readiness register, item 14, jobs 1, 2 and 3.
+# Msgcore CI -- the build matrix (job 1), the load and unit tests (job 2)
+# and the hygiene checks (job 3).
 #
 # NOTES: Every job runs on a FRESH CLONE with WDMSCS_LIB, WDMSCS_DEBUG and
 #        WDMSCS_VSUTILS absent from the environment. That is not incidental --
@@ -89,17 +90,16 @@ jobs:
       fail-fast: false        # one broken configuration must not mask the other seven
       matrix:
         include:
-          # Baselines are the "Warning lines" column of the release-readiness register's
-          # build table -- occurrence counts, the figure the per-code breakdown
-          # sums to.
+          # Baselines are occurrence counts of compiler warning lines -- the
+          # figure the per-code breakdown sums to, not a count of distinct
+          # warnings or of files.
           #
           # RE-RECORDED at the unified regime (item 10). All eight configurations
           # now compile at /W4 + /std:c++17 + /std:c17 + /sdl; the x64 four used
           # to be /W3 + stdcpplatest with no /sdl, which is why only they moved
           # (37 -> 76 debug-side, 37 -> 59 release-side). Win32 fell 140 -> 138
           # and 123 -> 121 because item 10 fixed two real defects rather than
-          # silencing two warnings -- see the C4456 and C4389 notes in
-          # The release-readiness register, Stage D.
+          # silencing two warnings -- one C4456 and one C4389.
           #
           # The platforms still differ (74/57 vs 137/120) from identical source
           # and now-identical switches. That is the C4244 residue: 37 truncations
@@ -114,8 +114,8 @@ jobs:
           # v145 warning sets are identical line for line apart from the project
           # filename, so the toolset changed nothing here.
           #
-          # The 76/59 came from the register's build table, measured on the
-          # pre-org line under MSBuild 17, and one x64 warning has gone since
+          # The 76/59 was measured on the pre-org line under MSBuild 17, and
+          # one x64 warning has gone since
           # without being attributed to a commit -- which is exactly what a stale
           # ceiling hides, and why the notice fired on every run until now.
           #
@@ -234,7 +234,7 @@ jobs:
               # Not a failure -- the counts are being driven down on purpose.
               # But the baseline is now stale, and a stale ceiling silently
               # re-admits every warning between $count and $baseline.
-              Write-Host "::notice::Warning count fell from $baseline to $count. Update the baseline in the release-readiness register and this matrix in the same commit."
+              Write-Host "::notice::Warning count fell from $baseline to $count. Update the baseline in this matrix in the same commit."
           }
 
       # The solution, not just the project. These are different entry points and
@@ -276,12 +276,12 @@ jobs:
               exit $rc
           }
 
-      # The release-readiness register, item 11. Only the two DLL configurations are
-      # checked, because DebugLib/ReleaseLib produce a static library and a
-      # static library has no export table to drift. Running it on all four
-      # DLL builds rather than one is deliberate and not redundant: it is how
-      # the Debug|Win32 /sdl divergence was found in the first place, and one
-      # configuration per platform would have missed it.
+      # Only the two DLL configurations are checked, because DebugLib and
+      # ReleaseLib produce a static library and a static library has no export
+      # table to drift. Running it on all four DLL builds rather than one is
+      # deliberate and not redundant: it is how the Debug|Win32 /sdl divergence
+      # was found in the first place, and one configuration per platform would
+      # have missed it.
       - name: Check the exported surface against the manifests
         if: matrix.configuration == 'Debug' || matrix.configuration == 'Release'
         run: |
@@ -382,11 +382,10 @@ jobs:
           }
           Write-Host "C4 load test passed in ${{ matrix.mode }} mode."
 
-      # The release-readiness register, item 15 (Stage E). The C4 test above is a security
-      # regression harness for the load path; this is the unit suite -- 82 cases
-      # and 328 checks over the C++ surface and the flat C ABI, carried in from
-      # MscsUnitTests. Run in BOTH link modes for the same reason C4 is: an
-      # offset minted against one copy of the heap does not resolve against
+      # The C4 test above is a security regression harness for the load path;
+      # this is the unit suite, over the C++ surface and the flat C ABI, carried
+      # in from MscsUnitTests. Run in BOTH link modes for the same reason C4 is:
+      # an offset minted against one copy of the heap does not resolve against
       # another (LINKAGE.md), so a suite that only ran one way would miss a
       # regression that breaks the other.
       #
@@ -411,7 +410,7 @@ jobs:
           Write-Host "Unit suites passed in ${{ matrix.mode }} mode."
 
   # --------------------------------------------------------------------------
-  #  Job 3 -- hygiene. The release-readiness register, item 14, third bullet.
+  #  Job 3 -- hygiene.
   #
   #  Neither check needs a compiler, so this runs on ubuntu-latest: it is the
   #  cheapest runner and it costs a tenth of a Windows one. Both scripts are
