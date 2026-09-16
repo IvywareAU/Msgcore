@@ -2045,7 +2045,7 @@ P3PmsgName::P3PmsgName ( ) noexcept
 {
     RenderThisSafe ( );
 }
-P3PmsgName::P3PmsgName ( LPCTNAM lpszName, size_t nSize )
+P3PmsgName::P3PmsgName ( LPCWSTR lpszName, size_t nSize )
 {
     RenderThisSafe ( );
     // Delegate to the c_name() setter, which enforces the 63-char cap and
@@ -2184,8 +2184,8 @@ P3PmsgName::operator > ( const P3PmsgName& rhs ) const
 }
 
 //  Name exposure
-LPCTNAM
-P3PmsgName::c_name ( LPCTNAM lpszName, size_t nSize )
+LPCWSTR
+P3PmsgName::c_name ( LPCWSTR lpszName, size_t nSize )
 {
    //ASSERT(VerifyContainment()); //delete-bug-hunting
     // To be sure, to be sure
@@ -2218,16 +2218,16 @@ P3PmsgName::c_name ( LPCTNAM lpszName, size_t nSize )
       pName->u.vBlob08.nBlobUsed     = (UINT08)nUnits;
     m_bNameDirty = true;
    ASSERT(VerifyContainment()); //delete-bug-hunting
-    return (LPCTNAM)&pName->u.vBlob08.cBlob;
+    return (LPCWSTR)&pName->u.vBlob08.cBlob;
 }
 
-LPCTNAM
+LPCWSTR
 P3PmsgName::c_name ( ) const
 {
     //  Name stored as 16-bit P2PWCHAR; widen to wchar_t on read (§4.2). For names
     //  nBlobUsed is the character count (set by the name-write path above).
     VBLockName *pName = P3PmsgName_GetVBLockName(m_pObject);
-    return (LPCTNAM)p2p_wstr_from_store ( &pName->u.vBlob08.cBlob, pName->u.vBlob08.nBlobUsed );
+    return (LPCWSTR)p2p_wstr_from_store ( &pName->u.vBlob08.cBlob, pName->u.vBlob08.nBlobUsed );
 }
 UCHAR
 P3PmsgName::c_size ( ) const
@@ -4097,29 +4097,29 @@ AssertValid(); //TODO:LJM debugging
 //  Navigation and 
 
 P3PmsgItem&
-P3PmsgField::SelectItem ( LPCTNAM lpszItemName )
+P3PmsgField::SelectItem ( LPCWSTR lpszItemName )
 {
     return r_Desc().SelectItem ( lpszItemName );
 }
 P3PmsgObject
-P3PmsgField::SelectObject ( LPCTNAM lpszObjectName )
+P3PmsgField::SelectObject ( LPCWSTR lpszObjectName )
 {
     return P3Pmsg_SelectObject ( &r_Object(), lpszObjectName );
 }
 P3PmsgItem&
-P3PmsgField::DeclareItem ( LPCTNAM lpszItemName, const P3PmsgData& oData, BOOL bUpdate )
+P3PmsgField::DeclareItem ( LPCWSTR lpszItemName, const P3PmsgData& oData, BOOL bUpdate )
 {
     return r_Desc().DeclareItem( lpszItemName, oData, bUpdate );
 }
 bool
-P3PmsgField::Exists ( LPCTNAM lpszItemName ) const
+P3PmsgField::Exists ( LPCWSTR lpszItemName ) const
 {
     if ( IsVoid() )
       return false;
     return !P3Pmsg_SelectObject(&r_Object(),lpszItemName).IsVoid();
 }
 bool
-P3PmsgField::Delete ( LPCTNAM lpszItemName )
+P3PmsgField::Delete ( LPCWSTR lpszItemName )
 {
     return r_Desc().Delete(lpszItemName);
 }
@@ -7625,13 +7625,13 @@ P3Pmsg_GetPath ( const P3PmsgDesc *pDesc )
     return strPath;
 }
 
-LPCTNAM
-ParseObjectPath ( LPCTNAM lpszObjectPath, LPTNAM lpszObjectname, int nObjectnameChars )
+LPCWSTR
+ParseObjectPath ( LPCWSTR lpszObjectPath, LPTNAM lpszObjectname, int nObjectnameChars )
 {
     // Parse out the immediate object name
     // NOTES: [.|@|^]objectname[.|@|^]objectname[.|@|^]etc
     ZeroMemory ( (void *)lpszObjectname, nObjectnameChars*sizeof(lpszObjectname[0]) );
-    LPCTNAM lpszParsedname = lpszObjectPath;
+    LPCWSTR lpszParsedname = lpszObjectPath;
     int     i = 0;
     while ( *lpszParsedname                &&
             *lpszParsedname != T_DescDelim &&
@@ -7650,7 +7650,7 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
 {
     // Locals;
     TCHAR     nsObjectname[MAX_TNAME_SIZE];
-    LPCTNAM lpszParsedname = ParseObjectPath ( lpszObjectPath, nsObjectname, ARRAYSIZE(nsObjectname) );
+    LPCWSTR lpszParsedname = ParseObjectPath ( lpszObjectPath, nsObjectname, ARRAYSIZE(nsObjectname) );
 
     //  AN OBJECT THAT NAMES NO BLOCK IS AN ORDINARY ANSWER, NOT A LOGIC ERROR.
     //  r_Attr() on an item that has no attributes hands back one of these, so

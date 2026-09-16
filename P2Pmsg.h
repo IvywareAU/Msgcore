@@ -64,15 +64,15 @@ class Msgcore_EXT P2PmsgCheckMemory
 ///////////////////////////////////////////////////////////////////////
 //  Convenience characters
 
-#define T_Space     _T(' ')
-#define T_Hash      _T('#')
-#define T_Period    _T('.')
-#define T_Colon     _T(':')
+#define T_Space      L' '
+#define T_Hash       L'#'
+#define T_Period     L'.'
+#define T_Colon      L':'  
 #define T_BackSlash L'\\'
 #define T_ForeSlash L'/'
-#define T_LF        _T('\n')
-#define T_CR        _T('\r')
-#define T_CRLF      _T("\r\n")
+#define T_LF         L'\n'
+#define T_CR         L'\r'
+#define T_CRLF       L"\r\n"
 #define T_RootDelim  L'.'
 #define T_DescDelim  L'.'
 #define T_AttrDelim  L'@'
@@ -776,7 +776,7 @@ class Msgcore_EXT P3PmsgField : public P3PmsgName, public P3PmsgData
         operator != ( const P3PmsgField& rhs ) const;
 
       virtual P3PmsgField&
-        operator [] ( LPCTNAM lpszName );
+        operator [] ( LPCWSTR lpszName );
 
         operator P3PmsgData& ( );
 
@@ -807,17 +807,15 @@ class Msgcore_EXT P3PmsgField : public P3PmsgName, public P3PmsgData
     // Navigation and 
     public:
       P3PmsgField&
-        SelectItem  ( LPCTNAM lpszItemName );
+        SelectItem  ( LPCWSTR lpszItemName );
       P3PmsgObject
-        SelectObject( LPCTNAM lpszObjectName );
+        SelectObject( LPCWSTR lpszObjectName );
       P3PmsgField&
-        DeclareItem ( LPCTNAM lpszFieldName, const P3PmsgData& oData, BOOL bUpdate = FALSE );
-      //P3PmsgNode&
-      //  DeclareNode ( LPCTNAM lpszNodeName, const P3PmsgData& oData, bool bUpdate = false );
+        DeclareItem ( LPCWSTR lpszFieldName, const P3PmsgData& oData, BOOL bUpdate = FALSE );
       virtual bool
-        Exists ( LPCTNAM lpszItemName ) const;
+        Exists ( LPCWSTR lpszItemName ) const;
       virtual bool
-        Delete ( LPCTNAM lpszItemName );
+        Delete ( LPCWSTR lpszItemName );
       virtual void
         Truncate ( );
 
@@ -1097,7 +1095,7 @@ P2PmsgAttr_SERIALISE  ( P3PmsgAttr& oAttr, BOOL bOverwrite
 //  P2Pmsg object helpers
 
 Msgcore_EXT CString
-P3Pmsg_GetRootname ( LPCTSTR lpszItemPath );
+P3Pmsg_GetRootname ( LPCWSTR lpszItemPath );
 Msgcore_EXT CString
 P3Pmsg_GetPath ( const P3PmsgField *pField );
 Msgcore_EXT CString
