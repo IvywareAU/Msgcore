@@ -115,7 +115,7 @@ class Msgcore_EXT P3PmsgBSTR
     public:
         P3PmsgBSTR ( );
 
-        P3PmsgBSTR ( LPCTSTR lpszName, const P3PmsgData& oData );
+        P3PmsgBSTR ( LPCWSTR lpszName, const P3PmsgData& oData );
 
         P3PmsgBSTR ( UCHAR uVBLockAddr, VBLsize nSizeof );
 
@@ -148,7 +148,7 @@ class Msgcore_EXT P3PmsgBSTR
       P3PmsgBSTR&
         Init ( P2PmsgHANDLE hBSTR );
       P3PmsgItem&
-        Init ( LPCTNAM lpszName, const P3PmsgData& oData );
+        Init ( LPCWSTR lpszName, const P3PmsgData& oData );
       //P3PmsgNode&
       //  InitAddr ( );
       P3PmsgItem&
@@ -240,10 +240,10 @@ typedef P3PmsgBSTRnn<VBLock_Addr64> P3PmsgBSTR64;
 //  NOTES: Manage P3PmsgBSTR disk IO
 
 Msgcore_EXT BOOL
-P2PmsgBSTR_Read ( LPCTSTR lpszPathname, P3PmsgBSTR& oBSTR );
+P2PmsgBSTR_Read ( LPCWSTR lpszPathname, P3PmsgBSTR& oBSTR );
 Msgcore_EXT BOOL
 P2PmsgBSTR_Read ( HANDLE hFile, P3PmsgBSTR& oBSTR );
 Msgcore_EXT BOOL
-P2PmsgBSTR_Write ( LPCTSTR lpszPathname, const P3PmsgBSTR& oBSTR );
+P2PmsgBSTR_Write ( LPCWSTR lpszPathname, const P3PmsgBSTR& oBSTR );
 Msgcore_EXT BOOL
 P2PmsgBSTR_Write ( HANDLE hFile, const P3PmsgBSTR& oBSTR );

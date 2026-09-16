@@ -49,7 +49,7 @@ P3PmsgBSTR::P3PmsgBSTR ( )
     //m_oItem.Connect ( m_hBSTR, 0, 0 );  //TODO:P3Pobject upgrade
 }
 
-P3PmsgBSTR::P3PmsgBSTR ( LPCTSTR lpszName, const P3PmsgData& oData )
+P3PmsgBSTR::P3PmsgBSTR ( LPCWSTR lpszName, const P3PmsgData& oData )
 {
     m_hBSTR = P2PmsgHeap_CreateIOMAGE ( GetP2Pmsgnn(), BSTR_INITIAL_SiZE, 0/*was2024*/ );
     Init ( lpszName, oData );
@@ -165,7 +165,7 @@ P3PmsgBSTR::ResetThisObject ( )
 //  External initialisation
 
 P3PmsgItem&
-P3PmsgBSTR::Init ( LPCTNAM lpszMsgName, const P3PmsgData& oItemData )
+P3PmsgBSTR::Init ( LPCWSTR lpszMsgName, const P3PmsgData& oItemData )
 {
     //UINT       nSizeofItem;
     P3PmsgItem oItem ( lpszMsgName, oItemData );

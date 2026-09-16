@@ -192,7 +192,7 @@ P3PmsgDesc::operator += ( const P3PmsgField& rhs )
     return *this;
 }
 P3PmsgItem&
-P3PmsgDesc::operator [] ( LPCTNAM lpszName )
+P3PmsgDesc::operator [] ( LPCWSTR lpszName )
 {
     if ( m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -306,7 +306,7 @@ P3PmsgDesc::Drop ( )
 
 //  Navigation and 
 P3PmsgObject
-P3PmsgDesc::SelectObject ( LPCTNAM lpszObjectName )
+P3PmsgDesc::SelectObject ( LPCWSTR lpszObjectName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -315,7 +315,7 @@ P3PmsgDesc::SelectObject ( LPCTNAM lpszObjectName )
     return m_pCurs->r_Object();
 }
 P3PmsgField
-P3PmsgDesc::Select ( LPCTNAM lpszItemName )
+P3PmsgDesc::Select ( LPCWSTR lpszItemName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -324,7 +324,7 @@ P3PmsgDesc::Select ( LPCTNAM lpszItemName )
     return *m_pCurs;
 }
 P3PmsgField&
-P3PmsgDesc::SelectItem ( LPCTNAM lpszItemName )
+P3PmsgDesc::SelectItem ( LPCWSTR lpszItemName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -339,7 +339,7 @@ P3PmsgDesc::SelectItem ( LPCTNAM lpszItemName )
 }
 
 P3PmsgList&
-P3PmsgDesc::SelectList ( LPCTNAM lpszListName )
+P3PmsgDesc::SelectList ( LPCWSTR lpszListName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -354,7 +354,7 @@ P3PmsgDesc::SelectList ( LPCTNAM lpszListName )
     return m_pCurs->r_list ( );
 }
 P3PmsgVect&
-P3PmsgDesc::SelectVect ( LPCTNAM lpszVectName )
+P3PmsgDesc::SelectVect ( LPCWSTR lpszVectName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -370,7 +370,7 @@ P3PmsgDesc::SelectVect ( LPCTNAM lpszVectName )
 }
 
 P3PmsgField&
-P3PmsgDesc::DeclareItem ( LPCTNAM lpszItemName, const P3PmsgData& oData, BOOL bUpdate )
+P3PmsgDesc::DeclareItem ( LPCWSTR lpszItemName, const P3PmsgData& oData, BOOL bUpdate )
 {
     if ( OBJ__aVBLock == NULL )
       Create ( );
@@ -389,7 +389,7 @@ P3PmsgDesc::DeclareItem ( LPCTNAM lpszItemName, const P3PmsgData& oData, BOOL bU
     return m_pCurs->r_item();
 }
 //P3PmsgNode&
-//P3PmsgDesc::DeclareNode ( LPCTNAM lpszNodename, const P3PmsgData& oData, BOOL bUpdate )
+//P3PmsgDesc::DeclareNode ( LPCWSTR lpszNodename, const P3PmsgData& oData, BOOL bUpdate )
 //{
 //    ASSERT(0);
 //    if ( OBJ__aVBLock == NULL )
@@ -407,17 +407,17 @@ P3PmsgDesc::DeclareItem ( LPCTNAM lpszItemName, const P3PmsgData& oData, BOOL bU
 //    return m_pCurs->r_node();
 //}
 bool
-P3PmsgDesc::Exists ( LPCTNAM lpszItemName )
+P3PmsgDesc::Exists ( LPCWSTR lpszItemName )
 {
     if ( OBJ__aVBLock == NULL )
       return false;
     if (  lpszItemName         == NULL ||
-         _tcslen(lpszItemName) <= 0       )
+         wcslen(lpszItemName) <= 0       )
       return false;
     return !P3Pmsg_SelectObject(&r_Object(),lpszItemName).IsVoid();
 }
 bool
-P3PmsgDesc::Delete ( LPCTNAM lpszItemName )
+P3PmsgDesc::Delete ( LPCWSTR lpszItemName )
 {
     if ( OBJ__aVBLock == NULL )
       return false;
@@ -1154,10 +1154,10 @@ P2PmsgDesc_SortinItem ( P3PmsgDesc *pDesc, const P3PmsgName& oName
 
       // Insertion before minimum
       //oCurs.Goto(imin);
-      //LPCTSTR lpszImin = oCurs.r_name().c_name();
-      //LPCTSTR lpszName = oName.c_name();
+      //LPCWSTR lpszImin = oCurs.r_name().c_name();
+      //LPCWSTR lpszName = oName.c_name();
       //oCurs.Goto(imax);
-      //LPCTSTR lpszImax = oCurs.r_name().c_name();
+      //LPCWSTR lpszImax = oCurs.r_name().c_name();
     // Insertion before minimum
     if ( oCurs.Goto(imin) && oName < oCurs.r_name() )
     {
@@ -1401,11 +1401,11 @@ P2PmsgDesc_Swap ( P3PmsgItem& oItem1, P3PmsgItem& oItem2 )
 //  Parameters:  P3PmsgDesc oDesc
 //               Descendant object from which items are to be deleted
 //
-//               LPCTSTR lpszWildcard
+//               LPCWSTR lpszWildcard
 //               Wildcard
 //
 BOOL
-P2PmsgDesc_WCDelete ( P3PmsgDesc& oDesc, LPCTSTR lpszWildcard )
+P2PmsgDesc_WCDelete ( P3PmsgDesc& oDesc, LPCWSTR lpszWildcard )
 {
     int nMatches = 0;
     P3PmsgCurs oCurs ( oDesc );

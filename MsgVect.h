@@ -51,7 +51,7 @@ class Msgcore_EXT P3PmsgVect : public P3PmsgField
 
         P3PmsgVect ( const P3PmsgVect& rhs );
 
-        P3PmsgVect ( int nElems, LPCTNAM lpszName, const P3PmsgData& oData );
+        P3PmsgVect ( int nElems, LPCWSTR lpszName, const P3PmsgData& oData );
 
         P3PmsgVect ( int nElems, const P3PmsgField& oField );
 

@@ -69,7 +69,7 @@ P3PmsgVect::P3PmsgVect ( )
 {
     //RenderThisSafe ( );
 }
-P3PmsgVect::P3PmsgVect ( int nItems, LPCTNAM lpszName, const P3PmsgData& oData )
+P3PmsgVect::P3PmsgVect ( int nItems, LPCWSTR lpszName, const P3PmsgData& oData )
           : P3PmsgField ( 0, 0, 0 )
 {
     RenderThisSafe ( );
@@ -295,7 +295,7 @@ ASSERT(VBLock_IsLinked(pVBLock));
 
 //
 //P3PmsgField&
-//P3PmsgNode::AddField( LPCTSTR lpszName, P3PmsgData& oData )
+//P3PmsgNode::AddField( LPCWSTR lpszName, P3PmsgData& oData )
 //{
 //  (*this) += P3PmsgField(lpszName, oData );
 //    return *this;
@@ -430,11 +430,11 @@ ASSERT(r_Object().IsVect());
 //      //aField = aItem__ + VBLockItem_uos(pVBLock->oHdr.uVBLock,VBLock_pItem(pItem));
 //
 //    P3PmsgField oField ( m_hVBList, aItem__, nSizeofItem );
-//    LPCTSTR lpszName = oField.c_name();
+//    LPCWSTR lpszName = oField.c_name();
 //oField.AssertValid();
 //                oField = rhs;
 //oField.AssertValid();
-//    LPCTSTR lpszName1 = oField.c_name();
+//    LPCWSTR lpszName1 = oField.c_name();
 //AssertValid();
 //rhs.AssertValid();
 //    return *this;
@@ -456,7 +456,7 @@ P3PmsgVect::operator bool ( )
 }
 
 //P3PmsgField&
-//P3PmsgNode::operator [] ( LPCTSTR lpszItemName )
+//P3PmsgNode::operator [] ( LPCWSTR lpszItemName )
 //{
 //    if ( !m_pCurs )
 //      m_pCurs = new P3PmsgCurs ( *this );
@@ -473,7 +473,7 @@ P3PmsgVect::operator bool ( )
 ////  Navigation
 //
 //P3PmsgNode&
-//P3PmsgNode::SelectNode ( LPCTSTR lpszNodeName )
+//P3PmsgNode::SelectNode ( LPCWSTR lpszNodeName )
 //{
 //    if ( !m_pCurs )
 //      m_pCurs = new P3PmsgCurs ( *this );
@@ -489,7 +489,7 @@ P3PmsgVect::operator bool ( )
 //}
 //
 //bool
-//P3PmsgNode::Exists ( LPCTSTR lpszItemName )
+//P3PmsgNode::Exists ( LPCWSTR lpszItemName )
 //{
 //    if ( !m_pCurs )
 //      m_pCurs = new P3PmsgCurs ( *this );

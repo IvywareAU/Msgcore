@@ -102,7 +102,7 @@ class Msgcore_EXT MsgStck
     // Navigation and 
     public:
       MsgStck&
-        Rename ( LPCTNAM lpszName, bool bRecurse = true );
+        Rename ( LPCWSTR lpszName, bool bRecurse = true );
 
     // Exposure
     public:

@@ -78,10 +78,10 @@ class Msgcore_EXT P2PmsgCheckMemory
 #define T_AttrDelim  L'@'
 #define T_StckDelim  L'^'
 
-#define SelectObject_T(str)      SelectObject(_T(str))
-#define SelectItem_T(str)        SelectItem(_T(str))
-#define DeclareItem_T(str,data)  DeclareItem(_T(str),data)
-//#define DeclareNode_T(str,data)  DeclareNode(_T(str),data)
+#define SelectObject_T(str)      SelectObject(L##str)
+#define SelectItem_T(str)        SelectItem(L##str)
+#define DeclareItem_T(str,data)  DeclareItem(L##str,data)
+//#define DeclareNode_T(str,data)  DeclareNode(L##str,data)
 
 
 class P3PmsgField;
@@ -123,7 +123,7 @@ class Msgcore_EXT P3PmsgData
 		    P3PmsgData ( LPCWSTR vString
                    , size_t nLength = 0, UCHAR uVBLockData = VBLockData_WSTR16 );
         P3PmsgData ( size_t nLengthMax
-                   , LPCTSTR vString
+                   , LPCWSTR vString
                    , size_t nLength = 0, UCHAR uVBLockData = VBLockData_BSTR16var );
         P3PmsgData ( const void *vObject
                    , VBLsize nSizeof, UCHAR uVBLockData = VBLockData_BLOB16 );
@@ -311,12 +311,12 @@ class Msgcore_EXT P3PmsgData
     public:
       void
         Nullify ( );
-      LPCTSTR
-        ToString ( LPCTSTR lpszFormat = nullptr );
-      LPCTSTR
-        ToStringDefs ( LPCTSTR lpszFormat = 0 );
-      LPCTSTR
-        ToStringType ( LPCTSTR lpszFormat = 0 ) const;
+      LPCWSTR
+        ToString ( LPCWSTR lpszFormat = nullptr );
+      LPCWSTR
+        ToStringDefs ( LPCWSTR lpszFormat = 0 );
+      LPCWSTR
+        ToStringType ( LPCWSTR lpszFormat = 0 ) const;
 
     // Troubleshooting
     public:
@@ -357,11 +357,11 @@ class Msgcore_EXT P3PmsgData
       mutable
       P3PmsgObject *m_pObject{nullptr};
       mutable
-      TCHAR         m_szToString[256];
-      TCHAR         m_szToStrDef[256];
+      WCHAR         m_szToString[256];
+      WCHAR         m_szToStrDef[256];
       bool          m_bDataDirty{false};
 };
-//TCHAR
+//WCHAR
 #ifdef _UNICODE_TNAME
   #define c_tcscmp  c_wcscmp
   #define c_tcsicmp c_wcsicmp
@@ -432,7 +432,7 @@ class Msgcore_EXT P3PmsgName
     public:
         P3PmsgName ( ) noexcept;
 
-        P3PmsgName ( LPCTNAM lpszName, size_t nSize = 0 );
+        P3PmsgName ( LPCWSTR lpszName, size_t nSize = 0 );
       virtual
        ~P3PmsgName ( );
 
@@ -443,7 +443,7 @@ class Msgcore_EXT P3PmsgName
       bool
         operator == ( const P3PmsgName& rhs ) const;
       bool
-        operator == ( LPCTSTR rhs ) const;
+        operator == ( LPCWSTR rhs ) const;
       bool
         operator < ( const P3PmsgName& rhs ) const;
       bool
@@ -451,9 +451,9 @@ class Msgcore_EXT P3PmsgName
 
     // Name exposure
     public:
-      LPCTNAM
-        c_name ( LPCTNAM lpszName, size_t nSize = 0 );
-	    LPCTNAM
+      LPCWSTR
+        c_name ( LPCWSTR lpszName, size_t nSize = 0 );
+	    LPCWSTR
         c_name ( ) const;
       UCHAR
         c_size ( ) const;
@@ -723,9 +723,9 @@ class Msgcore_EXT P3PmsgField : public P3PmsgName, public P3PmsgData
 
         P3PmsgField ( const P3PmsgField& rhs );
 
-        P3PmsgField ( LPCTNAM lpszName, size_t nSize = 0 );
+        P3PmsgField ( LPCWSTR lpszName, size_t nSize = 0 );
 
-        P3PmsgField ( LPCTNAM lpszName, const P3PmsgData& oData );
+        P3PmsgField ( LPCWSTR lpszName, const P3PmsgData& oData );
 
         P3PmsgField ( const P2PmsgFieldHdl& hField );
 
@@ -765,7 +765,7 @@ class Msgcore_EXT P3PmsgField : public P3PmsgName, public P3PmsgData
       //  therefore not be compared to a name at all -- C2678, while every
       //  meaningless comparison below compiled.
       bool
-        operator == ( LPCTNAM lpszName ) const;
+        operator == ( LPCWSTR lpszName ) const;
 
       //  Compare by IDENTITY -- do these two denote the SAME item?  That is
       //  P3PmsgObject's question and this asks it of the object.  For the
@@ -921,7 +921,7 @@ P2PmsgField_GetVBLockParentnn ( const P3PmsgField *pField );
 VBLock*
 P2PmsgField_GetVBLockParent ( const P3PmsgField *pField );
 
-//#define P2N(name) SelectNode(_T(#name))
+//#define P2N(name) SelectNode(L#name)
 
 /*class Msgcore_EXT P3PmsgNode : public P3PmsgField
 {
@@ -935,9 +935,9 @@ P2PmsgField_GetVBLockParent ( const P3PmsgField *pField );
 
         P3PmsgNode ( const P3PmsgNode& rhs );
 
-        P3PmsgNode ( LPCTNAM lpszName, int nSize = 0 );
+        P3PmsgNode ( LPCWSTR lpszName, int nSize = 0 );
 
-        P3PmsgNode ( LPCTNAM lpszName, const P3PmsgData& oData );
+        P3PmsgNode ( LPCWSTR lpszName, const P3PmsgData& oData );
 
         P3PmsgNode ( const P3PmsgField& oField );
 
@@ -954,9 +954,9 @@ P2PmsgField_GetVBLockParent ( const P3PmsgField *pField );
       void
         Connect ( P2PmsgHANDLE hVBList, VBLaddr aVBLock, VBLsize nNodeSize );
       P3PmsgNode&
-        AddNode ( LPCTNAM lpszName, const P3PmsgData& oData );
+        AddNode ( LPCWSTR lpszName, const P3PmsgData& oData );
       P3PmsgField&
-        AddField( LPCTNAM lpszName, const P3PmsgData& oData );
+        AddField( LPCWSTR lpszName, const P3PmsgData& oData );
 
     // Operators
     public:
@@ -977,7 +977,7 @@ P2PmsgField_GetVBLockParent ( const P3PmsgField *pField );
       P3PmsgNode&
         operator += ( const P3PmsgField& rhs );
       virtual P3PmsgField&
-        operator [] ( LPCTNAM lpszName );
+        operator [] ( LPCWSTR lpszName );
 
         operator P2PmsgNodeHdl ( );
 
@@ -991,27 +991,27 @@ P2PmsgField_GetVBLockParent ( const P3PmsgField *pField );
     // Navigation and 
     public:
       P3PmsgField
-        Select      ( LPCTNAM lpszItemName );
+        Select      ( LPCWSTR lpszItemName );
       P3PmsgObject
-        SelectObject( LPCTNAM lpszObjectName );
+        SelectObject( LPCWSTR lpszObjectName );
       P3PmsgField&
-        SelectItem  ( LPCTNAM lpszItemName );
+        SelectItem  ( LPCWSTR lpszItemName );
       P3PmsgNode&
-        SelectNode  ( LPCTNAM lpszNodeName );
+        SelectNode  ( LPCWSTR lpszNodeName );
       P3PmsgVect&
-        SelectVect  ( LPCTNAM lpszVectName );
+        SelectVect  ( LPCWSTR lpszVectName );
 
       P3PmsgField&
-        DeclareItem ( LPCTNAM lpszFieldName, const P3PmsgData& oData, bool bUpdate = false );
+        DeclareItem ( LPCWSTR lpszFieldName, const P3PmsgData& oData, bool bUpdate = false );
       P3PmsgNode&
-        DeclareNode ( LPCTNAM lpszNodeName, const P3PmsgData& oData, bool bUpdate = false );
+        DeclareNode ( LPCWSTR lpszNodeName, const P3PmsgData& oData, bool bUpdate = false );
 
       //bool
       //  Exists ( UPCSTR lpszItemName ) const;
       bool
-        Exists ( LPCTNAM lpszItemName ) const;
+        Exists ( LPCWSTR lpszItemName ) const;
       bool
-        Delete ( LPCTNAM lpszItemName );
+        Delete ( LPCWSTR lpszItemName );
       void
         Truncate ( );
 
@@ -1083,13 +1083,13 @@ P2PmsgNode_Swap  ( P3PmsgField& oField1, P3PmsgField& oField2 );
 //  NOTES: Perform standard activities
 Msgcore_EXT P3PmsgItem&
 P3PmsgField_SERIALISE ( P3PmsgItem& oItem
-                      , LPCTNAM lpszFieldname, const P3PmsgData& oData
-                      , BOOL bDscAttr, LPCTSTR lpszDescription );
+                      , LPCWSTR lpszFieldname, const P3PmsgData& oData
+                      , BOOL bDscAttr, LPCWSTR lpszDescription );
 
 Msgcore_EXT P3PmsgAttr&
 P2PmsgAttr_SERIALISE  ( P3PmsgAttr& oAttr, BOOL bOverwrite
-                      , LPCTNAM lpszFieldname, const P3PmsgData& oData
-                      , BOOL bDscAttr = false, LPCTSTR lpszDescription = 0 );
+                      , LPCWSTR lpszFieldname, const P3PmsgData& oData
+                      , BOOL bDscAttr = false, LPCWSTR lpszDescription = 0 );
 
 ///////////////////////////////////////////////////////////////////////
 //  P2Pmsg object helpers
@@ -1110,7 +1110,7 @@ Msgcore_EXT BOOL
 P3Pmsg_IsValidItemname ( LPCWSTR lpszItemname, wchar_t *pwchar = 0 );
 
 Msgcore_EXT P3PmsgObject
-P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath );
+P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCWSTR lpszObjectPath );
 
 Msgcore_EXT BOOL
 P3Pmsg_IsPathDelimiter ( LPCWSTR lpszObjectPath );
@@ -1118,7 +1118,7 @@ Msgcore_EXT BOOL
 P3Pmsg_SplitRootPath ( LPCWSTR lpszObjectPath, CString& strRoot
                      , CList<CString>& oCListItems );
 Msgcore_EXT int
-P3Pmsg_fwprintf ( FILE *fd, LPCTSTR lpszFormat, ... );
+P3Pmsg_fwprintf ( FILE *fd, LPCWSTR lpszFormat, ... );
 
 
 ///////////////////////////////////////////////////////////////////////
@@ -1133,32 +1133,32 @@ P3Pmsg_SetTStamp ( const P3PmsgItem& oItem, INT64 tsValue = -1, BOOL bRecurse = 
 //  P2Pmsg refactoring helpers
 
 Msgcore_EXT void
-P3PmsgRefactor_Delete ( P3PmsgField& oItem, LPCTSTR lpszItemName );
+P3PmsgRefactor_Delete ( P3PmsgField& oItem, LPCWSTR lpszItemName );
 Msgcore_EXT void
-P3PmsgRefactor_Delete ( P3PmsgAttr& oItem, LPCTSTR lpszItemName );
+P3PmsgRefactor_Delete ( P3PmsgAttr& oItem, LPCWSTR lpszItemName );
 Msgcore_EXT void
-P3PmsgRefactor_DeleteFromParents ( const P3PmsgField& oItem, LPCTSTR lpszItemName );
+P3PmsgRefactor_DeleteFromParents ( const P3PmsgField& oItem, LPCWSTR lpszItemName );
 Msgcore_EXT int
-P3PmsgRefactor_DeleteWithQualAttributes ( P3PmsgAttr& oAttr, LPCTSTR lpszAttribute1
-                  , LPCTSTR lpszAttribute2 = nullptr, LPCTSTR lpszAttribute3 = nullptr );
+P3PmsgRefactor_DeleteWithQualAttributes ( P3PmsgAttr& oAttr, LPCWSTR lpszAttribute1
+                  , LPCWSTR lpszAttribute2 = nullptr, LPCWSTR lpszAttribute3 = nullptr );
 Msgcore_EXT void
-P3PmsgRefactor_Rename ( P3PmsgField& oItem, LPCTSTR lpszItemName, LPCTSTR lpszItemNew );
+P3PmsgRefactor_Rename ( P3PmsgField& oItem, LPCWSTR lpszItemName, LPCWSTR lpszItemNew );
 Msgcore_EXT void
-P3PmsgRefactor_Rename ( P3PmsgAttr& oAttr, LPCTSTR lpszItemName, LPCTSTR lpszItemNew );
+P3PmsgRefactor_Rename ( P3PmsgAttr& oAttr, LPCWSTR lpszItemName, LPCWSTR lpszItemNew );
 Msgcore_EXT void
-P3PmsgRefactor_Move ( P3PmsgField& oItemSource, P3PmsgField& oItemDestin, LPCTSTR lpszItemName );
+P3PmsgRefactor_Move ( P3PmsgField& oItemSource, P3PmsgField& oItemDestin, LPCWSTR lpszItemName );
 Msgcore_EXT void
-P3PmsgRefactor_Move ( P3PmsgField& oItemSource, P3PmsgAttr& oAttrDestin, LPCTSTR lpszItemName );
+P3PmsgRefactor_Move ( P3PmsgField& oItemSource, P3PmsgAttr& oAttrDestin, LPCWSTR lpszItemName );
 Msgcore_EXT void
-P3PmsgRefactor_Move ( P3PmsgAttr& oAttrSource, P3PmsgField& oItemDestin, LPCTSTR lpszItemName );
+P3PmsgRefactor_Move ( P3PmsgAttr& oAttrSource, P3PmsgField& oItemDestin, LPCWSTR lpszItemName );
 Msgcore_EXT void
-P3PmsgRefactor_Move ( P3PmsgAttr& oAttrSource, P3PmsgAttr& oAttrDestin, LPCTSTR lpszItemName );
+P3PmsgRefactor_Move ( P3PmsgAttr& oAttrSource, P3PmsgAttr& oAttrDestin, LPCWSTR lpszItemName );
 Msgcore_EXT void
-P3PmsgRefactor_DataType ( P3PmsgItem& oItemParent, LPCTSTR lpszItemname, const P3PmsgData& oData );
+P3PmsgRefactor_DataType ( P3PmsgItem& oItemParent, LPCWSTR lpszItemname, const P3PmsgData& oData );
 Msgcore_EXT void
-P3PmsgRefactor_CastDataType (P3PmsgItem& oItem, LPCTSTR lpszItemName, char ucNewDataType);
+P3PmsgRefactor_CastDataType (P3PmsgItem& oItem, LPCWSTR lpszItemName, char ucNewDataType);
 Msgcore_EXT void
-P3PmsgRefactor_CastDataType (P3PmsgAttr& oAttr, LPCTSTR lpszAttrName, char ucNewDataType);
+P3PmsgRefactor_CastDataType (P3PmsgAttr& oAttr, LPCWSTR lpszAttrName, char ucNewDataType);
 Msgcore_EXT void    
 P3PmsgRefactor_CastDataType ( P3PmsgData& oData, char ucNewDataType );
 
@@ -1445,16 +1445,16 @@ class P2Pc_str
 {
     // Constructors and destruction
     public:
-        P2Pc_str () : m_oData ( (LPCTSTR*)0, 32, uBSTRnn )
+        P2Pc_str () : m_oData ( (LPCWSTR*)0, 32, uBSTRnn )
         {
           //m_oData.Recreate ( VBLockData_BLOB08, 0, sizeof(StructType) );
           //m_oData.Nullify ( );
         }
         P2Pc_str ( const P3PmsgData& rhs ) { m_oData = rhs;}
 
-        P2Pc_str ( LPCTNAM lpszString )
+        P2Pc_str ( LPCWSTR lpszString )
         {
-          m_oData.Recreate ( uBSTRnn, lpszString, _tcslen(lpszString)*sizeof(TCHAR) );
+          m_oData.Recreate ( uBSTRnn, lpszString, wcslen(lpszString)*sizeof(WCHAR) );
         }
         //P2Pc_str ( const StructType& oStructType )
         //{
@@ -1481,7 +1481,7 @@ class P2Pc_str
         operator P3PmsgData& ( ) { return m_oData; }
 
       P2Pc_str&
-        operator = ( LPCTSTR lpszString )
+        operator = ( LPCWSTR lpszString )
         {
           m_oData.c_memcpy ( lpszString, wcslen(lpszString)*sizeof(lpszString[0]) );
           return *this;

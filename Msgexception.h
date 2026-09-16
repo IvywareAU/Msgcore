@@ -201,11 +201,11 @@ class Msgcore_EXT P2Pevent : public P3PmsgItem
         Module  ( LPCWSTR lpszModuleName, ... );
 #endif
       P2Pevent*
-        Module_ ( LPCTSTR lpszModuleName );
+        Module_ ( LPCWSTR lpszModuleName );
       P2Pevent*
-        HResult ( HRESULT hr, LPCTSTR lpszhr = 0 );
+        HResult ( HRESULT hr, LPCWSTR lpszhr = 0 );
       P2Pevent*
-        HResultHMODULE ( HRESULT hr, LPCTSTR lpszHMODULE, LPCTSTR lpszhr = 0 );
+        HResultHMODULE ( HRESULT hr, LPCWSTR lpszHMODULE, LPCWSTR lpszhr = 0 );
 #ifdef _UNICODE
       P2Pevent*
         Message ( LPCWSTR lpszFormat, ... );
@@ -213,7 +213,7 @@ class Msgcore_EXT P2Pevent : public P3PmsgItem
       P2Pevent*
         Message ( LPCSTR lpszFormat, ... );
       P2Pevent*
-        Message_( LPCTSTR lpszMessage );
+        Message_( LPCWSTR lpszMessage );
 #ifdef _UNICODE
       P2Pevent*
         Advice  ( LPCWSTR lpszFormat, ... );
@@ -221,7 +221,7 @@ class Msgcore_EXT P2Pevent : public P3PmsgItem
       P2Pevent*
         Advice  ( LPCSTR lpszFormat, ... );
       P2Pevent*
-        Advice_ ( LPCTSTR lpszFormat );
+        Advice_ ( LPCWSTR lpszFormat );
 #ifdef _UNICODE
       P2Pevent*
         Group  ( LPCWSTR lpszGroupFormat, ... );
@@ -229,7 +229,7 @@ class Msgcore_EXT P2Pevent : public P3PmsgItem
       P2Pevent*
         Group  ( LPCSTR lpszGroupFormat, ... );
       P2Pevent*
-        Group_ ( LPCTSTR lpszGroupFormat );
+        Group_ ( LPCWSTR lpszGroupFormat );
       P2Pevent*
         Time    ( DWORD dwEpochTime );
       P2Pevent*
@@ -249,8 +249,8 @@ class Msgcore_EXT P2Pevent : public P3PmsgItem
     // NOTES: Variable parameter set associated with P2Pevent
     public:
       P2Pevent*
-        SetFParam  ( LPCTNAM lpszFParamName, const P3PmsgData& oData );
-      P2Pevent* SetFParam(LPCTNAM lpszFParamName, const P3PmsgItem & oItem)
+        SetFParam  ( LPCWSTR lpszFParamName, const P3PmsgData& oData );
+      P2Pevent* SetFParam(LPCWSTR lpszFParamName, const P3PmsgItem & oItem)
       {
         // Function parameter list housekeeping
         // NOTES: Creation upon demand etc
@@ -270,13 +270,13 @@ class Msgcore_EXT P2Pevent : public P3PmsgItem
       P2Pevent*
         SetFParam  ( P2Pevent *pEvent );
       //P2Pevent*
-      //  SetFParam  ( LPCTNAM lpszFParamName, const P3PmsgItem& oItem );
+      //  SetFParam  ( LPCWSTR lpszFParamName, const P3PmsgItem& oItem );
 
     // Configuration
     // NOTES: Manage P2Pevent default and reporting
     public:
-      static LPCTSTR
-        Service ( LPCTSTR lpszServiceFormat, ... );
+      static LPCWSTR
+        Service ( LPCWSTR lpszServiceFormat, ... );
       static DWORD
         Configure ( ReportCmd_e eCmd, DWORD dwCmdArg );
 
@@ -364,11 +364,11 @@ class Msgcore_EXT P2Pevent : public P3PmsgItem
     public:
       P2Pevent_e
         GetClass ( );
-      LPCTSTR
+      LPCWSTR
         GetClassText ( );
-      LPCTSTR
+      LPCWSTR
         GetService ( );
-      LPCTSTR
+      LPCWSTR
         GetModule ( );
       BOOL
         EmptyModule ( );
@@ -376,11 +376,11 @@ class Msgcore_EXT P2Pevent : public P3PmsgItem
         GetMessage ( );
       const CString&
         GetAdvice ( );
-      LPCTSTR
+      LPCWSTR
         GetGroup ( );
       HRESULT
         GetHRESULT ( );
-      LPCTSTR
+      LPCWSTR
         GetHRESULText ( );
       time_t
         GetTime ( );
@@ -413,8 +413,8 @@ typedef P2PSafePtr<P2Pevent> P2PeventSP;
 
 #define T__FUNCTION__ _T(__FUNCTION__)
 #define MODULE  Module_(T__FUNCTION__)
-#define Message_T(str) Message(_T(str))
-#define Advice_T(str)  Advice(_T(str))
+#define Message_T(str) Message(L##str)
+#define Advice_T(str)  Advice(L##str)
 
 //
 //  Diagnostic, DiagnosticA and TargetcorelogA were removed here (item 17).
@@ -435,12 +435,12 @@ typedef P2PSafePtr<P2Pevent> P2PeventSP;
 #define Diagnostic(strFormat, ...) \
 { CString strVargs; strVargs.Format(strFormat,__VA_ARGS__); \
 COleDateTime _dt_ = COleDateTime::GetCurrentTime(); \
-TCHAR szDiagnostic[4096]; \
+WCHAR szDiagnostic[4096]; \
 int cSize = swprintf_s ( &szDiagnostic[0], ARRAYSIZE(szDiagnostic)-1 \
-,L"[%s] %s\n",(LPCTSTR)_dt_.Format(L"%H-%M-%S"),(LPCTSTR)strVargs); \
+,L"[%s] %s\n",(LPCWSTR)_dt_.Format(L"%H-%M-%S"),(LPCWSTR)strVargs); \
 szDiagnostic[cSize]=0; \
 CString strDiagnostic = szDiagnostic; \
-fwprintf ( stdout, (LPCTSTR)CString(strDiagnostic) ); }
+fwprintf ( stdout, (LPCWSTR)CString(strDiagnostic) ); }
 #else
 #define Diagnostic(...) ((void*)0)
 #endif
@@ -452,9 +452,9 @@ fwprintf ( stdout, (LPCTSTR)CString(strDiagnostic) ); }
 { CStringA strVargsA; strVargsA.Format(strFormatA,__VA_ARGS__); \
 CString strVargs(strVargsA); \
 COleDateTime _dt_ = COleDateTime::GetCurrentTime(); \
-TCHAR szDiagnostic[4096]; \
+WCHAR szDiagnostic[4096]; \
 int cSize = swprintf_s ( &szDiagnostic[0], ARRAYSIZE(szDiagnostic)-1 \
-,L"[%s] %s\n",(LPCTSTR)_dt_.Format(L"%H-%M-%S"),(LPCTSTR)strVargs); \
+,L"[%s] %s\n",(LPCWSTR)_dt_.Format(L"%H-%M-%S"),(LPCWSTR)strVargs); \
 szDiagnostic[cSize]=0; \
 CString strDiagnostic = szDiagnostic; \
 CStringA strDiagnosticA(strDiagnostic); \
@@ -504,14 +504,14 @@ P2Pevent_catch ( CException *pEx, bool bDeleteEx = true );
     catch ( ... ) \
     { \
       EVERR-> MODULE \
-           -> Message ( _T("Unknown exception") ) \
+           -> Message ( L"Unknown exception" ) \
            -> Cancel(); \
     }
 #define catch_ALL_SetLast \
     catch ( ... ) \
     { \
       EVERR-> MODULE \
-           -> Message ( _T("Unknown exception") ) \
+           -> Message ( L"Unknown exception" ) \
            -> SetLast(); \
     }
 
@@ -533,8 +533,8 @@ P2Pevent_catch ( CException *pEx, bool bDeleteEx = true );
 //
 //  P2Pevent content helpers
 //  NOTES: Used to summarise content of P2Pevent objects
-#define EVT_EmptyGroup(pEVT) (_tcslen(pEVT->GetGroup())>0)
-#define EVT_EmptyModule(pEVT) (_tcslen(pEVT->GetModule())>0)
+#define EVT_EmptyGroup(pEVT) (wcslen(pEVT->GetGroup())>0)
+#define EVT_EmptyModule(pEVT) (wcslen(pEVT->GetModule())>0)
 
 //
 //  SetFParam ( ) helpers

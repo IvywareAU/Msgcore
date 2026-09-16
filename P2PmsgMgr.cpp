@@ -59,7 +59,7 @@ P2PmsgMgr::P2PmsgMgr ( const P2PmsgMgr& rhs )
     ASSERT(m_hMgr==this->r_Object().m_hVBList);
 }
 
-P2PmsgMgr::P2PmsgMgr ( LPCTSTR lpszFilename )
+P2PmsgMgr::P2PmsgMgr ( LPCWSTR lpszFilename )
          : P3PmsgItem ( 0, 0, 0 )
 {
     RenderThisSafe ( );
@@ -118,7 +118,7 @@ P2PmsgMgr::Nullify ( )
 //  Returns:     P2PmsgMgr&
 //               Reference to this P2PmsgMgr
 P2PmsgMgr&
-P2PmsgMgr::Attacheap ( LPCTNAM lpszMsgName, const P3PmsgData& oData )
+P2PmsgMgr::Attacheap ( LPCWSTR lpszMsgName, const P3PmsgData& oData )
 {
     // Environmental
     // NOTES: Create a dummy root item for sizing purposes, then allocate
@@ -164,7 +164,7 @@ ASSERT(VBLock_IsItem(pVBLock));
 //       : Files > 4GB are intentionally rejected.
 //
 BOOL
-P2PmsgMgr::Load ( LPCTSTR lpszFilename )
+P2PmsgMgr::Load ( LPCWSTR lpszFilename )
 {
     BOOL  bResult      = FALSE;
     char *pP2PmsgHeap  = nullptr;
@@ -288,7 +288,7 @@ P2PmsgMgr::Load ( LPCTSTR lpszFilename )
     return FALSE;
 }
 /*BOOL
-P2PmsgMgr::Load ( LPCTSTR lpszFilename )
+P2PmsgMgr::Load ( LPCWSTR lpszFilename )
 {
     // Locals
     BOOL   bResult;
@@ -382,7 +382,7 @@ struct P2PmsgScrubGuard
 }
 
 BOOL
-P2PmsgMgr::Save ( LPCTSTR lpszFilename, bool bDefragment )
+P2PmsgMgr::Save ( LPCWSTR lpszFilename, bool bDefragment )
 {
     // Locals
     BOOL       bResult = FALSE;
@@ -394,7 +394,7 @@ P2PmsgMgr::Save ( LPCTSTR lpszFilename, bool bDefragment )
       // Resolve the target file. An explicit filename always wins; otherwise
       // fall back to the remembered file (e.g. save-back after a read-only
       // Load). An atomic save needs a concrete target name to rename onto.
-      CString strTarget = ( lpszFilename && _tcslen(lpszFilename) > 0 )
+      CString strTarget = ( lpszFilename && wcslen(lpszFilename) > 0 )
                         ? CString(lpszFilename) : m_strFilename;
       if ( strTarget.IsEmpty() )
         EVERR -> MODULE
@@ -446,7 +446,7 @@ P2PmsgMgr::Save ( LPCTSTR lpszFilename, bool bDefragment )
           break;
         DWORD dwErr = GetLastError();
         if ( dwErr != ERROR_SHARING_VIOLATION || i >= 50 )   // ~1s of retries
-          EVERR -> MODULE -> AFP((LPCTSTR)strTarget)
+          EVERR -> MODULE -> AFP((LPCWSTR)strTarget)
                 -> Message( L"Save: could not acquire write lock (concurrent writer?)" )
                 -> HResult( dwErr )
                 -> Throw();
@@ -460,7 +460,7 @@ P2PmsgMgr::Save ( LPCTSTR lpszFilename, bool bDefragment )
       // intact; a crash after it leaves the fully-written new store. There is
       // no window in which the target is half-written.
       CString strTemp;
-      strTemp.Format ( L"%s.%lu.tmp", (LPCTSTR)strTarget, GetCurrentThreadId() );
+      strTemp.Format ( L"%s.%lu.tmp", (LPCWSTR)strTarget, GetCurrentThreadId() );
 
       hFile = CreateFileW ( strTemp, GENERIC_WRITE, 0, nullptr
                           , CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr );
@@ -468,7 +468,7 @@ P2PmsgMgr::Save ( LPCTSTR lpszFilename, bool bDefragment )
       {
         DWORD dwErr = GetLastError();
         DeleteFileW ( strTemp );
-        EVERR -> MODULE -> AFP((LPCTSTR)strTemp)
+        EVERR -> MODULE -> AFP((LPCWSTR)strTemp)
               -> Message( L"CreateFile(temp) failed" )
               -> HResult( dwErr )
               -> Throw();
@@ -481,7 +481,7 @@ P2PmsgMgr::Save ( LPCTSTR lpszFilename, bool bDefragment )
         DWORD dwErr = GetLastError();
         CloseHandle ( hFile ); hFile = INVALID_HANDLE_VALUE;
         DeleteFileW ( strTemp );
-        EVERR -> MODULE -> AFP((LPCTSTR)strTarget)
+        EVERR -> MODULE -> AFP((LPCWSTR)strTarget)
               -> Message( L"WriteFile(temp) failed" )
               -> HResult( dwErr )
               -> Throw();
@@ -495,7 +495,7 @@ P2PmsgMgr::Save ( LPCTSTR lpszFilename, bool bDefragment )
       {
         DWORD dwErr = GetLastError();
         DeleteFileW ( strTemp );
-        EVERR -> MODULE -> AFP((LPCTSTR)strTarget)
+        EVERR -> MODULE -> AFP((LPCWSTR)strTarget)
               -> Message( L"MoveFileEx() atomic replace failed" )
               -> HResult( dwErr )
               -> Throw();
@@ -523,7 +523,7 @@ P2PmsgMgr::SharedMode ( DWORD dwSharedMode )
 }
 
 BOOL
-P2PmsgMgr::Rename ( LPCTSTR lpszNewname )
+P2PmsgMgr::Rename ( LPCWSTR lpszNewname )
 {
     if ( m_strFilename.IsEmpty() || !lpszNewname )
       return FALSE;
@@ -537,7 +537,7 @@ P2PmsgMgr::Rename ( LPCTSTR lpszNewname )
 ///////////////////////////////////////////////////////////////////////
 //  Factories
 P2PmsgMgr*
-P2PmsgMgr::Factory ( LPCTSTR lpszFilename
+P2PmsgMgr::Factory ( LPCWSTR lpszFilename
                    , UCHAR uAddrNN, UINT nSizeInitial, UINT nSizeMax )
 {
     // Locals
@@ -582,7 +582,7 @@ P2PmsgMgr::Factory ( LPCTSTR lpszFilename
 }
 
 P2PmsgMgr*
-P2PmsgMgr::Factory ( LPCTSTR lpszFilename, DWORD dwSharedMode )
+P2PmsgMgr::Factory ( LPCWSTR lpszFilename, DWORD dwSharedMode )
 {
     // Locals
     P2PmsgMgr *pMgr = 0;
@@ -1345,12 +1345,12 @@ P2PmsgMgr::FireTrigger ( P2Pos posP2Pobject, UINT nTrigger_TypeMask )
 //P2PmsgListHdl
 //P2PmsgMgr::GetTriggerList ( P3PmsgField& oField )
 //{
-//    if ( !oField.r_Attr().Exists(_T("#Trig")) )
+//    if ( !oField.r_Attr().Exists(L"#Trig") )
 //    {
 //      P2PmsgListHdl oHdl = { 0, 0, 0};
 //      return oHdl;
 //    }
-//    P3PmsgList oListTrig = oField.r_Attr().SelectList (_T("#Trig")).GetP2PmsgListHdl();
+//    P3PmsgList oListTrig = oField.r_Attr().SelectList (L"#Trig").GetP2PmsgListHdl();
 //
 //    // TODO:LJM Hack for progress vvvvvvv
 //    if ( oListTrig.r_data().DataType() != VBLockData_BLOB08 )
@@ -1366,12 +1366,12 @@ P2PmsgMgr::FireTrigger ( P2Pos posP2Pobject, UINT nTrigger_TypeMask )
 //bool
 //P2PmsgMgr::TriggerListExists ( P3PmsgNode& oNode )
 //{
-//    return oNode.r_Attr().Exists(_T("#Trig"));
+//    return oNode.r_Attr().Exists(L"#Trig");
 //}
 //bool
 //P2PmsgMgr::TriggerListExists ( P3PmsgField& oField )
 //{
-//    return oField.r_Attr().Exists(_T("#Trig"));
+//    return oField.r_Attr().Exists(L"#Trig");
 //}
 
 /*P2PmsgListHdl
@@ -1383,23 +1383,23 @@ P2PmsgMgr::GetP2PmsgListHdlTrig ( P2Pos posP2Pobject )
     if ( VBLockItem_IsField(pItem) )
     {
       P3PmsgField oField (objVBList, posP2Pobject, VBLock_Hdr_u_SizeNN(pVBLock) );
-      if ( !oField.r_Attr().Exists(_T("#Trig")) )
+      if ( !oField.r_Attr().Exists(L"#Trig") )
         return oHdl;
-      return oField.r_Attr().SelectList(_T("#Trig")).GetP2PmsgListHdl();
+      return oField.r_Attr().SelectList(L"#Trig").GetP2PmsgListHdl();
     }
     if ( VBLockItem_IsNode(pItem) )
     {
       P3PmsgNode oNode (objVBList, posP2Pobject, VBLock_Hdr_u_SizeNN(pVBLock) );
-      if ( !oNode.r_Attr().Exists(_T("#Trig")) )
+      if ( !oNode.r_Attr().Exists(L"#Trig") )
         return oHdl;
-      return oNode.r_Attr().SelectList(_T("#Trig")).GetP2PmsgListHdl();
+      return oNode.r_Attr().SelectList(L"#Trig").GetP2PmsgListHdl();
     }
     if ( VBLockItem_IsList(pItem) )
     {
       P3PmsgList oList (objVBList, posP2Pobject, VBLock_Hdr_u_SizeNN(pVBLock) );
-      if ( !oList.r_Attr().Exists(_T("#Trig")) )
+      if ( !oList.r_Attr().Exists(L"#Trig") )
         return oHdl;
-      return oList.r_Attr().SelectList(_T("#Trig")).GetP2PmsgListHdl();
+      return oList.r_Attr().SelectList(L"#Trig").GetP2PmsgListHdl();
     }
     ASSERT(0);
     return oHdl;
@@ -1455,13 +1455,13 @@ P2PmsgMgr::Print ( FILE *fd, int nDepthOS, int nDepthOSinc )
 ///////////////////////////////////////////////////////////////////////
 //  Properties
 
-LPCTSTR
+LPCWSTR
 P2PmsgMgr::GetFilename ( )
 {
     return m_strFilename;
 }
 
-LPCTSTR
+LPCWSTR
 P2PmsgMgr::GetRootname ( )
 {
     return r_name().c_name();
@@ -1584,7 +1584,7 @@ P2PmsgMgr_IsValid ( P2PmsgMgr *pP2PmsgMgr ) noexcept
     return FALSE;
 }
 BOOL
-P2PmsgMgr_IsValid ( LPCTSTR lpszFilename ) noexcept
+P2PmsgMgr_IsValid ( LPCWSTR lpszFilename ) noexcept
 {
     // Expect issues
     try

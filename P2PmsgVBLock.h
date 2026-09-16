@@ -676,7 +676,7 @@ VBLockData_Copy ( VBLockData *pDataDst, VBLsize nSizeofDst
 //  NOTES: Provide address sensitive VBLockName manipulation
 void
 VBLockName_Init ( UCHAR uVBLock, VBLockName *pName, UCHAR uVBLockAttr
-                , LPCTNAM lpszName, VBLsize nSizenn );
+                , LPCWSTR lpszName, VBLsize nSizenn );
 VBLaddr
 VBLockName_GetChain2Next ( UCHAR uVBLock, const VBLockName *pName );
 VBLaddr

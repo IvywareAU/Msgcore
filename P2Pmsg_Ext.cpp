@@ -57,7 +57,7 @@ P2PmsgNode_Merge ( P3PmsgNode& oItem, const P3PmsgNode& rhs )
 ASSERT(oCurs.Item()==i);
       if ( oCurs.IsNode() )
       {
-        LPCTNAM lpszNodename = oCurs.r_node().c_name();
+        LPCWSTR lpszNodename = oCurs.r_node().c_name();
         if ( oItem.Exists(lpszNodename) )
           P2PmsgNode_Merge ( oItem.SelectNode(lpszNodename), oCurs.r_node() );
         else
@@ -75,7 +75,7 @@ ASSERT(oCurs.Item()==i);
       }
       else if ( oCurs.IsItem() )
       {
-        LPCTNAM lpszFieldname = oCurs.r_item().c_name();
+        LPCWSTR lpszFieldname = oCurs.r_item().c_name();
         if ( oItem.Exists(lpszFieldname) )
           P2PmsgField_Merge ( oItem.SelectItem(lpszFieldname), oCurs.r_item() );
         else
@@ -101,7 +101,7 @@ P2PmsgAttr_Merge ( P3PmsgAttr& oAttrLHS, const P3PmsgNode& rhs )
 ASSERT(oCurs.Item()==i);
       if ( oCurs.IsNode() )
       {
-        LPCTNAM lpszNodename = oCurs.r_node().c_name();
+        LPCWSTR lpszNodename = oCurs.r_node().c_name();
 //oAttrLHS.AssertValid();
         if ( oAttrLHS.Exists(lpszNodename) )
           P2PmsgNode_Merge ( oAttrLHS.SelectNode(lpszNodename), oCurs.r_node() );
@@ -120,7 +120,7 @@ ASSERT(oCurs.Item()==i);
       }
       else if ( oCurs.IsItem() )
       {
-        LPCTNAM lpszFieldname = oCurs.r_item().c_name();
+        LPCWSTR lpszFieldname = oCurs.r_item().c_name();
         if ( oAttrLHS.Exists(lpszFieldname) )
           P2PmsgField_Merge ( oAttrLHS.SelectItem(lpszFieldname), oCurs.r_item() );
         else
@@ -146,7 +146,7 @@ P2PmsgAttr_Merge ( P3PmsgAttr& oAttr, const P3PmsgAttr& rhs )
 ASSERT(oCurs.Item()==i);
       /*if ( oCurs.IsNode() )
       {
-        LPCTNAM lpszNodename = oCurs.r_node().c_name();
+        LPCWSTR lpszNodename = oCurs.r_node().c_name();
         if ( oAttrLHS.Exists(lpszNodename) )
           P2PmsgNode_Merge ( oAttrLHS.SelectNode(lpszNodename), oCurs.r_node() );
         else
@@ -174,7 +174,7 @@ ASSERT(oCurs.Item()==i);
         //  comparison reads equal and the WRONG item is merged.  Win32 returns the
         //  store pointer unchanged, so this is byte-identical there.
         CString strFieldname  = oCurs.r_item().c_name();
-        LPCTNAM lpszFieldname = strFieldname;
+        LPCWSTR lpszFieldname = strFieldname;
         if ( oAttr.Exists(lpszFieldname) )
           P2PmsgField_Merge ( oAttr.SelectItem(lpszFieldname), oCurs.r_item() );
         else
@@ -215,7 +215,7 @@ P2PmsgAttr_AbsoluteMerge ( P3PmsgAttr& oAttrLHS, const P3PmsgAttr& oRHS )
       //  spending one ring slot per comparison, so a bare c_name() argument dies
       //  inside the very scan that is reading it.
       CString strFieldname  = oCurs.r_item().c_name();
-      LPCTNAM lpszFieldname = strFieldname;
+      LPCWSTR lpszFieldname = strFieldname;
       if ( oAttrLHS.Exists(lpszFieldname) )
       {
         CString strDelname = oCurs.r_name().c_name();
@@ -234,26 +234,26 @@ P2PmsgAttr_AbsoluteMerge ( P3PmsgAttr& oAttrLHS, const P3PmsgAttr& oRHS )
 
 P3PmsgItem&
 P3PmsgField_SERIALISE ( P3PmsgItem& oItem
-                      , LPCTNAM lpszFieldname, const P3PmsgData& oData
-                      , BOOL bDscAttr, LPCTSTR lpszDescription )
+                      , LPCWSTR lpszFieldname, const P3PmsgData& oData
+                      , BOOL bDscAttr, LPCWSTR lpszDescription )
 {
     P3PmsgField oField ( lpszFieldname, oData );
     if ( bDscAttr )
       oField.r_Attr(P3PmsgField::AttrCMD_Create)
-        += P3PmsgField ( _T("Dsc"), lpszDescription );
+        += P3PmsgField ( L"Dsc", lpszDescription );
     oItem += oField;
     return oItem;
 }
 
 P3PmsgAttr&
 P2PmsgAttr_SERIALISE  ( P3PmsgAttr& oAttr, BOOL bOverwrite
-                      , LPCTNAM lpszFieldname, const P3PmsgData& oData
-                      , BOOL bDscAttr, LPCTSTR lpszDescription )
+                      , LPCWSTR lpszFieldname, const P3PmsgData& oData
+                      , BOOL bDscAttr, LPCWSTR lpszDescription )
 {
     P3PmsgField oField ( lpszFieldname, oData );
     if ( bDscAttr )
       oField.r_Attr(P3PmsgField::AttrCMD_Create)
-        += P3PmsgField ( _T("Dsc"), lpszDescription );
+        += P3PmsgField ( L"Dsc", lpszDescription );
     if ( !oAttr.Exists(lpszFieldname) )
       oAttr += oField;
     else if ( bOverwrite )
@@ -261,7 +261,7 @@ P2PmsgAttr_SERIALISE  ( P3PmsgAttr& oAttr, BOOL bOverwrite
     else
       EVERR->MODULE
            ->AFP(lpszFieldname)
-           ->Message(_T("Field already exists, no overwrite permission") )
+           ->Message(L"Field already exists, no overwrite permission" )
            ->Throw();
     return oAttr;
 }
@@ -275,14 +275,14 @@ P2PmsgAttr_SERIALISE  ( P3PmsgAttr& oAttr, BOOL bOverwrite
 //  Parameters:  const P3PmsgObject& oObject
 //               Search base point
 //
-//               LPCTSTR lpszAttributeName
+//               LPCWSTR lpszAttributeName
 //               Name of attribute to be searched for
 //
 //  Returns:     P3PmsgObject
 //               Located object, null object flags failed search
 //                  
 P3PmsgObject
-P3Pmsg_FindParentWithAttr ( const P3PmsgObject& oObject, LPCTNAM lpszAttributeName )
+P3Pmsg_FindParentWithAttr ( const P3PmsgObject& oObject, LPCWSTR lpszAttributeName )
 {
     if ( !oObject.HasParent() )
       return P3PmsgObject();           // Has no parent
@@ -328,14 +328,14 @@ P3Pmsg_FindParentWithAttr ( const P3PmsgObject& oObject, LPCTNAM lpszAttributeNa
 //  Parameters:  const P3PmsgObject& oObject
 //               Search base point
 //
-//               LPCTSTR lpszAttributeName
+//               LPCWSTR lpszAttributeName
 //               Name of attribute to be searched for
 //
 //  Returns:     P3PmsgObject
 //               Located attribute, null object flags failed search
 //                  
 P3PmsgObject
-P3Pmsg_FindParentAttr ( const P3PmsgObject& oObject, LPCTNAM lpszAttributeName )
+P3Pmsg_FindParentAttr ( const P3PmsgObject& oObject, LPCWSTR lpszAttributeName )
 {
     // Delegate
     P3PmsgItem oParent = P3Pmsg_FindParentWithAttr ( oObject, lpszAttributeName );
@@ -350,17 +350,17 @@ P3Pmsg_FindParentAttr ( const P3PmsgObject& oObject, LPCTNAM lpszAttributeName )
 //  Parameters:  const P3PmsgItem& oItem
 //               Search base point
 //
-//               LPCTSTR lpszAttributeName
+//               LPCWSTR lpszAttributeName
 //               Name of attribute to be searched for
 //
-//               LPCTNAM lpszChildname
+//               LPCWSTR lpszChildname
 //               Matching name wildcard
 //  Returns:     P3PmsgObject
 //               Located attribute, null object flags failed search
 //                  
 P3PmsgObject
 P3Pmsg_FindChildWithAttr ( const P3PmsgItem& oItem
-                         , LPCTNAM lpszAttributeName, LPCTNAM lpszChildname )
+                         , LPCWSTR lpszAttributeName, LPCWSTR lpszChildname )
 {
     if ( lpszChildname == 0 || wcslen(lpszChildname) <= 0 )
       lpszChildname = nullptr;
@@ -387,8 +387,8 @@ P3Pmsg_FindChildWithAttr ( const P3PmsgItem& oItem
     //  (Platform/p2pstr.h), so the snapshot and the null-ness cost one line each.
     const p2p_wkey oAttrKey  ( lpszAttributeName );
     const p2p_wkey oChildKey ( lpszChildname );
-    LPCTNAM        lpszAttr  = oAttrKey;
-    LPCTNAM        lpszChild = oChildKey;
+    LPCWSTR        lpszAttr  = oAttrKey;
+    LPCWSTR        lpszChild = oChildKey;
     //  NAME TEST SENSE.  c_wcsicmpWC() is a PREDICATE, not a comparison:
     //  it returns MsgcoreWildcard(pattern,name) (P2Pmsg.cpp:2099-2103), so
     //  NON-ZERO means the name MATCHES. The `cmp` in the spelling reads like
@@ -463,7 +463,7 @@ ASSERT(oCurs.Item()==i);
       if ( oCurs.IsNode() )
       {
         P3PmsgNode&   oNodeRValue = oCurs.r_node();
-        LPCTNAM    lpszNodename   = oNodeRValue.c_name();
+        LPCWSTR    lpszNodename   = oNodeRValue.c_name();
         if ( !oItem.Exists(lpszNodename) )
           continue;
         P3PmsgObject oObjectLValue = oItem.SelectObject(lpszNodename);
@@ -482,7 +482,7 @@ ASSERT(oCurs.Item()==i);
       }
       else if ( oCurs.IsItem() )
       {
-        LPCTNAM lpszFieldname = oCurs.r_item().c_name();
+        LPCWSTR lpszFieldname = oCurs.r_item().c_name();
         if ( !oItem.Exists(lpszFieldname) )
           continue;
         P2PmsgField_AND ( oItem.SelectItem(lpszFieldname), oCurs.r_item() );
@@ -527,7 +527,7 @@ ASSERT(oCurs.Item()==i);
       //if ( oCurs.IsNode() )
       //{
       //  P3PmsgNode&   oNodeRValue = oCurs.r_node();
-      //  LPCTNAM    lpszNodename   = oNodeRValue.c_name();
+      //  LPCWSTR    lpszNodename   = oNodeRValue.c_name();
       //  if ( !oAttrLHS.Exists(lpszNodename) )
       //    continue;
       //  P3PmsgObject oObjectLValue = oAttrLHS.SelectObject(lpszNodename);
@@ -550,7 +550,7 @@ ASSERT(oCurs.Item()==i);
       {
         //  COPY - see the P3PmsgCurs widening-ring note in P2PmsgAttr_Merge above.
         CString strFieldname  = oCurs.r_item().c_name();
-        LPCTNAM lpszFieldname = strFieldname;
+        LPCWSTR lpszFieldname = strFieldname;
         if ( !oAttr.Exists(lpszFieldname) )
           continue;
         P2PmsgField_AND ( oAttr.SelectItem(lpszFieldname), oCurs.r_item() );
@@ -576,7 +576,7 @@ ASSERT(oCurs.Item()==i);
       //if ( oCurs.IsNode() )
       //{
       //  P3PmsgNode&   oNodeRValue = oCurs.r_node();
-      //  LPCTNAM    lpszNodename   = oNodeRValue.c_name();
+      //  LPCWSTR    lpszNodename   = oNodeRValue.c_name();
       //  if ( !oDesc.Exists(lpszNodename) )
       //    continue;
       //  P3PmsgObject oObjectLValue = oDesc.SelectObject(lpszNodename);
@@ -599,7 +599,7 @@ ASSERT(oCurs.Item()==i);
       {
         //  COPY - see the P3PmsgCurs widening-ring note in P2PmsgAttr_Merge above.
         CString strFieldname  = oCurs.r_item().c_name();
-        LPCTNAM lpszFieldname = strFieldname;
+        LPCWSTR lpszFieldname = strFieldname;
         if ( !oDesc.Exists(lpszFieldname) )
           continue;
         P2PmsgField_AND ( oDesc.SelectItem(lpszFieldname), oCurs.r_item() );
@@ -635,7 +635,7 @@ ASSERT(oCurs.Item()==i);
       //if ( oCurs.IsNode() )
       //{
       //  P3PmsgNode&   oNodeRValue = oCurs.r_node();
-      //  LPCTNAM    lpszNodename   = oNodeRValue.c_name();
+      //  LPCWSTR    lpszNodename   = oNodeRValue.c_name();
       //  if ( !oDesc.Exists(lpszNodename) )
       //    continue;
       //  P3PmsgObject oObjectLValue = oDesc.SelectObject(lpszNodename);
@@ -670,55 +670,55 @@ ASSERT(oCurs.Item()==i);
 CString bytetohex(byte item)
 {
 CString result;
-result.Format(_T("%02.2x"),item);
+result.Format(L"%02.2x",item);
 return result.Right(2);
 }
 
 void
-GuidToString ( GUID& oGUID, LPTSTR lpszGUID )
+GuidToString ( GUID& oGUID, LPWSTR lpszGUID )
 {
     byte *pbyGUID = (byte *)&oGUID;
 
-    lpszGUID [0] = _T('0') +  pbyGUID [3] / 16;
-    lpszGUID [1] = _T('0') +  pbyGUID [3] % 16;
-    lpszGUID [2] = _T('0') +  pbyGUID [2] / 16;
-    lpszGUID [3] = _T('0') +  pbyGUID [2] % 16;
-    lpszGUID [4] = _T('0') +  pbyGUID [1] / 16;
-    lpszGUID [5] = _T('0') +  pbyGUID [1] % 16;
-    lpszGUID [6] = _T('0') +  pbyGUID [0] / 16;
-    lpszGUID [7] = _T('0') +  pbyGUID [0] % 16;
-    lpszGUID [8] = _T('-');
+    lpszGUID [0] = L'0' +  pbyGUID [3] / 16;
+    lpszGUID [1] = L'0' +  pbyGUID [3] % 16;
+    lpszGUID [2] = L'0' +  pbyGUID [2] / 16;
+    lpszGUID [3] = L'0' +  pbyGUID [2] % 16;
+    lpszGUID [4] = L'0' +  pbyGUID [1] / 16;
+    lpszGUID [5] = L'0' +  pbyGUID [1] % 16;
+    lpszGUID [6] = L'0' +  pbyGUID [0] / 16;
+    lpszGUID [7] = L'0' +  pbyGUID [0] % 16;
+    lpszGUID [8] = L'-';
 
-    lpszGUID [9] = _T('0') +  pbyGUID [5] / 16;
-    lpszGUID[10] = _T('0') +  pbyGUID [5] % 16;
-    lpszGUID[11] = _T('0') +  pbyGUID [4] / 16;
-    lpszGUID[12] = _T('0') +  pbyGUID [4] % 16;
-    lpszGUID[13] = _T('-');
+    lpszGUID [9] = L'0' +  pbyGUID [5] / 16;
+    lpszGUID[10] = L'0' +  pbyGUID [5] % 16;
+    lpszGUID[11] = L'0' +  pbyGUID [4] / 16;
+    lpszGUID[12] = L'0' +  pbyGUID [4] % 16;
+    lpszGUID[13] = L'-';
 
-    lpszGUID[14] = _T('0') +  pbyGUID [7] / 16;
-    lpszGUID[15] = _T('0') +  pbyGUID [7] % 16;
-    lpszGUID[16] = _T('0') +  pbyGUID [6] / 16;
-    lpszGUID[17] = _T('0') +  pbyGUID [6] % 16;
-    lpszGUID[18] = _T('-');
+    lpszGUID[14] = L'0' +  pbyGUID [7] / 16;
+    lpszGUID[15] = L'0' +  pbyGUID [7] % 16;
+    lpszGUID[16] = L'0' +  pbyGUID [6] / 16;
+    lpszGUID[17] = L'0' +  pbyGUID [6] % 16;
+    lpszGUID[18] = L'-';
 
-    lpszGUID[19] = _T('0') +  pbyGUID [8] / 16;
-    lpszGUID[20] = _T('0') +  pbyGUID [8] % 16;
-    lpszGUID[21] = _T('0') +  pbyGUID [9] / 16;
-    lpszGUID[22] = _T('0') +  pbyGUID [9] % 16;
-    lpszGUID[23] = _T('-');
+    lpszGUID[19] = L'0' +  pbyGUID [8] / 16;
+    lpszGUID[20] = L'0' +  pbyGUID [8] % 16;
+    lpszGUID[21] = L'0' +  pbyGUID [9] / 16;
+    lpszGUID[22] = L'0' +  pbyGUID [9] % 16;
+    lpszGUID[23] = L'-';
 
-    lpszGUID[24] = _T('0') +  pbyGUID[10] / 16;
-    lpszGUID[25] = _T('0') +  pbyGUID[10] % 16;
-    lpszGUID[26] = _T('0') +  pbyGUID[11] / 16;
-    lpszGUID[27] = _T('0') +  pbyGUID[11] % 16;
-    lpszGUID[28] = _T('0') +  pbyGUID[12] / 16;
-    lpszGUID[29] = _T('0') +  pbyGUID[12] % 16;
-    lpszGUID[30] = _T('0') +  pbyGUID[13] / 16;
-    lpszGUID[31] = _T('0') +  pbyGUID[13] % 16;
-    lpszGUID[32] = _T('0') +  pbyGUID[14] / 16;
-    lpszGUID[33] = _T('0') +  pbyGUID[14] % 16;
-    lpszGUID[34] = _T('0') +  pbyGUID[15] / 16;
-    lpszGUID[35] = _T('0') +  pbyGUID[15] % 16;
+    lpszGUID[24] = L'0' +  pbyGUID[10] / 16;
+    lpszGUID[25] = L'0' +  pbyGUID[10] % 16;
+    lpszGUID[26] = L'0' +  pbyGUID[11] / 16;
+    lpszGUID[27] = L'0' +  pbyGUID[11] % 16;
+    lpszGUID[28] = L'0' +  pbyGUID[12] / 16;
+    lpszGUID[29] = L'0' +  pbyGUID[12] % 16;
+    lpszGUID[30] = L'0' +  pbyGUID[13] / 16;
+    lpszGUID[31] = L'0' +  pbyGUID[13] % 16;
+    lpszGUID[32] = L'0' +  pbyGUID[14] / 16;
+    lpszGUID[33] = L'0' +  pbyGUID[14] % 16;
+    lpszGUID[34] = L'0' +  pbyGUID[15] / 16;
+    lpszGUID[35] = L'0' +  pbyGUID[15] % 16;
     lpszGUID[36] =     0;
 }
 
@@ -732,7 +732,7 @@ GuidToString ( GUID& oGUID, LPTSTR lpszGUID )
 //  NOTES: Move negated if destination item already exists
 //       : Source item deleted after move sequence
 //
-//  Parameters:  LPCTSTR lpszItemname
+//  Parameters:  LPCWSTR lpszItemname
 //               Name of item to be moved
 //
 //               P3PmsgItem& oItemSource
@@ -741,7 +741,7 @@ GuidToString ( GUID& oGUID, LPTSTR lpszGUID )
 //               P3PmsgAttr& oAttrDestin
 //               Move destination
 BOOL
-P2Pmsg_UpgradeMove ( LPCTSTR lpszItemname, P3PmsgItem& oItemSource, P3PmsgAttr& oAttrDestin )
+P2Pmsg_UpgradeMove ( LPCWSTR lpszItemname, P3PmsgItem& oItemSource, P3PmsgAttr& oAttrDestin )
 {
     if ( !oItemSource.Exists(lpszItemname) )
       return FALSE;

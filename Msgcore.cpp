@@ -103,10 +103,10 @@ wmemicmp ( const wchar_t *pwSrc, const wchar_t *pwDst, size_t count ) noexcept
 //                 false.. No match
 //
 bool
-MsgcoreWildcard(LPCTSTR pattern, LPCTSTR text) noexcept
+MsgcoreWildcard(LPCWSTR pattern, LPCWSTR text) noexcept
 {
-    const TCHAR* starPattern = nullptr;
-    const TCHAR* starText    = nullptr;
+    const WCHAR* starPattern = nullptr;
+    const WCHAR* starText    = nullptr;
     while ( *text )
     {
         if ( *pattern == L'?' )
@@ -154,13 +154,13 @@ starFallback:
     return *pattern == 0;
 }
 bool
-MsgcoreWildcard_preChatGPT ( LPCTSTR lpszWildcard, LPCTSTR lpszName ) noexcept
+MsgcoreWildcard_preChatGPT ( LPCWSTR lpszWildcard, LPCWSTR lpszName ) noexcept
 {
     // Locals
     BOOL bStar = FALSE;
 
     // Implmentation
-TOP:LPCTSTR p, s;
+TOP:LPCWSTR p, s;
     for ( s = lpszName, p = lpszWildcard; *s; ++s, ++p )
     {
       switch (*p)

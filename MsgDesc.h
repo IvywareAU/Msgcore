@@ -130,7 +130,7 @@ class Msgcore_EXT P3PmsgDesc
       P3PmsgDesc&
         operator += ( const P3PmsgField& rhs );
       virtual P3PmsgItem&
-        operator [] ( LPCTNAM lpszName );
+        operator [] ( LPCWSTR lpszName );
 
       //  `if ( oDesc )` and nothing else.  Refer P3PmsgObject::operator bool.
       explicit
@@ -156,22 +156,22 @@ class Msgcore_EXT P3PmsgDesc
     // Navigation and 
     public:
       P3PmsgField
-        Select      ( LPCTNAM lpszItemName );
+        Select      ( LPCWSTR lpszItemName );
       P3PmsgObject
-        SelectObject( LPCTNAM lpszObjectname );
+        SelectObject( LPCWSTR lpszObjectname );
       P3PmsgField&
-        SelectItem  ( LPCTNAM lpszItemName );
+        SelectItem  ( LPCWSTR lpszItemName );
       P3PmsgList&
-        SelectList  ( LPCTNAM lpszListName );
+        SelectList  ( LPCWSTR lpszListName );
       P3PmsgVect&
-        SelectVect  ( LPCTNAM lpszVectName );
+        SelectVect  ( LPCWSTR lpszVectName );
 
       P3PmsgField&
-        DeclareItem ( LPCTNAM lpszFieldName, const P3PmsgData& oData, BOOL bUpdate = false );
+        DeclareItem ( LPCWSTR lpszFieldName, const P3PmsgData& oData, BOOL bUpdate = false );
       bool
-        Exists ( LPCTNAM lpszItemName );
+        Exists ( LPCWSTR lpszItemName );
       bool
-        Delete ( LPCTNAM lpszItemName );
+        Delete ( LPCWSTR lpszItemName );
       bool
         Delete ( P3PmsgItem& oItem );
       void
@@ -236,4 +236,4 @@ P2PmsgDesc_SortinItem ( P3PmsgDesc *pDesc, const P3PmsgName& oName
 Msgcore_EXT void
 P2PmsgDesc_Swap ( P3PmsgItem& oItem1, P3PmsgItem& oItem2 );
 Msgcore_EXT BOOL
-P2PmsgDesc_WCDelete ( P3PmsgDesc& oDesc, LPCTSTR lpszWildcard );
+P2PmsgDesc_WCDelete ( P3PmsgDesc& oDesc, LPCWSTR lpszWildcard );

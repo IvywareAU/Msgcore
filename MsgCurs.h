@@ -138,7 +138,7 @@ class Msgcore_EXT P3PmsgCurs
       P3PmsgCurs&
         Seek ( );
       bool
-        Goto ( LPCTNAM lpszItemName );
+        Goto ( LPCWSTR lpszItemName );
       bool
         Goto ( int nElem );
 
@@ -146,7 +146,7 @@ class Msgcore_EXT P3PmsgCurs
     public:
       virtual const P3PmsgObject&
         r_Object ( ) const;
-      virtual LPCTNAM
+      virtual LPCWSTR
         c_wstr ( );
       virtual P3PmsgData&
         r_data ( ) const;
@@ -242,7 +242,7 @@ class Msgcore_EXT P2PmsgRecurs
 
     // Exposure
     public:
-      virtual LPCTNAM
+      virtual LPCWSTR
         c_wstr ( );
       virtual P3PmsgAttr&
         r_attr ( ) const;

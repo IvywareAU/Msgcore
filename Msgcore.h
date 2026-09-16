@@ -34,9 +34,9 @@
 typedef unsigned char  UINT08;
 typedef void *         P2PmsgHANDLE;   // P2Pmsg handle
 typedef unsigned char  P2Pmsgnn_t;     // P2Pmsg 08, 16, 32, 64 addressing
-typedef LPCTSTR        LPCTNAM;        // Field naming convention (const)
-typedef       LPTSTR   LPTNAM;         // Field naming convention
-typedef       TCHAR    TNAME;          // Field name type
+typedef LPCWSTR        LPCTNAM;        // Field naming convention (const)
+typedef       LPWSTR   LPTNAM;         // Field naming convention
+typedef       WCHAR    TNAME;          // Field name type
 #define MAX_TNAME_SIZE 64              // Field name maximum size
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -80,9 +80,9 @@ const UINT64 UINT64_NULL = ((UINT64)~0);
 ///////////////////////////////////////////////////////////
 //  win32 and win64 sensitive definitions
 #if defined(_WIN64)
-    #define _tcstoUINT_PTR _tcstoui64
+    #define _tcstoUINT_PTR _wcstoui64
 #else
-    #define _tcstoUINT_PTR _tcstoul
+    #define _tcstoUINT_PTR wcstoul
 #endif
 
 #if defined(Msgcore_STATIC)
@@ -135,7 +135,7 @@ typedef void (*P2PmsgTriggerSink)( void* pUser
 #define _ucsicmp stricmp
 #define _ucslen  strlen
 
-#define _U(arg)  _T(arg)
+#define _U(arg)  L##arg
 //#define _N(arg)  L##arg
 
 ///////////////////////////////////////
@@ -150,7 +150,7 @@ typedef void (*P2PmsgTriggerSink)( void* pUser
 Msgcore_EXT int
 wmemicmp ( const wchar_t *pwSrc, const wchar_t *pwDst, size_t count ) noexcept;
 Msgcore_EXT bool
-MsgcoreWildcard ( LPCTSTR lpszWildcard, LPCTSTR lpszName ) noexcept;
+MsgcoreWildcard ( LPCWSTR lpszWildcard, LPCWSTR lpszName ) noexcept;
 
 ///////////////////////////////////////////////////////////////////////
 //  VBLock container and header definitions

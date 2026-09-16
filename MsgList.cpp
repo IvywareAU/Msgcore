@@ -67,7 +67,7 @@ P3PmsgList::P3PmsgList ( )
 {
     RenderThisSafe ( );
 }
-P3PmsgList::P3PmsgList ( LPCTNAM lpszName, const P3PmsgData& oData )
+P3PmsgList::P3PmsgList ( LPCWSTR lpszName, const P3PmsgData& oData )
           : P3PmsgField ( 0, 0, 0 )
 {
     RenderThisSafe ( );
@@ -309,7 +309,7 @@ P3PmsgList::DropTail ( )
 
 //
 //P3PmsgField&
-//P3PmsgNode::AddField( LPCTSTR lpszName, P3PmsgData& oData )
+//P3PmsgNode::AddField( LPCWSTR lpszName, P3PmsgData& oData )
 //{
 //  (*this) += P3PmsgField(lpszName, oData );
 //    return *this;
@@ -386,7 +386,7 @@ P3PmsgList::operator bool ( )
 }
 
 //P3PmsgField&
-//P3PmsgNode::operator [] ( LPCTSTR lpszItemName )
+//P3PmsgNode::operator [] ( LPCWSTR lpszItemName )
 //{
 //    if ( !m_pCurs )
 //      m_pCurs = new P3PmsgCurs ( *this );
@@ -403,7 +403,7 @@ P3PmsgList::operator bool ( )
 ////  Navigation
 //
 //P3PmsgNode&
-//P3PmsgNode::SelectNode ( LPCTSTR lpszNodeName )
+//P3PmsgNode::SelectNode ( LPCWSTR lpszNodeName )
 //{
 //    if ( !m_pCurs )
 //      m_pCurs = new P3PmsgCurs ( *this );
@@ -419,7 +419,7 @@ P3PmsgList::operator bool ( )
 //}
 //
 //bool
-//P3PmsgNode::Exists ( LPCTSTR lpszItemName )
+//P3PmsgNode::Exists ( LPCWSTR lpszItemName )
 //{
 //    if ( !m_pCurs )
 //      m_pCurs = new P3PmsgCurs ( *this );

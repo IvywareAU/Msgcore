@@ -32,7 +32,7 @@
 ///////////////////////////////////////////////////////////////////////
 //  Constructors and destructor
 
-static  TCHAR s_szServiceName[32]  = { 0 };
+static  WCHAR s_szServiceName[32]  = { 0 };
 static  DWORD s_nEventNo           =   0;
 //  THE DEFAULT NOTIFICATION MASK.  ERROR and WARNING.
 //  NOTES: WARNING joined it on 2026-08-20, closing Targetcore's F-S6-4.
@@ -195,9 +195,9 @@ P2Pevent::MakeEvent( P2Pevent_e eClass )
       //P2PmsgHubID nP2PmsgHubID = GetP2PmsgHubContext();
       //if ( nP2PmsgHubID > 0 )
       //{
-      //  LPCTSTR lpszHubName  = GetP2PmsgHubName ( nP2PmsgHubID );
+      //  LPCWSTR lpszHubName  = GetP2PmsgHubName ( nP2PmsgHubID );
       //  (*pP2Pevent) += P3PmsgField ( TEvent__Hub, DataBSTR08(lpszHubName) );
-      //  LPCTSTR lpszPumpName = GetP2PmsgPumpName( );
+      //  LPCWSTR lpszPumpName = GetP2PmsgPumpName( );
       //  (*pP2Pevent) += P3PmsgField ( TEvent__Pmp, DataBSTR08(lpszPumpName) );
       //}
     }
@@ -234,9 +234,9 @@ P2Pevent::InitEvent( P2Pevent_e eClass )
     //P2PmsgHubID nP2PmsgHubID = GetP2PmsgHubContext();
     //if ( nP2PmsgHubID > 0 )
     //{
-    //  LPCTSTR lpszHubName  = GetP2PmsgHubName ( nP2PmsgHubID );
+    //  LPCWSTR lpszHubName  = GetP2PmsgHubName ( nP2PmsgHubID );
     //  (*this) += P3PmsgField ( TEvent__Hub, DataBSTR08(lpszHubName) );
-    //  LPCTSTR lpszPumpName = GetP2PmsgPumpName( );
+    //  LPCWSTR lpszPumpName = GetP2PmsgPumpName( );
     //  (*this) += P3PmsgField ( TEvent__Pmp, DataBSTR08(lpszPumpName) );
     //}
 
@@ -292,7 +292,7 @@ P2Pevent::Module ( LPCWSTR lpszModuleFormat, ... )
     if ( lpszModuleFormat == nullptr )
       return this;
     va_list ap;
-    TCHAR   szModule[512] = {0};
+    WCHAR   szModule[512] = {0};
     int      cSize = 0;
 
     // Complete formating from variable argument list.
@@ -339,7 +339,7 @@ P2Pevent::Module ( LPCSTR lpszModuleFormat, ... )
     return this;
 }
 P2Pevent*
-P2Pevent::Module_ ( LPCTSTR lpszModule )
+P2Pevent::Module_ ( LPCWSTR lpszModule )
 {
 #ifdef _UNICODE
     P3PmsgData oData = DataWSTR08(lpszModule);
@@ -361,7 +361,7 @@ P2Pevent::Module_ ( LPCTSTR lpszModule )
 //  Allocates P2Pevent message
 //  NOTES: Build a list of successive message strings
 //
-//  Parameters:  LPCTSTR lpszMessageFormat
+//  Parameters:  LPCWSTR lpszMessageFormat
 //               Message format
 //
 //               ...
@@ -376,7 +376,7 @@ P2Pevent::Message ( LPCWSTR lpszMessageFormat, ... )
 {
     // Locals
     va_list ap;
-    TCHAR   szModule[4096] = {0};
+    WCHAR   szModule[4096] = {0};
     int      cSize = 0;
 
     // Complete formating from variable argument list.
@@ -420,13 +420,13 @@ P2Pevent::Message ( LPCSTR lpszMessageFormat, ... )
     return this;
 }
 P2Pevent*
-P2Pevent::Message_ ( LPCTSTR lpszMessage )
+P2Pevent::Message_ ( LPCWSTR lpszMessage )
 {
     // Persist and
     if ( !P3PmsgItem::Exists(TEvent__Dsc) )
       (*this).DESC += P3PmsgList ( P3PmsgField(TEvent__Dsc) );
     P3PmsgList& oList = dynamic_cast<P3PmsgList&>((*this)[TEvent__Dsc]);
-    if ( _tcslen(lpszMessage) < 127 )
+    if ( wcslen(lpszMessage) < 127 )
       oList += DataWSTR08(lpszMessage);
     else
       oList += DataWSTR16(lpszMessage);
@@ -440,7 +440,7 @@ P2Pevent::Message_ ( LPCTSTR lpszMessage )
 //  Allocates P2Pevent advice
 //  NOTES: Build a list of successive advice strings
 //
-//  Parameters:  LPCTSTR lpszFormat
+//  Parameters:  LPCWSTR lpszFormat
 //               Advice format
 //
 //               ...
@@ -455,7 +455,7 @@ P2Pevent::Advice ( LPCWSTR lpszAdviceFormat, ... )
 {
     // Locals
     va_list ap;
-    TCHAR   szAdvice[512] = {0};
+    WCHAR   szAdvice[512] = {0};
     int      cSize = 0;
 
     // Complete formating from variable argument list.
@@ -500,13 +500,13 @@ P2Pevent::Advice ( LPCSTR lpszAdviceFormat, ... )
     return this;
 }
 P2Pevent*
-P2Pevent::Advice_ ( LPCTSTR lpszAdvice )
+P2Pevent::Advice_ ( LPCWSTR lpszAdvice )
 {
     // Persist and
     if ( !P3PmsgItem::Exists(TEvent__Adv) )
       (*this).DESC += P3PmsgList ( P3PmsgField(TEvent__Adv) );
     P3PmsgList& oList = dynamic_cast<P3PmsgList&>((*this)[TEvent__Adv]);
-    if ( _tcslen(lpszAdvice) < 127 )
+    if ( wcslen(lpszAdvice) < 127 )
       oList += DataWSTR08(lpszAdvice);
     else
       oList += DataWSTR16(lpszAdvice);
@@ -525,7 +525,7 @@ P2Pevent::Advice_ ( LPCTSTR lpszAdvice )
 //       : Displaces previous field contents
 //
 //
-//  Parameters:  LPCTSTR lpszGroup
+//  Parameters:  LPCWSTR lpszGroup
 //
 //               ...
 //               Variable argument list associated with above
@@ -538,7 +538,7 @@ P2Pevent::Group ( LPCWSTR lpszGroupFormat, ... )
 {
     // Locals
     va_list ap;
-    TCHAR   szGroup[512];
+    WCHAR   szGroup[512];
     int      cSize = 0;
 
     // Complete formating from variable argument list.
@@ -583,7 +583,7 @@ P2Pevent::Group ( LPCSTR lpszGroupFormat, ... )
     return this;
 }
 P2Pevent*
-P2Pevent::Group_ ( LPCTSTR lpszGroup )
+P2Pevent::Group_ ( LPCWSTR lpszGroup )
 {
     P3PmsgData oData = DataWSTR08(lpszGroup);
 
@@ -605,13 +605,13 @@ P2Pevent::Group_ ( LPCTSTR lpszGroup )
 //  Parameters:  HRESULT hr
 //               System error to be set
 //
-//               LPCTSTR lpszhr = 0
+//               LPCWSTR lpszhr = 0
 //               Text description associated with above error
 //
 //  Returns:     P2Pevent*
 //               Pointer to this object suitable for P2Pevent chaining
 P2Pevent*
-P2Pevent::HResult ( HRESULT hr, LPCTSTR lpszHR )
+P2Pevent::HResult ( HRESULT hr, LPCWSTR lpszHR )
 {
     if ( hr == 0 )
       hr = GetLastError();
@@ -623,7 +623,7 @@ P2Pevent::HResult ( HRESULT hr, LPCTSTR lpszHR )
     //  hr = std::stderror;
 
     // Persist
-    TCHAR szHR[256] = {0};
+    WCHAR szHR[256] = {0};
     if ( lpszHR == 0 )
     {
       DWORD dwSize = FormatMessage ( FORMAT_MESSAGE_FROM_SYSTEM
@@ -645,7 +645,7 @@ P2Pevent::HResult ( HRESULT hr, LPCTSTR lpszHR )
     return this;
 }
 P2Pevent*
-P2Pevent::HResultHMODULE ( HRESULT hr, LPCTSTR lpszHMODULEname, LPCTSTR lpszHR )
+P2Pevent::HResultHMODULE ( HRESULT hr, LPCWSTR lpszHMODULEname, LPCWSTR lpszHR )
 {
     if ( hr == 0 )
       hr = GetLastError();
@@ -655,7 +655,7 @@ P2Pevent::HResultHMODULE ( HRESULT hr, LPCTSTR lpszHMODULEname, LPCTSTR lpszHR )
       hr = _doserrno;
 
     // Persist
-    TCHAR szHR[256] = {0};
+    WCHAR szHR[256] = {0};
     DWORD dwSize = 0;
     if ( lpszHR == nullptr )
     {
@@ -663,7 +663,7 @@ P2Pevent::HResultHMODULE ( HRESULT hr, LPCTSTR lpszHMODULEname, LPCTSTR lpszHR )
                              , reinterpret_cast<LPCVOID>(GetModuleHandle(lpszHMODULEname))
                              , hr
                              , MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT)
-                             , &szHR[0] //reinterpret_cast<LPTSTR>(&szHR)
+                             , &szHR[0] //reinterpret_cast<LPWSTR>(&szHR)
                              , ARRAYSIZE(szHR), NULL);
       szHR[dwSize] = 0;
     }
@@ -1687,7 +1687,7 @@ P2Pevent::Display ( const HWND hWnd )
       {
         csOrigin += L"[Hub=";
         csOrigin += (*this)[TEvent__Hub].c_wstr();
-        csOrigin += _T("]");
+        csOrigin += L"]";
       }
       if ( P3PmsgItem::Exists(TEvent__Pmp) )
       {
@@ -1698,30 +1698,30 @@ P2Pevent::Display ( const HWND hWnd )
       if ( !csOrigin.IsEmpty() )
       {
         if ( !csMessage.IsEmpty() )
-          csMessage += _T("\n");
+          csMessage += L"\n";
         csMessage += csOrigin;
       }
 
       // Function component
       CString strFunction;
-      strFunction.Format(_T("[%s]%s"), GetService(), GetModule() );
+      strFunction.Format(L"[%s]%s", GetService(), GetModule() );
       if ( P3PmsgItem::Exists(TEvent__Fnc) )
       {
         P3PmsgItem& oItemFunc = dynamic_cast<P3PmsgItem&>((*this)[TEvent__Fnc]);
         P3PmsgCurs& oCursFunc = oItemFunc.DESC.r_Curs ( );
-        strFunction += _T("(");
+        strFunction += L"(";
         for ( int i = 0; oCursFunc.Goto(i); i++ )
         {
           if ( i > 0 )
-            strFunction += _T(", ");
+            strFunction += L", ";
           strFunction += oCursFunc.r_name().c_name();
           if ( oCursFunc.IsItem() )
           {
-            strFunction += _T("=");
+            strFunction += L"=";
             strFunction += oCursFunc.r_item().ToString();
           }
         }
-        strFunction += _T(")");
+        strFunction += L")";
       }
 
       // HRESULT component
@@ -1730,7 +1730,7 @@ P2Pevent::Display ( const HWND hWnd )
         CString csHResult = GetHRESULText();
         if ( !csHResult.IsEmpty() )
           csMessage += csHResult;
-        csHResult.Format (_T("[HRESULT=%ld]\n"), GetHRESULT() );
+        csHResult.Format (L"[HRESULT=%ld]\n", GetHRESULT() );
         csMessage += csHResult;
       }
 
@@ -1907,7 +1907,7 @@ P2Pevent::Notify ( )
 //  Sets formatted function parameters
 //  NOTES: Appends to existing parameter list
 //
-//  Parameters:  LPCTSTR lpszFParamName
+//  Parameters:  LPCWSTR lpszFParamName
 //               Name of the function parameter
 //
 //               const P3PmsgData& oData
@@ -1916,7 +1916,7 @@ P2Pevent::Notify ( )
 //  Returns:     P2Pevent*
 //               Pointer to this object suitable for P2Pevent chaining
 P2Pevent*
-P2Pevent::SetFParam  ( LPCTNAM lpszFParamName, const P3PmsgData& oData )
+P2Pevent::SetFParam  ( LPCWSTR lpszFParamName, const P3PmsgData& oData )
 {
     // Simply append to module parameter list
     if ( !P3PmsgItem::Exists(TEvent__Fnc) )
@@ -1956,21 +1956,21 @@ P2Pevent::SetFParam ( P2Pevent *pEvent )
 //         process domain for which it's defined
 //
 //
-//  Parameters:  LPCTSTR lpszServiceName
+//  Parameters:  LPCWSTR lpszServiceName
 //               Service name to be formatted and loaded.
 //
 //               ...
 //               Variable argument list associated with above format
 //               string.
 //
-//  Returns:     LPCTSTR
+//  Returns:     LPCWSTR
 //               Formatted service name
-LPCTSTR
-P2Pevent::Service ( LPCTSTR lpszServiceFormat, ... )
+LPCWSTR
+P2Pevent::Service ( LPCWSTR lpszServiceFormat, ... )
 {
     // Introduce the locals.
     va_list       ap;                  // Variable argument list
-    TCHAR         szService[512]={0};
+    WCHAR         szService[512]={0};
     int           cSize = 0;
     va_start ( ap, lpszServiceFormat );
 
@@ -2058,74 +2058,74 @@ P2Pevent::GetClass ( )
     return (P2Pevent_e)((P2PeventNode *)c_vBlob())->eClass;
 }
 
-LPCTSTR
+LPCWSTR
 P2Pevent::GetClassText ( )
 {
     P2Pevent_e eClass = GetClass();
     if ( eClass == P2Pevent_UNDEF )
-      return _T("EVUND");
+      return L"EVUND";
     if ( eClass == P2Pevent_ERROR )
-      return _T("EVERR");
+      return L"EVERR";
     if ( eClass == P2Pevent_WARNING )
-      return _T("EVWRN");
+      return L"EVWRN";
     if ( eClass == P2Pevent_DEBUG )
-      return _T("EVDBG");
+      return L"EVDBG";
     if ( eClass == P2Pevent_TRACE )
-      return _T("EVTRC");
+      return L"EVTRC";
     if ( eClass == P2Pevent_LOG )
-      return _T("EVLOG");
+      return L"EVLOG";
     if ( eClass == P2Pevent_INFO )
-      return _T("EVINF");
+      return L"EVINF";
     if ( eClass ==  7 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass ==  8 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass ==  9 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 10 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 11 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 12 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 13 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 14 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 15 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 16 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 17 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 18 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 19 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 20 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 21 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 22 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 23 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 24 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 25 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 26 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 27 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 28 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 29 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 30 )
-      return _T("EV005");
+      return L"EV005";
     if ( eClass == 31 )
-      return _T("EV005");
+      return L"EV005";
 
     // Hmmm
     return L"EV___";
@@ -2135,10 +2135,10 @@ P2Pevent::GetClassText ( )
 //  Fetches P2Pevent service or application name
 //  NOTES: Service auto-assigned in MakeEvent()
 //
-//  Returns:     LPCTSTR
+//  Returns:     LPCWSTR
 //               Application or service name
 //
-LPCTSTR
+LPCWSTR
 P2Pevent::GetService ( )
 {
     if ( P3PmsgItem::Exists(TEvent__Svc) )
@@ -2150,10 +2150,10 @@ P2Pevent::GetService ( )
 //  Fetches P2Pevent group name
 //  NOTES: Refer Group() for group name assignment
 //
-//  Returns:     LPCTSTR
+//  Returns:     LPCWSTR
 //               Group name
 //
-LPCTSTR
+LPCWSTR
 P2Pevent::GetGroup ( )
 {
     if ( P3PmsgItem::Exists(TEvent__Grp) )
@@ -2164,7 +2164,7 @@ P2Pevent::GetGroup ( )
 //
 //  Fetches composition P2Pevent description
 //
-//  Returns:     LPCTSTR
+//  Returns:     LPCWSTR
 //               Message text
 //
 const CString&
@@ -2204,9 +2204,9 @@ P2Pevent::GetAdvice ( )
       while ( aEntry )
       {
         if ( m_csAdvice.IsEmpty() )
-          m_csAdvice += _T("ADVICE\t: ");
+          m_csAdvice += L"ADVICE\t: ";
         else
-          m_csAdvice += _T("\n\t: ");
+          m_csAdvice += L"\n\t: ";
         P3PmsgData& oEntry = oList.GetNext ( aEntry );
         m_csAdvice += oEntry.c_wstr();
       }
@@ -2218,10 +2218,10 @@ P2Pevent::GetAdvice ( )
 //  Fetches P2Pevent module
 //  NOTES: Refer Module() for setting P2Pevent module name
 //
-//  Returns:     LPCTSTR
+//  Returns:     LPCWSTR
 //               Name of precipitating module
 //
-LPCTSTR
+LPCWSTR
 P2Pevent::GetModule ( )
 {
     if ( P3PmsgItem::Exists(TEvent__Fnc) )
@@ -2247,7 +2247,7 @@ P2Pevent::GetHRESULT ( )
 {
     return ((P2PeventNode *)c_vBlob())->hr;
 }
-LPCTSTR
+LPCWSTR
 P2Pevent::GetHRESULText ( )
 {
     if ( P3PmsgItem::Exists(TEvent__Sys) )
@@ -2356,11 +2356,11 @@ P2PeventPost_HWND ( const P2Pevent& oP2Pevent )
 P2Pevent*
 P2Pevent_catch ( CException *pEx, bool bDeleteEx )
 {
-    TCHAR szError[512];
+    WCHAR szError[512];
     pEx -> GetErrorMessage ( szError, ARRAYSIZE(szError) );
     if ( bDeleteEx )
       pEx -> Delete ();
-    //  _T("%ls"), never szError as the format itself: Message() is
+    //  L"%ls", never szError as the format itself: Message() is
     //  Message(LPCWSTR lpszFormat, ...) and hands the string to _vstprintf_s,
     //  so any '%' in the text CException::GetErrorMessage produced consumed a
     //  variadic argument that was never passed (finding M3 of the internal,
@@ -2369,7 +2369,7 @@ P2Pevent_catch ( CException *pEx, bool bDeleteEx )
     //  reached it - including file paths and OS-formatted messages carrying
     //  inserts. %ls not %s: wide in both the MSVC and glibc dialects (5aa9b2a).
     P2Pevent *pEVT = EVERR
-                  -> Message( _T("%ls"), szError )
+                  -> Message( L"%ls", szError )
                   -> HResult( GetLastError() );
     return pEVT;
 }

@@ -392,9 +392,9 @@ MsgStck::Pop ( )
     return *this;
 }
       /*P3PmsgNode&
-        AddNode ( LPCTSTR lpszName, const P3PmsgData& oData );
+        AddNode ( LPCWSTR lpszName, const P3PmsgData& oData );
       P3PmsgField&
-        AddField( LPCTSTR lpszName, const P3PmsgData& oData );*/
+        AddField( LPCWSTR lpszName, const P3PmsgData& oData );*/
 
     // Operators
       /*P3PmsgNode&
@@ -406,7 +406,7 @@ MsgStck::Pop ( )
       P3PmsgNode&
         operator += ( const P3PmsgList& rhs );
       virtual P3PmsgField&
-        operator [] ( LPCTSTR lpszName );
+        operator [] ( LPCWSTR lpszName );
 
         operator P3PmsgData& ( );*/
 
@@ -619,7 +619,7 @@ MsgStck::Drop ( )
 
 //  Navigation and 
 MsgStck&
-MsgStck::Rename ( LPCTNAM lpszName, bool bRecurse )
+MsgStck::Rename ( LPCWSTR lpszName, bool bRecurse )
 {
     if ( IsEmpty() )
       return *this;

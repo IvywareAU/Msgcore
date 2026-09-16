@@ -101,7 +101,7 @@ jobs:
           # silencing two warnings -- see the C4456 and C4389 notes in
           # The release-readiness register, Stage D.
           #
-          # The platforms still differ (75/58 vs 138/121) from identical source
+          # The platforms still differ (74/57 vs 137/120) from identical source
           # and now-identical switches. That is the C4244 residue: 37 truncations
           # on x64 against 102 on Win32, which is a property of the pointer width,
           # not of the diagnostic regime. Triaging that set is the one part of
@@ -118,16 +118,28 @@ jobs:
           # pre-org line under MSBuild 17, and one x64 warning has gone since
           # without being attributed to a commit -- which is exactly what a stale
           # ceiling hides, and why the notice fired on every run until now.
-          # Debug|x64's 75 is 37 C4244 + 18 C4189 + 10 C4245 + 7 C4100 + 3 C4366;
-          # the 37 is the C4244 residue named above, unchanged.
-          - { configuration: Debug,      platform: x64,   baseline: 75  }
-          - { configuration: Release,    platform: x64,   baseline: 58  }
-          - { configuration: DebugLib,   platform: x64,   baseline: 75  }
-          - { configuration: ReleaseLib, platform: x64,   baseline: 58  }
-          - { configuration: Debug,      platform: Win32, baseline: 138 }
-          - { configuration: DebugLib,   platform: Win32, baseline: 138 }
-          - { configuration: Release,    platform: Win32, baseline: 121 }
-          - { configuration: ReleaseLib, platform: Win32, baseline: 121 }
+          #
+          # LOWERED AGAIN on 2026-09-16, every configuration by one: 75 -> 74 and
+          # 58 -> 57 on x64, 138 -> 137 and 121 -> 120 on Win32. The same caveat
+          # as the entry above applies -- this is banking a drop that had already
+          # happened, not one the accompanying commit caused. CI reported all
+          # eight of these figures as notices on ea1ef95, whose own tree still
+          # carried the old ceilings, and the _T -> L pass that lands with this
+          # edit measured identically before and after on all eight. What moved
+          # was a single C4100, at or before b3fd506, unattributed.
+          #
+          # Debug|x64's 74 is 37 C4244 + 18 C4189 + 10 C4245 + 6 C4100 + 3 C4366;
+          # the 37 is the C4244 residue named above, unchanged. Win32's 137 is
+          # the same set with 102 C4244 in place of the 37, which is the residue
+          # being a property of the pointer width and not of the source.
+          - { configuration: Debug,      platform: x64,   baseline: 74  }
+          - { configuration: Release,    platform: x64,   baseline: 57  }
+          - { configuration: DebugLib,   platform: x64,   baseline: 74  }
+          - { configuration: ReleaseLib, platform: x64,   baseline: 57  }
+          - { configuration: Debug,      platform: Win32, baseline: 137 }
+          - { configuration: DebugLib,   platform: Win32, baseline: 137 }
+          - { configuration: Release,    platform: Win32, baseline: 120 }
+          - { configuration: ReleaseLib, platform: Win32, baseline: 120 }
 
     steps:
       # One repository, and that is the whole layout. Platform/ is IN this

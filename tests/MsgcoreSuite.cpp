@@ -573,7 +573,7 @@ static void Test_Curs_GotoKeyLifetime()
         // c_name() -- a live ring slot, deliberately NOT copied first.
         P3PmsgCurs oCursKey(oItem.r_Desc());
         TF_CHECK(oCursKey.Goto(kItems - 1));
-        LPCTNAM lpszKey = oCursKey.r_name().c_name();
+        LPCWSTR lpszKey = oCursKey.r_name().c_name();
 
         P3PmsgCurs oCurs(oItem.r_Desc());
         TF_CHECK(oCurs.Goto(lpszKey));
@@ -603,11 +603,11 @@ static void Test_Curs_GotoKeyLifetime()
         // Both arguments are bare c_name() pointers, deliberately not copied.
         P3PmsgCurs oCursOld(oItem.r_Desc());
         TF_CHECK(oCursOld.Goto(kItems - 1));          // rename the LAST one
-        LPCTNAM lpszOld = oCursOld.r_name().c_name();
+        LPCWSTR lpszOld = oCursOld.r_name().c_name();
 
         P3PmsgItem oNewName;
         oNewName.r_name() = L"Renamed";
-        LPCTNAM lpszNew = oNewName.r_name().c_name();
+        LPCWSTR lpszNew = oNewName.r_name().c_name();
 
         P3PmsgRefactor_Rename ( oItem, lpszOld, lpszNew );
 
@@ -658,11 +658,11 @@ static void Test_Curs_GotoKeyLifetime()
         //  Both keys are bare c_name() pointers - live ring slots, not copies.
         P3PmsgCurs oCursKey(oItem.r_Desc());
         TF_CHECK(oCursKey.Goto(kItems - 1));
-        LPCTNAM lpszChild = oCursKey.r_name().c_name();
+        LPCWSTR lpszChild = oCursKey.r_name().c_name();
 
         P3PmsgItem oAttrName;
         oAttrName.r_name() = L"Marked";
-        LPCTNAM lpszAttr = oAttrName.r_name().c_name();
+        LPCWSTR lpszAttr = oAttrName.r_name().c_name();
 
         P3PmsgObject oFound =
             P3Pmsg_FindChildWithAttr ( oItem, lpszAttr, lpszChild );
@@ -2929,7 +2929,7 @@ static void Test_ConstFieldName()
 static void GrowFloater ( P3PmsgField& oField, int nValue )
 {
     CString sBig ( L'x', 1024 );
-    oField.r_data() = P3PmsgData((LPCWSTR)(LPCTSTR)sBig);
+    oField.r_data() = P3PmsgData((LPCWSTR)(LPCWSTR)sBig);
     oField.r_data() = P3PmsgData((int)nValue);
 }
 
@@ -2938,7 +2938,7 @@ static void GrowFloater ( P3PmsgField& oField, int nValue )
 static P3PmsgObject HandleFromDeadFrame ( )
 {
     CString sBig ( L'x', 1024 );
-    P3PmsgField oField ( L"DEAD", P3PmsgData((LPCWSTR)(LPCTSTR)sBig) );
+    P3PmsgField oField ( L"DEAD", P3PmsgData((LPCWSTR)(LPCWSTR)sBig) );
     oField.r_data() = P3PmsgData((int)4242);
     return oField.r_Object();
 }
@@ -2946,8 +2946,8 @@ static P3PmsgObject HandleFromDeadFrame ( )
 //  Overwrite whatever the frame above left behind.
 static void ClobberFrame ( int nDepth )
 {
-    volatile TCHAR sz[512];
-    for ( int i = 0; i < 512; i++ ) sz[i] = (TCHAR)0xCDCD;
+    volatile WCHAR sz[512];
+    for ( int i = 0; i < 512; i++ ) sz[i] = (WCHAR)0xCDCD;
     if ( nDepth > 0 ) ClobberFrame ( nDepth - 1 );
 }
 
@@ -3119,7 +3119,7 @@ static void Test_HandleOrCopy()
 static void GrowPastInline ( P3PmsgField& oField, int nValue )
 {
     CString sBig(L'x', 1024);
-    oField.r_data() = P3PmsgData((LPCWSTR)(LPCTSTR)sBig);
+    oField.r_data() = P3PmsgData((LPCWSTR)(LPCWSTR)sBig);
     oField.r_data() = P3PmsgData((int)nValue);
 }
 
@@ -3903,7 +3903,7 @@ static void Test_ChainLongerThanOne()
     {
         CString sBig(L'x', 1024);
         sBig.SetAt(0, L'A');
-        P3PmsgData    oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgData    oSrc((LPCWSTR)(LPCWSTR)sBig);
         P3PmsgObject& oObj = const_cast<P3PmsgObject&>(*oSrc.p_Object());
 
         TF_CHECK_EQ(ChainLen29(oObj), 1);  // what every in-process path gives
@@ -3926,7 +3926,7 @@ static void Test_ChainLongerThanOne()
     TF_CASE("every link of a long chain can be sized and contained")
     {
         CString sBig(L'x', 1024);
-        P3PmsgData    oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgData    oSrc((LPCWSTR)(LPCWSTR)sBig);
         P3PmsgObject& oObj = const_cast<P3PmsgObject&>(*oSrc.p_Object());
         Lengthen29(oObj);
         Lengthen29(oObj);
@@ -3943,7 +3943,7 @@ static void Test_ChainLongerThanOne()
     {
         CString sBig(L'x', 1024);
         sBig.SetAt(0, L'A');
-        P3PmsgData    oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgData    oSrc((LPCWSTR)(LPCWSTR)sBig);
         P3PmsgObject& oObj = const_cast<P3PmsgObject&>(*oSrc.p_Object());
         Lengthen29(oObj);
         Lengthen29(oObj);
@@ -3981,7 +3981,7 @@ static void Test_ChainLongerThanOne()
     TF_CASE("and gives every link back when it goes")
     {
         CString sBig(L'x', 1024);
-        P3PmsgData    oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgData    oSrc((LPCWSTR)(LPCWSTR)sBig);
         P3PmsgObject& oObj = const_cast<P3PmsgObject&>(*oSrc.p_Object());
         Lengthen29(oObj);
         Lengthen29(oObj);
@@ -4030,13 +4030,13 @@ static void Test_ChainLongerThanOne()
         CString sBigger(L'y', 4096);
         sBigger.SetAt(0, L'B');
 
-        P3PmsgData    oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgData    oSrc((LPCWSTR)(LPCWSTR)sBig);
         P3PmsgObject& oObj = const_cast<P3PmsgObject&>(*oSrc.p_Object());
         Lengthen29(oObj);
         Lengthen29(oObj);
         TF_CHECK_EQ(ChainLen29(oObj), 3);
 
-        oSrc = P3PmsgData((LPCWSTR)(LPCTSTR)sBigger);
+        oSrc = P3PmsgData((LPCWSTR)(LPCWSTR)sBigger);
         TF_CHECK_EQ(ChainLen29(oObj), 1);
         TF_CHECK(oSrc.c_wstr()[0] == L'B');
         TF_CHECK_EQ((int)oSrc.c_size(), 8192);
@@ -4059,7 +4059,7 @@ static void Test_ChainLongerThanOne()
             oMgr.r_Desc(P3PmsgField::AttrCMD_Create)
                 += P3PmsgField(L"EEE", P3PmsgData((int)1));
             P3PmsgField& oF = oMgr.r_Desc().SelectItem(L"EEE");
-            oF.r_data() = P3PmsgData((LPCWSTR)(LPCTSTR)sBig);
+            oF.r_data() = P3PmsgData((LPCWSTR)(LPCWSTR)sBig);
 
             P3PmsgObject& oObj = const_cast<P3PmsgObject&>(oF.r_Object());
             TF_CHECK_EQ(ChainLen29(oObj), 1);
@@ -4111,7 +4111,7 @@ static void Test_ValueCopyReleasesItsPayload()
     TF_CASE("copying a grown value in a loop does not exhaust the heap")
     {
         CString sBig(L'z', 1024);
-        P3PmsgData oGrown((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgData oGrown((LPCWSTR)(LPCWSTR)sBig);
 
         //  Counted rather than checked: ten thousand TF_CHECKs would say the
         //  same thing ten thousand times and drown the run.
@@ -4130,7 +4130,7 @@ static void Test_ValueCopyReleasesItsPayload()
     TF_CASE("assigning a grown value in a loop does not exhaust the heap")
     {
         CString sBig(L'y', 1024);
-        P3PmsgData oGrown((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgData oGrown((LPCWSTR)(LPCWSTR)sBig);
 
         P3PmsgObject oTarget;
         for ( int i = 0; i < 10000; i++ )
@@ -4160,7 +4160,7 @@ static void Test_ValueCopyReleasesItsPayload()
     TF_CASE("a released copy still gave the right answer while it lived")
     {
         CString sBig(L'w', 600);
-        P3PmsgData oGrown((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgData oGrown((LPCWSTR)(LPCWSTR)sBig);
         bool bEveryCopyRead = true;
         for ( int i = 0; i < 100; i++ )
         {
@@ -4222,7 +4222,7 @@ static void Test_ValueCopiesItsPayload()
         CString sBig(L'x', 1024);
         sBig.SetAt(0, L'A');
 
-        P3PmsgData   oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgData   oSrc((LPCWSTR)(LPCWSTR)sBig);
         P3PmsgObject oCopy(*oSrc.p_Object());
 
         const VBLaddr aSrc  = ChainOfValue(*oSrc.p_Object());
@@ -4244,7 +4244,7 @@ static void Test_ValueCopiesItsPayload()
     TF_CASE("assignment gives the copy its own payload too")
     {
         CString sBig(L'x', 1024);
-        P3PmsgData   oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgData   oSrc((LPCWSTR)(LPCWSTR)sBig);
         P3PmsgObject oCopy;
         oCopy = *oSrc.p_Object();
 
@@ -4263,8 +4263,8 @@ static void Test_ValueCopiesItsPayload()
         CString sBigger(L'y', 4096);
         sBigger.SetAt(0, L'B');
 
-        P3PmsgData oSrc((LPCWSTR)(LPCTSTR)sBig);
-        oSrc = P3PmsgData((LPCWSTR)(LPCTSTR)sBigger);
+        P3PmsgData oSrc((LPCWSTR)(LPCWSTR)sBig);
+        oSrc = P3PmsgData((LPCWSTR)(LPCWSTR)sBigger);
 
         P3PmsgObject  oCopy(*oSrc.p_Object());
         const VBLaddr aSrc  = ChainOfValue(*oSrc.p_Object());
@@ -4285,7 +4285,7 @@ static void Test_ValueCopiesItsPayload()
         P3PmsgObject oCopy;
         VBLaddr      aCopy = 0;
         {
-            P3PmsgData oSrc((LPCWSTR)(LPCTSTR)sBig);
+            P3PmsgData oSrc((LPCWSTR)(LPCWSTR)sBig);
             oCopy = *oSrc.p_Object();
             aCopy = ChainOfValue(oCopy);
             TF_CHECK(aCopy != 0);
@@ -4316,7 +4316,7 @@ static void Test_ValueCopiesItsPayload()
     TF_CASE("a copied value shares the heap and not the block")
     {
         CString sBig(L'x', 1024);
-        P3PmsgData   oSrc((LPCWSTR)(LPCTSTR)sBig);
+        P3PmsgData   oSrc((LPCWSTR)(LPCWSTR)sBig);
         P3PmsgObject oCopy(*oSrc.p_Object());
 
         TF_CHECK(oSrc.p_Object()->m_hVBList != 0);
@@ -4772,10 +4772,10 @@ static void Test_Event()
         //  members and are stable either way.  Byte-identical on Win32.
         CString strModule   = pEVT->GetModule();
         CString strGroup    = pEVT->GetGroup();
-        LPCTSTR lpszModule  = strModule;
-        LPCTSTR lpszMessage = pEVT->GetMessage();
-        LPCTSTR lpszGroup   = strGroup;
-        LPCTSTR lpszAdvice  = pEVT->GetAdvice();
+        LPCWSTR lpszModule  = strModule;
+        LPCWSTR lpszMessage = pEVT->GetMessage();
+        LPCWSTR lpszGroup   = strGroup;
+        LPCWSTR lpszAdvice  = pEVT->GetAdvice();
 
         TF_CHECK(lpszModule  != nullptr && wcslen(lpszModule)  > 0);
         TF_CHECK(lpszMessage != nullptr && wcslen(lpszMessage) > 0);

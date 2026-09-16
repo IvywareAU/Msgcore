@@ -327,7 +327,7 @@ P3PmsgCurs::Seek ( )
     return *this;
 }
 bool
-P3PmsgCurs::Goto ( LPCTNAM lpszItemName )
+P3PmsgCurs::Goto ( LPCWSTR lpszItemName )
 {
     //  Hold the key still for the whole walk. Every sibling compared below spends
     //  a slot of the widening ring (c_wcsicmp -> c_name -> p2p_wstr_from_store),
@@ -422,7 +422,7 @@ P3PmsgCurs::Goto ( LPCTNAM lpszItemName )
       }
       else { ASSERT(0);}
       ASSERT(m_pP3PmsgFoN!=nullptr);
-      //LPCTSTR lpszName = m_pP3PmsgFoN->c_name();
+      //LPCWSTR lpszName = m_pP3PmsgFoN->c_name();
       if ( m_pP3PmsgFoN->r_name().c_wcsicmp(lpszStackName) == 0 )
         return true;
       aItem = VBLockItem_GetNext ( pVBLock->oHdr.uVBLockDefs, pItem, &m_nItem );
@@ -549,7 +549,7 @@ P3PmsgCurs::r_Object ( ) const
            ->Throw  ( );
     return m_pP3PmsgFoN->r_Object();
 }
-LPCTNAM
+LPCWSTR
 P3PmsgCurs::c_wstr ( )
 {
     return r_name().c_name();
@@ -821,7 +821,7 @@ P2PmsgRecurs::Push ( )
       return m_pRecurs -> Push ( );
     if ( !IsField() )
       EVERR->MODULE
-           ->Message(_T("Attempt to push non-P2PmsgItem environment") )
+           ->Message(L"Attempt to push non-P2PmsgItem environment" )
            ->Throw ( );
     m_pRecurs = new P2PmsgRecurs ( m_oCurs.r_item() );
     m_pRecurs -> m_cLevel = m_cLevel + 1;
@@ -834,7 +834,7 @@ P2PmsgRecurs::Pop ( )
 {
     if ( m_pRecurs == NULL )
       EVERR->MODULE
-           ->Message(_T("Attempt to pop non-pushed environment") )
+           ->Message(L"Attempt to pop non-pushed environment" )
            ->Throw ( );
     if ( m_pRecurs->m_pRecurs )
       return m_pRecurs -> Pop ( ); //TODO:LJM was debugging m_pRecurs -> Pop ( );
@@ -852,7 +852,7 @@ P2PmsgRecurs::Break ( )
 }
 //
 //  Exposure
-LPCTNAM
+LPCWSTR
 P2PmsgRecurs::c_wstr ( )
 {
     if ( m_pRecurs )

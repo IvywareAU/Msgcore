@@ -103,7 +103,7 @@ class Msgcore_EXT P3PmsgAttr
       P3PmsgAttr&
         operator += ( const P3PmsgItem& rhs );
       virtual P3PmsgItem&
-        operator [] ( LPCTNAM lpszName );
+        operator [] ( LPCWSTR lpszName );
 
       //  `if ( oAttr )` and nothing else.  Refer P3PmsgObject::operator bool.
       explicit
@@ -129,22 +129,22 @@ class Msgcore_EXT P3PmsgAttr
     // Navigation and 
     public:
       P3PmsgField
-        Select      ( LPCTNAM lpszItemName );
+        Select      ( LPCWSTR lpszItemName );
       P3PmsgObject
-        SelectObject( LPCTNAM lpszObjectname );
+        SelectObject( LPCWSTR lpszObjectname );
       P3PmsgField&
-        SelectItem  ( LPCTNAM lpszItemName );
+        SelectItem  ( LPCWSTR lpszItemName );
       P3PmsgList&
-        SelectList  ( LPCTNAM lpszListName );
+        SelectList  ( LPCWSTR lpszListName );
       P3PmsgVect&
-        SelectVect  ( LPCTNAM lpszVectName );
+        SelectVect  ( LPCWSTR lpszVectName );
 
     P3PmsgField&
-      DeclareItem ( LPCTNAM lpszFieldName, const P3PmsgData& oData, bool bUpdate = false );
+      DeclareItem ( LPCWSTR lpszFieldName, const P3PmsgData& oData, bool bUpdate = false );
     bool
-      Exists ( LPCTNAM lpszItemName );
+      Exists ( LPCWSTR lpszItemName );
     bool
-      Delete ( LPCTNAM lpszItemName );
+      Delete ( LPCWSTR lpszItemName );
     void
       Truncate ( );
     P3PmsgCurs&

@@ -355,7 +355,7 @@ ASSERT(nP2Pvar);
       else if ( nP2Pvar == VBLockData_UINT32 )
         pData->u.vuInt32 = *(UINT32*)pvData;
       //else if ( uDType == VBLockData_LONG )
-      //  sprintf ( m_szToString, _T("%i"), c_long() );
+      //  sprintf ( m_szToString, L"%i", c_long() );
       else if ( nP2Pvar == VBLockData_INT64 )
         pData->u.vInt64 = *(INT64*)pvData;
       else if ( nP2Pvar == VBLockData_UINT64 )
@@ -383,7 +383,7 @@ ASSERT(nP2Pvar);
     //  NOTE (§4.2): this raw c_memcpy assumes the source width == the stored P2PWCHAR
     //  width. That holds on Windows (wchar_t IS 16-bit) but NOT on Linux, where a
     //  wchar_t source is UTF-32 and would need p2p_store_wide conversion + a unit (not
-    //  sizeof(TCHAR)) size. Currently UNEXERCISED — the only caller, P2Pc_str<WSTR..>,
+    //  sizeof(WCHAR)) size. Currently UNEXERCISED — the only caller, P2Pc_str<WSTR..>,
     //  is never instantiated and no live code calls Recreate() with a WSTR type; wide
     //  values are set via c_wstr()/operator=(const wchar_t*), which pin correctly. If a
     //  WSTR Recreate() caller is ever added, convert here rather than raw-copy.
@@ -468,7 +468,7 @@ P3PmsgData::operator == ( const P3PmsgData& rhs )
           return pData1->u.vuInt32 == pData2->u.vuInt32 ? TRUE : FALSE;
           break;
       //else if ( uDType == VBLockData_LONG )
-      //  sprintf ( m_szToString, _T("%i"), c_long() );
+      //  sprintf ( m_szToString, L"%i", c_long() );
         case VBLockData_INT64:
           return pData1->u.vInt64 == pData2->u.vInt64 ? TRUE : FALSE;
           break;
@@ -580,7 +580,7 @@ P3PmsgData::c_int ( ) const
     const VBLockData *pData = P2PmsgObject_pData(*pOBJ__);
     if ( (pData->uDataAttr&VBLockAttr_NULL) == VBLockAttr_NULL )
       EVERR -> Module ( __FUNCTION__ )
-            -> Message( _T("c_int32() is null") )
+            -> Message( L"c_int32() is null" )
             -> Throw  ( );
     if ( pData->uDataType != VBLockData_INT32 )
       EVERR -> Module ( __FUNCTION__ )
@@ -617,7 +617,7 @@ P3PmsgData::c_int64 ( ) const
             -> Throw  ( );
     if ( (pData->uDataAttr&VBLockAttr_NULL) == VBLockAttr_NULL )
       EVERR -> Module ( __FUNCTION__ )
-            -> Message( _T("c_int64() is null") )
+            -> Message( L"c_int64() is null" )
             -> Throw  ( );
     return pData->u.vInt64;
 }
@@ -1258,47 +1258,47 @@ P3PmsgData::Nullify ( )
             -> Throw();
     pData -> uDataAttr |= VBLockAttr_NULL;
 }
-LPCTSTR
-P3PmsgData::ToString ( LPCTSTR /*lpszFormat*/ )
+LPCWSTR
+P3PmsgData::ToString ( LPCWSTR /*lpszFormat*/ )
 {
     VBLockData *pData  = P2PmsgObject_pData(*pOBJ__);
     UCHAR       uDType = pData->uDataType;
     m_szToString[0]    = 0;
 
     if ( uDType == VBLockData_NULL )
-      return _T("Null");
+      return L"Null";
     if ( (pData->uDataAttr&VBLockAttr_NULL) == VBLockAttr_NULL )
-      return _T("Null");
+      return L"Null";
     if ( uDType == VBLockData_INT08 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), _T("%c"), c_char() );
+     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%c", c_char() );
     else if ( uDType == VBLockData_UINT08 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), _T("0x%02x"), pData->u.vuInt08 );
+     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"0x%02x", pData->u.vuInt08 );
     else if ( uDType == VBLockData_INT16 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), _T("%i"), c_short() );
+     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%i", c_short() );
     else if ( uDType == VBLockData_UINT16 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), _T("%iu"), pData->u.vuInt16 );
+     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%iu", pData->u.vuInt16 );
     else if ( uDType == VBLockData_INT32 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), _T("%i"), c_int() );
+     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%i", c_int() );
     else if ( uDType == VBLockData_UINT32 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), _T("%iu"), pData->u.vuInt32 );
+     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%iu", pData->u.vuInt32 );
     //else if ( uDType == VBLockData_LONG )
-    //  sprintf ( m_szToString, _T("%i"), c_long() );
+    //  sprintf ( m_szToString, L"%i", c_long() );
     else if ( uDType == VBLockData_INT64 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), _T("%I64i"), pData->u.vInt64 );
+     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%I64i", pData->u.vInt64 );
     else if ( uDType == VBLockData_UINT64 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), _T("%I64iu"), pData->u.vuInt64 );
+     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%I64iu", pData->u.vuInt64 );
     else if ( uDType == VBLockData_FLOAT )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), _T("%g"), c_float() );
+     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%g", c_float() );
     else if ( uDType == VBLockData_DOUBLE )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), _T("%g"), c_double() );
+     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%g", c_double() );
     else if ( uDType == VBLockData_BOOL )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), _T("%i"), c_bool() );
+     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%i", c_bool() );
     else if ( uDType == VBLockData_WCHAR )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), _T("%c"), c_wchar() );
+     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%c", c_wchar() );
     else if ( uDType == VBLockData_TIME64 )
     {
       CTime oTime(pData->u.vTime64);
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), _T("%04i-%02i-%02i %02i:%02i:%02i")
+     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%04i-%02i-%02i %02i:%02i:%02i"
                  , oTime.GetYear(), oTime.GetMonth(), oTime.GetDay()
                  , oTime.GetHour(), oTime.GetMinute(), oTime.GetSecond() );
     }
@@ -1323,21 +1323,21 @@ P3PmsgData::ToString ( LPCTSTR /*lpszFormat*/ )
               uDType == VBLockData_BSTR32var    )
     {
       CString strBSTRnn = c_str(); //TODO:LJM debugging
-      swprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%s", (LPCTSTR)strBSTRnn );
+      swprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%s", (LPCWSTR)strBSTRnn );
     }
                                        // Entry type Blob
     else if ( uDType == VBLockData_BLOB08 )
-      return _T("...");
+      return L"...";
     else if ( uDType == VBLockData_BLOB08var )
-      return _T("...");
+      return L"...";
     else if ( uDType == VBLockData_BLOB16 )
-      return _T("...");
+      return L"...";
     else if ( uDType == VBLockData_BLOB16var )
-      return _T("...");
+      return L"...";
     else if ( uDType == VBLockData_BLOB32 )
-      return _T("...");
+      return L"...";
     else if ( uDType == VBLockData_BLOB32var )
-      return _T("...");
+      return L"...";
 
     else if ( uDType == VBLockData_GUID )
       GuidToString ( pData->u.vGUID, m_szToString );
@@ -1346,8 +1346,8 @@ P3PmsgData::ToString ( LPCTSTR /*lpszFormat*/ )
     return m_szToString;
 }
 
-LPCTSTR
-P3PmsgData::ToStringDefs ( LPCTSTR /*lpszFormat*/ )
+LPCWSTR
+P3PmsgData::ToStringDefs ( LPCWSTR /*lpszFormat*/ )
 {
     VBLockData *pData  = P2PmsgObject_pData(*pOBJ__);
     UCHAR       uDType = pData->uDataType;
@@ -1372,7 +1372,7 @@ P3PmsgData::ToStringDefs ( LPCTSTR /*lpszFormat*/ )
     if ( uDType == VBLockData_UINT64 )
       return L"";
     //else if ( uDType == VBLockData_LONG )
-    //  sprintf ( m_szToString, _T("%i"), c_long() );
+    //  sprintf ( m_szToString, L"%i", c_long() );
     if ( uDType == VBLockData_FLOAT )
       return L"";
     if ( uDType == VBLockData_DOUBLE )
@@ -1383,60 +1383,60 @@ P3PmsgData::ToStringDefs ( LPCTSTR /*lpszFormat*/ )
       return L"";
 
     if ( uDType == VBLockData_WSTR08 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	                , pData->u.vBlob08.nBlobSize , pData->u.vBlob08.nBlobUsed );
     else if ( uDType == VBLockData_WSTR08var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob08.nBlobSize, pData->u.vBlob08.nBlobUsed );
     else if ( uDType == VBLockData_WSTR16 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob16.nBlobSize, pData->u.vBlob16.nBlobUsed );
     else if ( uDType == VBLockData_WSTR16var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob16.nBlobSize, pData->u.vBlob16.nBlobUsed );
     else if ( uDType == VBLockData_WSTR32 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob32.nBlobSize, pData->u.vBlob32.nBlobUsed );
     else if ( uDType == VBLockData_WSTR32var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob32.nBlobSize, pData->u.vBlob32.nBlobUsed );
 
     else if ( uDType == VBLockData_BSTR08 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	                , pData->u.vBlob08.nBlobSize , pData->u.vBlob08.nBlobUsed );
     else if ( uDType == VBLockData_BSTR08var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob08.nBlobSize, pData->u.vBlob08.nBlobUsed );
     else if ( uDType == VBLockData_BSTR16 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob16.nBlobSize, pData->u.vBlob16.nBlobUsed );
     else if ( uDType == VBLockData_BSTR16var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob16.nBlobSize, pData->u.vBlob16.nBlobUsed );
     else if ( uDType == VBLockData_BSTR32 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob32.nBlobSize, pData->u.vBlob32.nBlobUsed );
     else if ( uDType == VBLockData_BSTR32var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob32.nBlobSize, pData->u.vBlob32.nBlobUsed );
                                        // Entry type Blob
     else if ( uDType == VBLockData_BLOB08 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob08.nBlobSize, pData->u.vBlob08.nBlobUsed );
     else if ( uDType == VBLockData_BLOB08var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob08.nBlobSize, pData->u.vBlob08.nBlobUsed );
     else if ( uDType == VBLockData_BLOB16 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob16.nBlobSize, pData->u.vBlob16.nBlobUsed );
     else if ( uDType == VBLockData_BLOB16var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob16.nBlobSize, pData->u.vBlob16.nBlobUsed );
     else if ( uDType == VBLockData_BLOB32 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob32.nBlobSize, pData->u.vBlob32.nBlobUsed );
     else if ( uDType == VBLockData_BLOB32var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), _T("%02i:%02i")
+     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
 	               , pData->u.vBlob32.nBlobSize, pData->u.vBlob32.nBlobUsed );
 
     else if ( uDType == VBLockData_GUID )
@@ -1444,8 +1444,8 @@ P3PmsgData::ToStringDefs ( LPCTSTR /*lpszFormat*/ )
     return m_szToStrDef;
 }
 
-LPCTSTR
-P3PmsgData::ToStringType ( LPCTSTR lpszFormat ) const
+LPCWSTR
+P3PmsgData::ToStringType ( LPCWSTR lpszFormat ) const
 {
     UNREFERENCED_PARAMETER(lpszFormat);
     VBLockData *pData   = P2PmsgObject_pData(*pOBJ__);
@@ -1874,7 +1874,7 @@ P2PmsgData_var ( P3PmsgData& oData, const _variant_t& var )
       pData->u.vBool = var;
 
     else if ( var.vt == VT_BSTR )
-      oData.c_memcpy ( (const void *)((_bstr_t)var).GetBSTR(), ((_bstr_t)var).length()*sizeof(TCHAR) );
+      oData.c_memcpy ( (const void *)((_bstr_t)var).GetBSTR(), ((_bstr_t)var).length()*sizeof(WCHAR) );
     //else if ( uDType == VBLockData_BSTR08var )
     //  oData.c_memcpy ( (const char *)((_bstr_t)var), 0 );
     //else if ( uDType == VBLockData_BSTR16 )
@@ -2054,7 +2054,7 @@ P3PmsgName::P3PmsgName ( LPCWSTR lpszName, size_t nSize )
     // never resized the default vBlob08, so a name 64..255 chars long overran
     // it: the capacity check was a debug-only ASSERT, and the runtime guard
     // fired only AFTER the overflowing memcpy had corrupted the heap. c_name()
-    // is also null-safe for lpszName, which the old _tcslen path was not.
+    // is also null-safe for lpszName, which the old wcslen path was not.
     c_name ( lpszName, nSize );
 }
 P3PmsgName::~P3PmsgName ( )
@@ -2151,18 +2151,18 @@ P3PmsgName::operator == ( const P3PmsgName& rhs ) const
     size_t nSizeThat = rhs.c_size();
     if ( nSizeThis != nSizeThat )
       return false;
-    return _tcsnicmp ( c_name(), rhs.c_name(), nSizeThis) == 0 ? true : false;
+    return _wcsnicmp ( c_name(), rhs.c_name(), nSizeThis) == 0 ? true : false;
 }
 bool
-P3PmsgName::operator == ( LPCTSTR rhs ) const
+P3PmsgName::operator == ( LPCWSTR rhs ) const
 {
     size_t nSizeThis = c_size();
     if ( rhs == nullptr )
       return nSizeThis ? false : true;
-    size_t nSize = _tcslen ( rhs );
+    size_t nSize = wcslen ( rhs );
     if ( nSizeThis != nSize )
       return false;
-    return _tcsnicmp ( c_name(), rhs, nSize) == 0 ? true : false;
+    return _wcsnicmp ( c_name(), rhs, nSize) == 0 ? true : false;
 }
 
 bool
@@ -2171,7 +2171,7 @@ P3PmsgName::operator < ( const P3PmsgName& rhs ) const
     size_t nSize = c_size();
     if ( nSize > rhs.c_size() )
       nSize = rhs.c_size();
-    return _tcsnicmp ( c_name(),rhs.c_name(),nSize) < 0 ? true : false;
+    return _wcsnicmp ( c_name(),rhs.c_name(),nSize) < 0 ? true : false;
 }
 
 bool
@@ -2180,7 +2180,7 @@ P3PmsgName::operator > ( const P3PmsgName& rhs ) const
     size_t nSize = c_size();
     if ( nSize > rhs.c_size() )
       nSize = rhs.c_size();
-    return _tcsnicmp ( c_name(),rhs.c_name(),nSize) < 0 ? false : true;
+    return _wcsnicmp ( c_name(),rhs.c_name(),nSize) < 0 ? false : true;
 }
 
 //  Name exposure
@@ -2249,13 +2249,13 @@ P3PmsgName::c_wcscmp ( LPCWSTR lpszCompare ) const
 int
 P3PmsgName::c_wcsicmp ( LPCWSTR lpszCompareNocase ) const
 {
-    LPCTSTR lpszName = c_name();
+    LPCWSTR lpszName = c_name();
     return _wcsicmp ( lpszName, lpszCompareNocase );
 }
 int
 P3PmsgName::c_wcsicmpWC ( LPCWSTR lpszCompareNocase ) const
 {
-    LPCTSTR lpszName = c_name();
+    LPCWSTR lpszName = c_name();
     return MsgcoreWildcard ( lpszCompareNocase, lpszName );
 }
 int
@@ -2335,7 +2335,7 @@ void
 P3PmsgName::AssertValid ( ) const
 {
     VBLockName *pName = P3PmsgName_GetVBLockName(m_pObject,false);
-//LPCTSTR lpszName=c_name();
+//LPCWSTR lpszName=c_name();
 
     // Indirections
     while ( VBLockName_IsChained(pName) )
@@ -3621,14 +3621,14 @@ P3PmsgField::P3PmsgField ( const P3PmsgField& rhs )
     RenderThisSafe ( );
    *this = rhs;
 }
-P3PmsgField::P3PmsgField ( LPCTSTR lpszName, size_t nSize )
+P3PmsgField::P3PmsgField ( LPCWSTR lpszName, size_t nSize )
            : P3PmsgName ( (P3PmsgField *)0 ), P3PmsgData ( (P3PmsgField *)0 )
 {
     RenderThisSafe ( );
     c_name ( lpszName, nSize );
     //ASSERT(VerifyContainment());
 }
-P3PmsgField::P3PmsgField ( LPCTSTR lpszName, const P3PmsgData& oData )
+P3PmsgField::P3PmsgField ( LPCWSTR lpszName, const P3PmsgData& oData )
            : P3PmsgName ( (P3PmsgField *)0 ), P3PmsgData ( (P3PmsgField *)0 )
 {
     RenderThisSafe ( );
@@ -3889,10 +3889,10 @@ P3PmsgField::operator = ( const P3PmsgName& rhs )
 //         not convert to int and so the built-in candidates below were not
 //         viable either.
 bool
-P3PmsgField::operator == ( LPCTNAM lpszName ) const
+P3PmsgField::operator == ( LPCWSTR lpszName ) const
 {
     ASSERT(P3PmsgName::m_pObject==&m_oObject);
-    return _tcsicmp(c_name(), lpszName ) ? false : true;
+    return _wcsicmp(c_name(), lpszName ) ? false : true;
 }
 
 //
@@ -3937,7 +3937,7 @@ P3PmsgField::operator != ( const P3PmsgField& rhs ) const
     return !( *this == rhs );
 }
 P3PmsgField&
-P3PmsgField::operator [] ( LPCTNAM lpszName )
+P3PmsgField::operator [] ( LPCWSTR lpszName )
 {
     return r_Desc()[lpszName];
 }
@@ -4187,7 +4187,7 @@ P3PmsgField::AssertValid ( ) const
       aPrev_Next = VBLockItem_GetNext ( OBJ__uVBLock, VBLock_pItem(pPrev) );
     if ( aPrev_Next && OBJ__VBLocknn != aPrev_Next )
       EVERR -> Module ( __FUNCTION__ )
-            -> Message(L"%s", (LPCTSTR)P3Pmsg_GetPath(this) )
+            -> Message(L"%s", (LPCWSTR)P3Pmsg_GetPath(this) )
             -> Message("Corrupted backwards link aPrev=%i aThis=%i aPrev_Next=%i",
                         aPrev, OBJ__VBLocknn, aPrev_Next )
             -> Throw();
@@ -4635,14 +4635,14 @@ P3PmsgField16::~P3PmsgField16 ( ) {};
     RenderThisSafe ( );
 }
 
-P3PmsgNode::P3PmsgNode ( LPCTNAM lpszName, int nSize )
+P3PmsgNode::P3PmsgNode ( LPCWSTR lpszName, int nSize )
           : P3PmsgField ( 0, 0, 0 )
 {
     RenderThisSafe ( );
   (*this) = P3PmsgField ( lpszName, nSize );
 }
 
-P3PmsgNode::P3PmsgNode ( LPCTNAM lpszName, const P3PmsgData& oData )
+P3PmsgNode::P3PmsgNode ( LPCWSTR lpszName, const P3PmsgData& oData )
           : P3PmsgField ( 0, 0, 0 )
 {
     RenderThisSafe ( );
@@ -4770,7 +4770,7 @@ P3PmsgNode::Connect ( P2PmsgHANDLE hVBList, VBLaddr aNode, VBLsize nNodeSize )
 }
 
 P3PmsgNode&
-P3PmsgNode::AddNode ( LPCTNAM lpszName, const P3PmsgData& oData )
+P3PmsgNode::AddNode ( LPCWSTR lpszName, const P3PmsgData& oData )
 {
   //  P3PmsgNode oNode ( P3PmsgField(lpszName,oData) );
   (*this) += P3PmsgNode( P3PmsgField(lpszName,oData) );
@@ -4778,7 +4778,7 @@ P3PmsgNode::AddNode ( LPCTNAM lpszName, const P3PmsgData& oData )
 }
 
 P3PmsgField&
-P3PmsgNode::AddField( LPCTNAM lpszName, const P3PmsgData& oData )
+P3PmsgNode::AddField( LPCWSTR lpszName, const P3PmsgData& oData )
 {
   (*this) += P3PmsgField(lpszName, oData );
     return *this;
@@ -5069,7 +5069,7 @@ ASSERT(VBLockItem_Sizenn(pVBLock)>=nSizeofItem);
     return *this;
 }
 P3PmsgField&
-P3PmsgNode::operator [] ( LPCTNAM lpszItemName )
+P3PmsgNode::operator [] ( LPCWSTR lpszItemName )
 {
     if ( m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -5098,12 +5098,12 @@ P3PmsgNode::operator P2PmsgNodeHdl ( )
 //
 //  Navigation
 P3PmsgObject
-P3PmsgNode::SelectObject ( LPCTNAM lpszObjectName )
+P3PmsgNode::SelectObject ( LPCWSTR lpszObjectName )
 {
     return P3Pmsg_SelectObject ( &r_Object(), lpszObjectName );
 }
 P3PmsgField
-P3PmsgNode::Select ( LPCTNAM lpszItemName )
+P3PmsgNode::Select ( LPCWSTR lpszItemName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -5112,7 +5112,7 @@ P3PmsgNode::Select ( LPCTNAM lpszItemName )
     return *m_pCurs;
 }
 P3PmsgField&
-P3PmsgNode::SelectItem ( LPCTNAM lpszItemName )
+P3PmsgNode::SelectItem ( LPCWSTR lpszItemName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -5128,7 +5128,7 @@ P3PmsgNode::SelectItem ( LPCTNAM lpszItemName )
 }
 
 P3PmsgNode&
-P3PmsgNode::SelectNode ( LPCTNAM lpszNodeName )
+P3PmsgNode::SelectNode ( LPCWSTR lpszNodeName )
 {
     if (  m_pCurs == nullptr)
       m_pCurs = new P3PmsgCurs ( *this );
@@ -5145,7 +5145,7 @@ P3PmsgNode::SelectNode ( LPCTNAM lpszNodeName )
 }
 
 P3PmsgField&
-P3PmsgNode::DeclareItem ( LPCTNAM lpszFieldname, const P3PmsgData& oData, bool bUpdate )
+P3PmsgNode::DeclareItem ( LPCWSTR lpszFieldname, const P3PmsgData& oData, bool bUpdate )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -5160,7 +5160,7 @@ P3PmsgNode::DeclareItem ( LPCTNAM lpszFieldname, const P3PmsgData& oData, bool b
     return m_pCurs->r_item();
 }
 P3PmsgNode&
-P3PmsgNode::DeclareNode ( LPCTNAM lpszNodename, const P3PmsgData& oData, bool bUpdate )
+P3PmsgNode::DeclareNode ( LPCWSTR lpszNodename, const P3PmsgData& oData, bool bUpdate )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -5176,7 +5176,7 @@ P3PmsgNode::DeclareNode ( LPCTNAM lpszNodename, const P3PmsgData& oData, bool bU
 }
 
 bool
-P3PmsgNode::Exists ( LPCTNAM lpszItemName ) const
+P3PmsgNode::Exists ( LPCWSTR lpszItemName ) const
 {
     if ( IsVoid() )
       return false;
@@ -5187,7 +5187,7 @@ P3PmsgNode::Exists ( LPCTNAM lpszItemName ) const
 }
 
 bool
-P3PmsgNode::Delete ( LPCTNAM lpszItemName )
+P3PmsgNode::Delete ( LPCWSTR lpszItemName )
 {
     // Initialisation
     if ( IsVoid() )
@@ -5761,7 +5761,7 @@ P3PmsgDesc::operator += ( const P3PmsgField& rhs )
     return *this;
 }
 P3PmsgNode&
-P3PmsgDesc::operator [] ( LPCTNAM lpszName )
+P3PmsgDesc::operator [] ( LPCWSTR lpszName )
 {
     if ( m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -5857,7 +5857,7 @@ P3PmsgDesc::Drop ( )
 
 //  Navigation and 
 P3PmsgObject
-P3PmsgDesc::SelectObject ( LPCTNAM lpszObjectName )
+P3PmsgDesc::SelectObject ( LPCWSTR lpszObjectName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -5867,7 +5867,7 @@ P3PmsgDesc::SelectObject ( LPCTNAM lpszObjectName )
     //TODO:LJM was return ((P3PmsgField&)*m_pCurs).r_Object();
 }
 P3PmsgField
-P3PmsgDesc::Select ( LPCTNAM lpszItemName )
+P3PmsgDesc::Select ( LPCWSTR lpszItemName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -5876,7 +5876,7 @@ P3PmsgDesc::Select ( LPCTNAM lpszItemName )
     return *m_pCurs;
 }
 P3PmsgField&
-P3PmsgDesc::SelectItem ( LPCTNAM lpszItemName )
+P3PmsgDesc::SelectItem ( LPCWSTR lpszItemName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -5891,7 +5891,7 @@ P3PmsgDesc::SelectItem ( LPCTNAM lpszItemName )
     return *m_pCurs;
 }
 P3PmsgNode&
-P3PmsgDesc::SelectNode ( LPCTNAM lpszNodeName )
+P3PmsgDesc::SelectNode ( LPCWSTR lpszNodeName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -5907,7 +5907,7 @@ P3PmsgDesc::SelectNode ( LPCTNAM lpszNodeName )
     return m_pCurs->r_node ( );
 }
 P3PmsgList&
-P3PmsgDesc::SelectList ( LPCTNAM lpszListName )
+P3PmsgDesc::SelectList ( LPCWSTR lpszListName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -5923,7 +5923,7 @@ P3PmsgDesc::SelectList ( LPCTNAM lpszListName )
     return m_pCurs->r_list ( );
 }
 P3PmsgVect&
-P3PmsgDesc::SelectVect ( LPCTNAM lpszVectName )
+P3PmsgDesc::SelectVect ( LPCWSTR lpszVectName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -5940,7 +5940,7 @@ P3PmsgDesc::SelectVect ( LPCTNAM lpszVectName )
 }
 
 P3PmsgField&
-P3PmsgDesc::DeclareItem ( LPCTNAM lpszItemName, const P3PmsgData& oData, bool bUpdate )
+P3PmsgDesc::DeclareItem ( LPCWSTR lpszItemName, const P3PmsgData& oData, bool bUpdate )
 {
     if ( OBJ__aVBLock == NULL )
       Create ( );
@@ -5957,7 +5957,7 @@ P3PmsgDesc::DeclareItem ( LPCTNAM lpszItemName, const P3PmsgData& oData, bool bU
     return m_pCurs->r_item();
 }
 P3PmsgNode&
-P3PmsgDesc::DeclareNode ( LPCTNAM lpszNodename, const P3PmsgData& oData, bool bUpdate )
+P3PmsgDesc::DeclareNode ( LPCWSTR lpszNodename, const P3PmsgData& oData, bool bUpdate )
 {
     if ( OBJ__aVBLock == NULL )
       Create ( );
@@ -5974,7 +5974,7 @@ P3PmsgDesc::DeclareNode ( LPCTNAM lpszNodename, const P3PmsgData& oData, bool bU
     return m_pCurs->r_node();
 }
 bool
-P3PmsgDesc::Exists ( LPCTNAM lpszItemName )
+P3PmsgDesc::Exists ( LPCWSTR lpszItemName )
 {
     if ( OBJ__aVBLock == NULL )
       return false;
@@ -5986,7 +5986,7 @@ P3PmsgDesc::Exists ( LPCTNAM lpszItemName )
     return m_pCurs->Goto(lpszItemName);
 }
 bool
-P3PmsgDesc::Delete ( LPCTNAM lpszItemName )
+P3PmsgDesc::Delete ( LPCWSTR lpszItemName )
 {
     if ( OBJ__aVBLock == NULL )
       return false;
@@ -6976,10 +6976,10 @@ P2PmsgNode_SortinItem ( P3PmsgNode *pNode, const P3PmsgName& oName
 
       // Insertion before minimum
       //oCurs.Goto(imin);
-      //LPCTSTR lpszImin = oCurs.r_name().c_name();
-      //LPCTSTR lpszName = oName.c_name();
+      //LPCWSTR lpszImin = oCurs.r_name().c_name();
+      //LPCWSTR lpszName = oName.c_name();
       //oCurs.Goto(imax);
-      //LPCTSTR lpszImax = oCurs.r_name().c_name();
+      //LPCWSTR lpszImax = oCurs.r_name().c_name();
     // Insertion before minimum
     if ( oCurs.Goto(imin) && oName < oCurs.r_name() )
     {
@@ -7180,7 +7180,7 @@ ASSERT(oCurs.Item()==i);
       {
         //  COPY - see the P3PmsgCurs widening-ring note in P2PmsgNode_Merge above.
         CString strNodename  = oCurs.r_node().c_name();
-        LPCTSTR lpszNodename = strNodename;
+        LPCWSTR lpszNodename = strNodename;
         if ( oAttr.Exists(lpszNodename) )
           P2PmsgNode_Merge ( oAttr.SelectNode(lpszNodename), oCurs.r_node() );
         else
@@ -7200,7 +7200,7 @@ ASSERT(oCurs.Item()==i);
       {
         //  COPY - see the P3PmsgCurs widening-ring note in P2PmsgNode_Merge above.
         CString strFieldname  = oCurs.r_field().c_name();
-        LPCTSTR lpszFieldname = strFieldname;
+        LPCWSTR lpszFieldname = strFieldname;
         if ( oAttr.Exists(lpszFieldname) )
           P2PmsgField_Merge ( oAttr.SelectItem(lpszFieldname), oCurs.r_field() );
         else
@@ -7221,26 +7221,26 @@ ASSERT(oCurs.Item()==i);
 
 //P3PmsgNode&
 //P3PmsgField_SERIALISE ( P3PmsgNode& oNode
-//                      , LPCTSTR lpszFieldname, const P3PmsgData& oData
-//                      , bool bDscAttr, LPCTSTR lpszDescription )
+//                      , LPCWSTR lpszFieldname, const P3PmsgData& oData
+//                      , bool bDscAttr, LPCWSTR lpszDescription )
 //{
 //    P3PmsgField oField ( lpszFieldname, oData );
 //    if ( bDscAttr )
 //      oField.r_Attr(P3PmsgField::AttrCMD_Create)
-//        += P3PmsgField ( _T("Dsc"), lpszDescription );
+//        += P3PmsgField ( L"Dsc", lpszDescription );
 //    oNode += oField;
 //    return oNode;
 //}
 //
 //P3PmsgAttr&
 //P2PmsgAttr_SERIALISE  ( P3PmsgAttr& oAttr, bool bOverwrite
-//                      , LPCTSTR lpszFieldname, const P3PmsgData& oData
-//                      , bool bDscAttr, LPCTSTR lpszDescription )
+//                      , LPCWSTR lpszFieldname, const P3PmsgData& oData
+//                      , bool bDscAttr, LPCWSTR lpszDescription )
 //{
 //    P3PmsgField oField ( lpszFieldname, oData );
 //    if ( bDscAttr )
 //      oField.r_Attr(P3PmsgField::AttrCMD_Create)
-//        += P3PmsgField ( _T("Dsc"), lpszDescription );
+//        += P3PmsgField ( L"Dsc", lpszDescription );
 //    if ( !oAttr.Exists(lpszFieldname) )
 //      oAttr += oField;
 //    else if ( bOverwrite )
@@ -7248,7 +7248,7 @@ ASSERT(oCurs.Item()==i);
 //    else
 //      EVERR->MODULE
 //           ->AFP(lpszFieldname)
-//           ->Message(_T("Field already exists, no overwrite permission") )
+//           ->Message(L"Field already exists, no overwrite permission" )
 //           ->Throw();
 //    return oAttr;
 //}
@@ -7256,21 +7256,21 @@ ASSERT(oCurs.Item()==i);
 //
 //P3PmsgField&
 //Decorate4Grid_COLOR ( P3PmsgField& oField, UCHAR ucAttributes
-//                    , LPCTSTR lpszGridLabel, LPCTSTR lpszGridDescription )
+//                    , LPCWSTR lpszGridLabel, LPCWSTR lpszGridDescription )
 //{
-//    oField.r_Attr().PushBack ( P3PmsgField ( _T("#Lab"), lpszGridLabel ) );
-//    oField.r_Attr().PushBack ( P3PmsgField ( _T("#Dsc"), lpszGridDescription ) );
-//    oField.r_Attr().PushBack ( P3PmsgField ( _T("#Typ"), _T("COLOR") ) );
+//    oField.r_Attr().PushBack ( P3PmsgField ( L"#Lab", lpszGridLabel ) );
+//    oField.r_Attr().PushBack ( P3PmsgField ( L"#Dsc", lpszGridDescription ) );
+//    oField.r_Attr().PushBack ( P3PmsgField ( L"#Typ", L"COLOR" ) );
 //    return oField;
 //}
 //
 //P3PmsgField&
 //Decorate4Grid_FILE ( P3PmsgField& oField, UCHAR ucAttributes
-//                   , LPCTSTR lpszGridLabel, LPCTSTR lpszGridDescription )
+//                   , LPCWSTR lpszGridLabel, LPCWSTR lpszGridDescription )
 //{
-//    oField.r_Attr().PushBack ( P3PmsgField ( _T("#Lab"), lpszGridLabel ) );
-//    oField.r_Attr().PushBack ( P3PmsgField ( _T("#Dsc"), lpszGridDescription ) );
-//    oField.r_Attr().PushBack ( P3PmsgField ( _T("#Typ"), _T("FILE") ) );
+//    oField.r_Attr().PushBack ( P3PmsgField ( L"#Lab", lpszGridLabel ) );
+//    oField.r_Attr().PushBack ( P3PmsgField ( L"#Dsc", lpszGridDescription ) );
+//    oField.r_Attr().PushBack ( P3PmsgField ( L"#Typ", L"FILE" ) );
 //    return oField;
 //}
 
@@ -7284,13 +7284,13 @@ ASSERT(oCurs.Item()==i);
 //         "[.]item@item.etc parses to "", and
 //         "[@]item.etc parses to ""
 //
-//  Parameters:  LPCTSTR lpszItemPath
+//  Parameters:  LPCWSTR lpszItemPath
 //               Item path to be parsed
 //
 //  Returns:     CString
 //               Parsed root name
 CString
-P3Pmsg_GetRootname ( LPCTSTR lpszItemPath )
+P3Pmsg_GetRootname ( LPCWSTR lpszItemPath )
 {
     CString strRootname;
     if ( *lpszItemPath != L':' && *lpszItemPath != T_DescDelim )
@@ -7371,7 +7371,7 @@ P3Pmsg_GetAttrPath ( const P3PmsgField *pField, VBLaddr aParent )
       VBLaddr     aAttrPar = VBLockAttr_GetParent ( pParent->oHdr.uVBLockDefs, pAttr );
       if ( aAttrPar )
         strPath += P3Pmsg_GetAttrPath ( pField, aAttrPar );
-      strPath += _T("@");
+      strPath += L"@";
       return strPath;
     }
     if ( ( VBLock_IsItem(pParent)                   &&
@@ -7489,7 +7489,7 @@ P3Pmsg_GetPath ( const P3PmsgField *pItem )
       if ( aDescPar )
         strPath += P3Pmsg_GetDescPath ( pItem, aDescPar );
       strPath += pItem->r_Object().IsRoot() ? L":" : L".";
-      //strPath += _T("."); //TODO:LJM displaced by above
+      //strPath += L"."; //TODO:LJM displaced by above
     }
     //else if ( VBLock_IsNode(pParent)         ||
     //          VBLockItem_IsNode(pParentItem)    )
@@ -7518,7 +7518,7 @@ P3Pmsg_GetPath ( const P3PmsgField *pItem )
       VBLaddr     aAttrPar = VBLockAttr_GetParent ( pParent->oHdr.uVBLockDefs, pAttr );
       if ( aAttrPar )
         strPath += P3Pmsg_GetAttrPath ( pItem, aAttrPar );
-      strPath += T_AttrDelim; //_T("@");
+      strPath += T_AttrDelim; //L"@";
     }
     else
     {
@@ -7558,7 +7558,7 @@ P3Pmsg_GetPath ( const P3PmsgAttr *pAttr )
       //{
       //  P3PmsgNode oNodeParent( pAttr->GetField()->GetP2PmsgHandle(), aParent, 0 );
       //  strPath += P3Pmsg_GetPath ( &oNodeParent );
-      //  strPath += _T(".");
+      //  strPath += L".";
       //}
       if ( pParent && VBLock_IsItem(pParent) )
       {
@@ -7579,7 +7579,7 @@ P3Pmsg_GetPath ( const P3PmsgAttr *pAttr )
     //  '@' with no name after it IS the component. It names the collection
     //  itself, the way '^' with nothing after it names a snapshot (§5), and
     //  P3Pmsg_SplitRootPath keeps it for the same reason.
-    strPath += T_AttrDelim; //_T("@");
+    strPath += T_AttrDelim; //L"@";
     return strPath;
 }
 VBLaddr
@@ -7621,12 +7621,12 @@ P3Pmsg_GetPath ( const P3PmsgDesc *pDesc )
     }
 
     // Tidy up, and
-    strPath += T_DescDelim; //_T(".");
+    strPath += T_DescDelim; //L".";
     return strPath;
 }
 
 LPCWSTR
-ParseObjectPath ( LPCWSTR lpszObjectPath, LPTNAM lpszObjectname, int nObjectnameChars )
+ParseObjectPath ( LPCWSTR lpszObjectPath, LPWSTR lpszObjectname, int nObjectnameChars )
 {
     // Parse out the immediate object name
     // NOTES: [.|@|^]objectname[.|@|^]objectname[.|@|^]etc
@@ -7646,10 +7646,10 @@ ParseObjectPath ( LPCWSTR lpszObjectPath, LPTNAM lpszObjectname, int nObjectname
     return lpszParsedname;
 }
 P3PmsgObject
-P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath )
+P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCWSTR lpszObjectPath )
 {
     // Locals;
-    TCHAR     nsObjectname[MAX_TNAME_SIZE];
+    WCHAR     nsObjectname[MAX_TNAME_SIZE];
     LPCWSTR lpszParsedname = ParseObjectPath ( lpszObjectPath, nsObjectname, ARRAYSIZE(nsObjectname) );
 
     //  AN OBJECT THAT NAMES NO BLOCK IS AN ORDINARY ANSWER, NOT A LOGIC ERROR.
@@ -7968,7 +7968,7 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath
     return P3PmsgObject();
 }
 P3PmsgObject
-P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath )
+P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCWSTR lpszObjectPath )
 {
     //  A LEADING '.' means "this component names the object you are standing
     //  on", and the name after it is matched against that object's own. A path
@@ -7992,8 +7992,8 @@ P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCTNAM lpszObjectPath )
     //  The WHOLE path is kept. A leading '.' that turns out not to be the
     //  root marker is an ordinary descendant delimiter, and the arms below
     //  have to be able to hand it on with the delimiter still attached.
-    LPCTNAM lpszWhole = lpszObjectPath;
-    TNAME   nsObjectname[MAX_TNAME_SIZE] = {0};
+    LPCWSTR lpszWhole = lpszObjectPath;
+    WCHAR   nsObjectname[MAX_TNAME_SIZE] = {0};
     lpszObjectPath = ParseObjectPath ( lpszObjectPath + 1, nsObjectname, ARRAYSIZE(nsObjectname) );
 
     //  THE COLLECTIONS ARE ASKED ABOUT FIRST, for the reason §16 gives: IsAttr
@@ -8311,18 +8311,18 @@ strItemname=strLast;
 //  Parameters:  FILE *fd
 //               Diagnostic message destination
 // 
-//               LPCTSTR lpszFormat
+//               LPCWSTR lpszFormat
 //               Format specification
 //
 //               ...
 //               Variable argument list associated with above
 //
 int
-P3Pmsg_fwprintf ( FILE *fd, LPCTSTR lpszFormat, ... )
+P3Pmsg_fwprintf ( FILE *fd, LPCWSTR lpszFormat, ... )
 {
     // Encode
     va_list  ap;                       // Variable argument list.
-    TCHAR    szDebugMsg[2048];
+    WCHAR    szDebugMsg[2048];
     int      cSize = 0;
 
     // Encode message
@@ -8409,19 +8409,19 @@ P3Pmsg_SetTStamp ( const P3PmsgItem& oItem, INT64 tsValue, BOOL bRecurse )
 //               LPCSTR lpszItemName
 //               Name of descendant(s) to be deleted
 Msgcore_EXT void
-P3PmsgRefactor_Delete ( P3PmsgField& oItem, LPCTSTR lpszItemName )
+P3PmsgRefactor_Delete ( P3PmsgField& oItem, LPCWSTR lpszItemName )
 {
     while ( oItem.Exists(lpszItemName) )
       oItem.Delete ( lpszItemName );
 }
 Msgcore_EXT void
-P3PmsgRefactor_Delete ( P3PmsgAttr& oAttr, LPCTSTR lpszItemName )
+P3PmsgRefactor_Delete ( P3PmsgAttr& oAttr, LPCWSTR lpszItemName )
 {
     while ( oAttr.Exists(lpszItemName) )
       oAttr.Delete ( lpszItemName );
 }
 Msgcore_EXT void
-P3PmsgRefactor_DeleteFromParents ( const P3PmsgField& oItem, LPCTSTR lpszItemName )
+P3PmsgRefactor_DeleteFromParents ( const P3PmsgField& oItem, LPCWSTR lpszItemName )
 {
     P3PmsgObject oParentObject = oItem.r_Object().GetParent();
     while ( !oParentObject.IsVoid() )
@@ -8441,35 +8441,35 @@ P3PmsgRefactor_DeleteFromParents ( const P3PmsgField& oItem, LPCTSTR lpszItemNam
 //  Parameters:  P3PmsgItem& oItem or P3PmsgAttr& oAttr
 //               Parent Item or Attr from which children are to be deleted
 //
-//               LPCTSTR lpszAttribute1
+//               LPCWSTR lpszAttribute1
 //               First attribute requirement, mandatory
 //
-//               LPCTSTR lpszAttribute2 = nullptr
+//               LPCWSTR lpszAttribute2 = nullptr
 //               Second attribute requirement, optional
 //
-//               LPCTSTR lpszAttribute3 = nullptr
+//               LPCWSTR lpszAttribute3 = nullptr
 //               Third attribute requirement, optional
 //
 //  Returns:     int
 //               Item deleted count
 // 
 Msgcore_EXT int
-P3PmsgRefactor_DeleteWithQualAttributes ( P3PmsgAttr& oAttr, LPCTSTR lpszAttribute1
-                                   , LPCTSTR lpszAttribute2, LPCTSTR lpszAttribute3 )
+P3PmsgRefactor_DeleteWithQualAttributes ( P3PmsgAttr& oAttr, LPCWSTR lpszAttribute1
+                                   , LPCWSTR lpszAttribute2, LPCWSTR lpszAttribute3 )
 {
     int        nItems = 0;
     P3PmsgCurs oCurs(oAttr);
     for ( int i = 0; oCurs.Goto(i); i++ )
     {
-      LPCTSTR lpszName = oCurs.r_name().c_name();
+      LPCWSTR lpszName = oCurs.r_name().c_name();
       if ( !oCurs.IsItem()                       ||
            !oCurs.r_attr().Exists(lpszAttribute1)   )
         continue;
-      if ( _tcslen(lpszAttribute2) > 0           &&
+      if ( wcslen(lpszAttribute2) > 0           &&
            !oCurs.r_attr().Exists(lpszAttribute2)   )
         continue;
       if (         lpszAttribute3                &&
-           _tcslen(lpszAttribute3) > 0           &&
+           wcslen(lpszAttribute3) > 0           &&
            !oCurs.r_attr().Exists(lpszAttribute3)   )
         continue;
       oCurs.Delete ( );
@@ -8487,11 +8487,11 @@ P3PmsgRefactor_DeleteWithQualAttributes ( P3PmsgAttr& oAttr, LPCTSTR lpszAttribu
 //               LPCSTR lpszItemName
 //               Name of descendant(s) to be renamed
 //
-//               LPCTSTR lpszItemNew
+//               LPCWSTR lpszItemNew
 //               New descendant name
 //
 Msgcore_EXT void
-P3PmsgRefactor_Rename ( P3PmsgField& oItem, LPCTSTR lpszItemName, LPCTSTR lpszItemNew )
+P3PmsgRefactor_Rename ( P3PmsgField& oItem, LPCWSTR lpszItemName, LPCWSTR lpszItemNew )
 {
     //  BOTH names are snapshotted, because this loop spends a ring slot per
     //  sibling: c_wcscmp() widens that sibling's stored name through
@@ -8518,7 +8518,7 @@ P3PmsgRefactor_Rename ( P3PmsgField& oItem, LPCTSTR lpszItemName, LPCTSTR lpszIt
 }
 
 Msgcore_EXT void
-P3PmsgRefactor_Rename ( P3PmsgAttr& oAttr, LPCTSTR lpszItemName, LPCTSTR lpszItemNew )
+P3PmsgRefactor_Rename ( P3PmsgAttr& oAttr, LPCWSTR lpszItemName, LPCWSTR lpszItemNew )
 {
     //  Attribute twin of the descendant version above, with the same hazard in
     //  both arguments and the same reason: the scan spends a ring slot per
@@ -8547,11 +8547,11 @@ P3PmsgRefactor_Rename ( P3PmsgAttr& oAttr, LPCTSTR lpszItemName, LPCTSTR lpszIte
 //               P3PmsgField& oItemDestin
 //               Item destination
 //
-//               LPCTSTR lpszItemName
+//               LPCWSTR lpszItemName
 //               Item name
 //
 Msgcore_EXT void
-P3PmsgRefactor_Move ( P3PmsgAttr& oAttrSource, P3PmsgField& oItemDestin, LPCTSTR lpszItemName )
+P3PmsgRefactor_Move ( P3PmsgAttr& oAttrSource, P3PmsgField& oItemDestin, LPCWSTR lpszItemName )
 { 
     while ( oAttrSource.Exists(lpszItemName) )
     {
@@ -8561,7 +8561,7 @@ P3PmsgRefactor_Move ( P3PmsgAttr& oAttrSource, P3PmsgField& oItemDestin, LPCTSTR
     }
 }
 Msgcore_EXT void
-P3PmsgRefactor_Move ( P3PmsgField& oFieldSource, P3PmsgAttr& oAttrDestin, LPCTSTR lpszItemName )
+P3PmsgRefactor_Move ( P3PmsgField& oFieldSource, P3PmsgAttr& oAttrDestin, LPCWSTR lpszItemName )
 { 
     while ( oFieldSource.Exists(lpszItemName) )
     {
@@ -8571,7 +8571,7 @@ P3PmsgRefactor_Move ( P3PmsgField& oFieldSource, P3PmsgAttr& oAttrDestin, LPCTST
     }
 }
 Msgcore_EXT void
-P3PmsgRefactor_Move ( P3PmsgField& oFieldSource, P3PmsgField& oItemDestin, LPCTSTR lpszItemName )
+P3PmsgRefactor_Move ( P3PmsgField& oFieldSource, P3PmsgField& oItemDestin, LPCWSTR lpszItemName )
 { 
     while ( oFieldSource.Exists(lpszItemName) )
     {
@@ -8581,7 +8581,7 @@ P3PmsgRefactor_Move ( P3PmsgField& oFieldSource, P3PmsgField& oItemDestin, LPCTS
     }
 }
 Msgcore_EXT void
-P3PmsgRefactor_Move ( P3PmsgAttr& oAttrSource, P3PmsgAttr& oAttrDestin, LPCTSTR lpszItemName )
+P3PmsgRefactor_Move ( P3PmsgAttr& oAttrSource, P3PmsgAttr& oAttrDestin, LPCWSTR lpszItemName )
 { 
     while ( oAttrSource.Exists(lpszItemName) )
     {
@@ -8597,14 +8597,14 @@ P3PmsgRefactor_Move ( P3PmsgAttr& oAttrSource, P3PmsgAttr& oAttrDestin, LPCTSTR 
 //  Parameters:  P3PmsgItem& oItemParent
 //               Item source
 //
-//               LPCTSTR lpszItemname
+//               LPCWSTR lpszItemname
 //               Name of item whose data type is to be changed
 //
 //               const P3PmsgData& oData
 //               Changed item data
 //
 Msgcore_EXT void
-P3PmsgRefactor_DataType ( P3PmsgItem& oItemParent, LPCTSTR lpszItemname, const P3PmsgData& oData )
+P3PmsgRefactor_DataType ( P3PmsgItem& oItemParent, LPCWSTR lpszItemname, const P3PmsgData& oData )
 { 
     if ( oItemParent.Exists(lpszItemname) )
     {
@@ -8622,14 +8622,14 @@ P3PmsgRefactor_DataType ( P3PmsgItem& oItemParent, LPCTSTR lpszItemname, const P
 //               P3PmsgData& oData
 //               Original data source
 //
-//               LPCTSTR lpszItemName
+//               LPCWSTR lpszItemName
 //               Name of item whose data type is to be changed
 // 
 //               char ucNewDataType
 //               New data type to be set
 //
 Msgcore_EXT void
-P3PmsgRefactor_CastDataType (P3PmsgItem& oItem, LPCTSTR lpszItemName, char ucNewDataType)
+P3PmsgRefactor_CastDataType (P3PmsgItem& oItem, LPCWSTR lpszItemName, char ucNewDataType)
 {
     if (oItem.Exists(lpszItemName))
     {
@@ -8638,7 +8638,7 @@ P3PmsgRefactor_CastDataType (P3PmsgItem& oItem, LPCTSTR lpszItemName, char ucNew
     }
 }
 Msgcore_EXT void
-P3PmsgRefactor_CastDataType (P3PmsgAttr& oAttr, LPCTSTR lpszItemName, char ucNewDataType)
+P3PmsgRefactor_CastDataType (P3PmsgAttr& oAttr, LPCWSTR lpszItemName, char ucNewDataType)
 {
     if (oAttr.Exists(lpszItemName))
     {

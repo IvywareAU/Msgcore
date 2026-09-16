@@ -177,7 +177,7 @@ class Msgcore_EXT P2PmsgMgr : public P3PmsgItem
 
         P2PmsgMgr ( const P2PmsgMgr& rhs );
 
-        P2PmsgMgr ( LPCTSTR lpszFilename );
+        P2PmsgMgr ( LPCWSTR lpszFilename );
 
       virtual
        ~P2PmsgMgr ( );
@@ -185,25 +185,25 @@ class Msgcore_EXT P2PmsgMgr : public P3PmsgItem
     // Initialisation and serialisation
     public:
       P2PmsgMgr&
-        Attacheap ( LPCTNAM lpszName, const P3PmsgData& oData );
+        Attacheap ( LPCWSTR lpszName, const P3PmsgData& oData );
       BOOL
-        Load ( LPCTSTR lpszFilename );
+        Load ( LPCWSTR lpszFilename );
       BOOL
-        Save ( LPCTSTR lpszFilename = 0, bool bDefragment = false );
+        Save ( LPCWSTR lpszFilename = 0, bool bDefragment = false );
       BOOL
         SharedMode ( DWORD dwSharedMode );
       void
         Nullify ( );
       BOOL
-        Rename ( LPCTSTR lpszNewname );
+        Rename ( LPCWSTR lpszNewname );
 
     // Factories
     public:
       static P2PmsgMgr*
-        Factory ( LPCTSTR lpszFilename
+        Factory ( LPCWSTR lpszFilename
                 , UCHAR uAddrNN, UINT nSizeInitial, UINT nSizeMax );
       static P2PmsgMgr*
-        Factory ( LPCTSTR lpszFilename, DWORD dwSharedMode = 0 );
+        Factory ( LPCWSTR lpszFilename, DWORD dwSharedMode = 0 );
 
     // Paging
     public:
@@ -240,7 +240,7 @@ class Msgcore_EXT P2PmsgMgr : public P3PmsgItem
       P3PmsgObject
         P2Pos2Object( P2Pos pos, BOOL bPageIn = FALSE );
       P3PmsgObject
-        Path2Object ( LPCTSTR lpszObjectPath );
+        Path2Object ( LPCWSTR lpszObjectPath );
       P3PmsgObject
         RootPath2Object ( LPCWSTR lpszObjectPath );
 
@@ -282,9 +282,9 @@ class Msgcore_EXT P2PmsgMgr : public P3PmsgItem
 
     // Properties
     public:
-      LPCTSTR
+      LPCWSTR
         GetFilename ( );
-      LPCTSTR
+      LPCWSTR
         GetRootname ( );
       virtual bool
         IsDirty ( );
@@ -437,7 +437,7 @@ class Msgcore_EXT SafeRegistrationPush
 //  NOTES: Standard extensions and activities
 
 Msgcore_EXT BOOL
-P2PmsgMgr_IsValid ( LPCTSTR lpszFilename ) noexcept;
+P2PmsgMgr_IsValid ( LPCWSTR lpszFilename ) noexcept;
 Msgcore_EXT BOOL
 P2PmsgMgr_IsValid ( P2PmsgMgr *pP2PmsgMgr ) noexcept;
 Msgcore_EXT BOOL

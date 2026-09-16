@@ -531,7 +531,7 @@ int main ( )
             mgr.r_name() = L"Addr08Root";
         } catch ( P2Pevent *e ) { refused = true; strMsg = e->GetMessage(); e->Cancel(); }
           catch ( ... )         { refused = true; }
-        byWidth = strMsg.Find ( _T("not a supported heap addressing width") ) >= 0;
+        byWidth = strMsg.Find ( L"not a supported heap addressing width" ) >= 0;
         printf ( "[12b] Addr08 create  : %s -> '%ls'\n",
                  refused ? "refused" : "ACCEPTED an unsupported width (FAIL)",
                  (LPCWSTR)strMsg );
@@ -652,7 +652,7 @@ int main ( )
             e->Cancel();
         }
         // "past the 0x... addressable by the Addr16 width it also declares"
-        byWidth = strMsg.Find ( _T("addressable by") ) >= 0;
+        byWidth = strMsg.Find ( L"addressable by" ) >= 0;
         printf ( "[14] Load(Addr16)    : %s -> '%ls'\n",
                  rejected ? "rejected" : "ACCEPTED (FAIL)", (LPCWSTR)strMsg );
         if ( !rejected ) fail++;
@@ -729,7 +729,7 @@ int main ( )
             strMsg   = e->GetMessage();
             e->Cancel();
         }
-        byWalk = strMsg.Find ( _T("block structure") ) >= 0;
+        byWalk = strMsg.Find ( L"block structure" ) >= 0;
         printf ( "[15] Load(F3)        : %s -> '%ls'\n",
                  rejected ? "rejected" : "ACCEPTED (FAIL - IOMAGE walk did not gate)",
                  (LPCWSTR)strMsg );

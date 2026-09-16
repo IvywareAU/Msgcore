@@ -211,7 +211,7 @@ P3PmsgAttr::operator += ( const P3PmsgItem& rhs )
     return *this;
 }
 P3PmsgItem&
-P3PmsgAttr::operator [] ( LPCTNAM lpszName )
+P3PmsgAttr::operator [] ( LPCWSTR lpszName )
 {
     if ( m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -308,7 +308,7 @@ P3PmsgAttr::Drop ( )
 
 //  Navigation and 
 P3PmsgObject
-P3PmsgAttr::SelectObject ( LPCTNAM lpszObjectName )
+P3PmsgAttr::SelectObject ( LPCWSTR lpszObjectName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -318,7 +318,7 @@ P3PmsgAttr::SelectObject ( LPCTNAM lpszObjectName )
     //TODO:LJM was return ((P3PmsgField&)*m_pCurs).r_Object();
 }
 P3PmsgField
-P3PmsgAttr::Select ( LPCTNAM lpszItemName )
+P3PmsgAttr::Select ( LPCWSTR lpszItemName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -327,7 +327,7 @@ P3PmsgAttr::Select ( LPCTNAM lpszItemName )
     return *m_pCurs;
 }
 P3PmsgField&
-P3PmsgAttr::SelectItem ( LPCTNAM lpszItemName )
+P3PmsgAttr::SelectItem ( LPCWSTR lpszItemName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -341,7 +341,7 @@ P3PmsgAttr::SelectItem ( LPCTNAM lpszItemName )
     return *m_pCurs;
 }
 P3PmsgList&
-P3PmsgAttr::SelectList ( LPCTNAM lpszListName )
+P3PmsgAttr::SelectList ( LPCWSTR lpszListName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -356,7 +356,7 @@ P3PmsgAttr::SelectList ( LPCTNAM lpszListName )
     return m_pCurs->r_list ( );
 }
 P3PmsgVect&
-P3PmsgAttr::SelectVect ( LPCTNAM lpszVectName )
+P3PmsgAttr::SelectVect ( LPCWSTR lpszVectName )
 {
     if (  m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
@@ -372,7 +372,7 @@ P3PmsgAttr::SelectVect ( LPCTNAM lpszVectName )
 }
 
 P3PmsgField&
-P3PmsgAttr::DeclareItem ( LPCTNAM lpszItemName, const P3PmsgData& oData, bool bUpdate )
+P3PmsgAttr::DeclareItem ( LPCWSTR lpszItemName, const P3PmsgData& oData, bool bUpdate )
 {
     if ( OBJ__aVBLock == NULL )
       Create ( );
@@ -389,7 +389,7 @@ P3PmsgAttr::DeclareItem ( LPCTNAM lpszItemName, const P3PmsgData& oData, bool bU
     return m_pCurs->r_item();
 }
 bool
-P3PmsgAttr::Exists ( LPCTNAM lpszItemName )
+P3PmsgAttr::Exists ( LPCWSTR lpszItemName )
 {
     if ( OBJ__aVBLock == NULL )
       return false;
@@ -398,7 +398,7 @@ P3PmsgAttr::Exists ( LPCTNAM lpszItemName )
     return m_pCurs->Goto(lpszItemName);
 }
 bool
-P3PmsgAttr::Delete ( LPCTNAM lpszItemName )
+P3PmsgAttr::Delete ( LPCWSTR lpszItemName )
 {
     if ( OBJ__aVBLock == NULL )
       return false;
@@ -1027,10 +1027,10 @@ P2PmsgAttr_SortinItem ( P3PmsgAttr *pAttr, const P3PmsgName& oName, VBLaddr aIte
 
       // Insertion before minimum
       //oCurs.Goto(imin);
-      //LPCTSTR lpszImin = oCurs.r_name().c_name();
-      //LPCTSTR lpszName = oName.c_name();
+      //LPCWSTR lpszImin = oCurs.r_name().c_name();
+      //LPCWSTR lpszName = oName.c_name();
       //oCurs.Goto(imax);
-      //LPCTSTR lpszImax = oCurs.r_name().c_name();
+      //LPCWSTR lpszImax = oCurs.r_name().c_name();
     // Insertion before minimum
     if ( oCurs.Goto(imin) && oName < oCurs.r_name() )
     {

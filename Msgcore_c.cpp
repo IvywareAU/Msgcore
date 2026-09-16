@@ -2267,7 +2267,7 @@ msgcore_recurs_get_name(MsgRecursHandle hRecurs)
     static thread_local std::wstring s_strName;
     if (!toRecurs(hRecurs)) return nullptr;
     try {
-        LPCTNAM psz = toRecurs(hRecurs)->c_wstr();
+        LPCWSTR psz = toRecurs(hRecurs)->c_wstr();
         if (!psz) return nullptr;
         s_strName = psz;
         return s_strName.c_str();

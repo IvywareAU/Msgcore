@@ -829,7 +829,7 @@ VBLock_pItem ( const VBLock *pVBLock )
 
 void
 VBLockName_Init ( UCHAR uVBLock, VBLockName *pName, UCHAR uVBLockAttr
-                , LPCTNAM lpszName, VBLsize nSizenn )
+                , LPCWSTR lpszName, VBLsize nSizenn )
 {
     pName -> uVBLockAttr = uVBLockAttr;
     if ( nSizenn < VBLockName_Sizeof_Min(uVBLock) )
@@ -2105,7 +2105,7 @@ B16:pcBlob = (char *)&pData->u.vBlob16.cBlob;
     pData->u.vBlob16.nBlobUsed = UINT16(nBlobSize);
    *(char *)(pcBlob+nBlobSize)   = 0;
    *(char *)(pcBlob+nBlobSize+1) = 0;
-//TCHAR *pcTCHAR=(TCHAR*)pcBlob;
+//WCHAR *pcTCHAR=(WCHAR*)pcBlob;
     ASSERT(pData->u.vBlob16.nBlobSize>=pData -> u.vBlob16.nBlobUsed);
     return pcBlob;
 

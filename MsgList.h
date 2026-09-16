@@ -51,7 +51,7 @@ class Msgcore_EXT P3PmsgList : public P3PmsgField
 
         P3PmsgList ( const P3PmsgList& rhs );
 
-        P3PmsgList ( LPCTNAM lpszName, const P3PmsgData& oData );
+        P3PmsgList ( LPCWSTR lpszName, const P3PmsgData& oData );
 
         P3PmsgList ( const P3PmsgField& oField );
 

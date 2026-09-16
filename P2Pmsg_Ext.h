@@ -35,13 +35,13 @@
 //  NOTES: Perform standard activities
 //Msgcore_EXT P3PmsgNode&
 //P3PmsgField_SERIALISE ( P3PmsgNode& oNode
-//                      , LPCTSTR lpszFieldname, const P3PmsgData& oData
-//                      , bool bDscAttr, LPCTSTR lpszDescription );
+//                      , LPCWSTR lpszFieldname, const P3PmsgData& oData
+//                      , bool bDscAttr, LPCWSTR lpszDescription );
 //
 //Msgcore_EXT P3PmsgAttr&
 //P2PmsgAttr_SERIALISE  ( P3PmsgAttr& oAttr, bool bOverwrite
-//                      , LPCTSTR lpszFieldname, const P3PmsgData& oData
-//                      , bool bDscAttr = false, LPCTSTR lpszDescription = 0 );
+//                      , LPCWSTR lpszFieldname, const P3PmsgData& oData
+//                      , bool bDscAttr = false, LPCWSTR lpszDescription = 0 );
 
 ///////////////////////////////////////////////////////////////////////
 //  P2Pmsg CMFCPropertyGridCtrl decoration helpers
@@ -66,33 +66,33 @@ const DWORD GRIDEC_Append     = (1<<3);     // Append to passed properties
 
 Msgcore_EXT P3PmsgField&
 Decorate4Grid ( P3PmsgField& oField, UCHAR ucAttributes
-              , LPCTSTR lpszGridLabel, LPCTSTR lpszGridDescription );
+              , LPCWSTR lpszGridLabel, LPCWSTR lpszGridDescription );
 //Msgcore_EXT P3PmsgNode&
 //Decorate4Grid_HEADING ( P3PmsgNode& oNode, UCHAR ucAttributes
-//                      , LPCTSTR lpszGridLabel, LPCTSTR lpszGridDescription );
+//                      , LPCWSTR lpszGridLabel, LPCWSTR lpszGridDescription );
 Msgcore_EXT P3PmsgField&
 Decorate4Grid_HEADING ( P3PmsgField& oField, UCHAR ucAttributes
-                      , LPCTSTR lpszGridLabel, LPCTSTR lpszGridDescription );
+                      , LPCWSTR lpszGridLabel, LPCWSTR lpszGridDescription );
 Msgcore_EXT P3PmsgField&
 Decorate4Grid_FONT ( P3PmsgField& oField, UCHAR ucAttributes
-                   , LPCTSTR lpszGridLabel, LPCTSTR lpszGridDescription );
+                   , LPCWSTR lpszGridLabel, LPCWSTR lpszGridDescription );
 Msgcore_EXT P3PmsgField&
 Decorate4Grid_FONTcrx ( P3PmsgField& oField, UCHAR ucAttributes
-                      , LPCTSTR lpszGridLabel, LPCTSTR lpszGridDescription );
+                      , LPCWSTR lpszGridLabel, LPCWSTR lpszGridDescription );
 Msgcore_EXT P3PmsgField&
 Decorate4Grid_COLOR ( P3PmsgField& oField, UCHAR ucAttributes
-                    , LPCTSTR lpszGridLabel, LPCTSTR lpszGridDescription );
+                    , LPCWSTR lpszGridLabel, LPCWSTR lpszGridDescription );
 Msgcore_EXT P3PmsgField&
 Decorate4Grid_FILE ( P3PmsgField& oField, UCHAR ucAttributes
-                   , LPCTSTR lpszGridLabel, LPCTSTR lpszGridDescription );
+                   , LPCWSTR lpszGridLabel, LPCWSTR lpszGridDescription );
 Msgcore_EXT P3PmsgField&
 Decorate4Grid_OPTION ( P3PmsgField& oField, UCHAR ucAttributes
-                     , LPCTSTR lpszGridLabel, LPCTSTR lpszGridDescription
-                     , LPCTSTR lpszGridOptions );
+                     , LPCWSTR lpszGridLabel, LPCWSTR lpszGridDescription
+                     , LPCWSTR lpszGridOptions );
 Msgcore_EXT P3PmsgField&
 Decorate4Grid_ENUM    ( P3PmsgField& oField, UCHAR ucAttributes
-                      , LPCTSTR lpszGridLabel, LPCTSTR lpszGridDescription
-                      , LPCTSTR lpszGridEnumOptions );
+                      , LPCWSTR lpszGridLabel, LPCWSTR lpszGridDescription
+                      , LPCWSTR lpszGridEnumOptions );
 
 ///////////////////////////////////////////////////////////////////////
 //  P2Pmsg object helpers
@@ -104,15 +104,15 @@ P3Pmsg_GetPath ( const P3PmsgAttr *pAttr );
 //Msgcore_EXT CString
 //P3Pmsg_GetParentName ( const P3PmsgNode *pNode );
 Msgcore_EXT P3PmsgObject
-P3Pmsg_FindParentWithAttr ( const P3PmsgObject& oObject, LPCTSTR lpszAttributeName );
+P3Pmsg_FindParentWithAttr ( const P3PmsgObject& oObject, LPCWSTR lpszAttributeName );
 Msgcore_EXT P3PmsgObject
-P3Pmsg_FindParentAttr ( const P3PmsgObject& oObject, LPCTSTR lpszAttributeName );
+P3Pmsg_FindParentAttr ( const P3PmsgObject& oObject, LPCWSTR lpszAttributeName );
 Msgcore_EXT P3PmsgObject
 P3Pmsg_FindChildWithAttr ( const P3PmsgItem& oItem
-                         , LPCTSTR lpszAttributeName, LPCTSTR lpszObjectName = nullptr );
+                         , LPCWSTR lpszAttributeName, LPCWSTR lpszObjectName = nullptr );
 
 Msgcore_EXT P3PmsgObject
-P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCTSTR lpszObjectPath );
+P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCWSTR lpszObjectPath );
 
 ///////////////////////////////////////////////////////////////////////
 //  Boolean operations
@@ -134,7 +134,7 @@ Msgcore_EXT P3PmsgAttr&
 P2PmsgAttr_AbsoluteMerge ( P3PmsgAttr& oAttrLValue, const P3PmsgAttr& oAttrRValue );
 
 Msgcore_EXT void
-GuidToString ( GUID& oGUID, LPTSTR lpszGUID );
+GuidToString ( GUID& oGUID, LPWSTR lpszGUID );
 
 ///////////////////////////////////////////////////////////////////////
 //  Touch management
@@ -150,5 +150,5 @@ P2Pmsg_UntouchedDelete ( P3PmsgField& oField, bool bRecurse = false );
 //         cut and paste operations
 
 Msgcore_EXT BOOL
-P2Pmsg_UpgradeMove ( LPCTSTR lpszItemname, P3PmsgItem& oItemSource, P3PmsgAttr& oAttrDestin );
+P2Pmsg_UpgradeMove ( LPCWSTR lpszItemname, P3PmsgItem& oItemSource, P3PmsgAttr& oAttrDestin );
 
