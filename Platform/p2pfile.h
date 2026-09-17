@@ -27,6 +27,7 @@
 //
 #pragma once
 #include "p2ptypes.h"
+#include "p2pthread.h"   // P2PEventImpl - CloseHandle frees an event's impl below
 
 #if defined(_WIN32)
   #include <windows.h>   // CreateFileW/ReadFile/WriteFile/DeleteFileW, GENERIC_*, etc.
@@ -408,7 +409,9 @@
   //             (§5.6), then honour DELETE_ON_CLOSE, close() (releasing any flock).
   //   - Iocp  : tear the completion port / IoRing down (delegates to p2p_iocp_destroy,
   //             which also frees the handle).
-  //   - Event : close the eventfd, free the manual-reset flag.
+  //   - Event : close the eventfd, free the P2PEventImpl (manual-reset flag +
+  //             the generation counter that carries the wait's acquire edge -
+  //             refer p2pthread.h).
   //   - Thread: joined/detached when jthread spawn lands (Phase 3); free for now.
   inline BOOL CloseHandle(HANDLE h) {
       if (!h) { SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
@@ -420,7 +423,7 @@
               if (&p2p_iocp_close_port) return p2p_iocp_close_port(h);   // retires h too
               break;                                                     // no ring linked: retire below
           case HKind::Event: {
-              if (h->impl) delete static_cast<bool*>(h->impl);
+              if (h->impl) delete static_cast<P2PEventImpl*>(h->impl);
               int fd = h->fd.exchange(-1, std::memory_order_acq_rel);
               if (fd >= 0) ::close(fd);
               break;

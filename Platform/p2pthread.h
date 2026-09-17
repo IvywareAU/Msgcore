@@ -80,8 +80,56 @@
   //  descriptor once P2PmsgPump is wired (Phase 3) — SetEvent(m_hQueEvent) then wakes
   //  a GetQueuedCompletionStatus idle-wait through the ring. This standalone event is
   //  the general primitive; the pump-specific folding happens at that call site.
-  //  impl holds a `bool` (manual-reset flag).
+  //  impl holds a P2PEventImpl: the manual-reset flag, plus the generation
+  //  counter that carries the HAPPENS-BEFORE EDGE described next.
+  //
+  //  WHY A WAIT PUBLISHES A GENERATION, measured under TSan on 2026-09-17.
+  //  poll() reporting a descriptor readable is a WAKE-UP, not a memory-ordering
+  //  edge. The auto-reset path gets its edge for free - it read()s the eventfd,
+  //  and a read paired with the signaller's write orders the two threads (it is
+  //  what the kernel's eventfd context lock actually does, and it is what TSan
+  //  models). The MANUAL-RESET path must not consume the signal, so it only
+  //  ever polled, and published nothing: a waiter had NO ordering against the
+  //  thread that signalled it, and everything that thread did before SetEvent
+  //  was formally unordered against everything the waiter did after waking.
+  //
+  //  Not theoretical. P2PeerHub::CloseHub() waits on exactly such an event for
+  //  its spawned pump thread to leave, and ~P2PeerHub then frees the hub - so
+  //  the destructor's CloseHandle, its `delete m_pAuthPolicy` and its
+  //  DeleteCriticalSection all ran unordered against ProcHub's epilogue. TSan
+  //  reported eleven races that way across p2p_e2ewaive, p2p_authrelay and
+  //  p2p_hubsnap, and named what was holding it together: "As if synchronized
+  //  via sleep" - the Sleep(1) in YieldForP2PmsgPump. A sleep is not a
+  //  synchronisation primitive. It is a bet on the other thread being quick,
+  //  and this counter is what cancels the bet.
   // -------------------------------------------------------------------------
+  //  Bumped with RELEASE after the eventfd write, so a waiter's ACQUIRE load of
+  //  a non-zero value orders it after that write as well as after everything
+  //  the signaller did before it. Zero means "never signalled"; an event
+  //  created already signalled starts at one, because for that one there is no
+  //  SetEvent to do the bumping.
+  //
+  //  MONOTONIC, and ResetEvent deliberately does NOT clear it. It is an
+  //  ordering carrier, not the signal state - the eventfd counter is the signal
+  //  state. Clearing it would let a waiter that has already polled readable
+  //  spin for ever on a generation that went backwards.
+  struct P2PEventImpl {
+      bool                       manual;
+      std::atomic<std::uint64_t> gen;
+      P2PEventImpl(bool m, bool signalled) : manual(m), gen(signalled ? 1u : 0u) {}
+  };
+
+  //  The acquire half. Called once poll() has said the descriptor is readable,
+  //  so the write that made it readable has already happened and the release
+  //  that follows it is a few instructions away at most: this spins, it does
+  //  not block, and on every signal after the first it is one load.
+  inline void p2p_event_acquire(void* impl) {
+      auto* ev = static_cast<P2PEventImpl*>(impl);
+      if (!ev) return;
+      while (ev->gen.load(std::memory_order_acquire) == 0u)
+          std::this_thread::yield();
+  }
+
   #ifndef INFINITE
     #define INFINITE 0xFFFFFFFFu
   #endif
@@ -97,7 +145,8 @@
                              const wchar_t* /*name*/) {
       int efd = ::eventfd(initialState ? 1u : 0u, EFD_CLOEXEC | EFD_NONBLOCK);
       if (efd < 0) { SetLastError(win32_from_errno(errno)); return nullptr; }
-      return p2p_handle_new(HKind::Event, efd, new bool(manualReset != FALSE));
+      return p2p_handle_new(HKind::Event, efd,
+                            new P2PEventImpl(manualReset != FALSE, initialState != FALSE));
   }
   inline HANDLE CreateEventA(void* sec, BOOL m, BOOL i, const char* /*name*/) {
       return CreateEventW(sec, m, i, nullptr); }
@@ -109,6 +158,11 @@
       ssize_t r = ::write(h->fd, &one, sizeof one);
       //  EAGAIN => counter already at the u64 ceiling, i.e. already signalled: success.
       if (r < 0 && errno != EAGAIN) { SetLastError(win32_from_errno(errno)); return FALSE; }
+      //  The release half, and it goes AFTER the write on purpose: a waiter that
+      //  acquires this value is then ordered after the write too, which is the
+      //  one that CloseHandle on the other thread would otherwise race.
+      if (h->impl)
+        static_cast<P2PEventImpl*>(h->impl)->gen.fetch_add(1u, std::memory_order_release);
       return TRUE;
   }
 
@@ -200,8 +254,12 @@
               if (rc < 0) { if (errno == EINTR) continue;
                             SetLastError(win32_from_errno(errno)); return WAIT_FAILED; }
               if (rc == 0) return WAIT_TIMEOUT;
-              bool manual = h->impl && *static_cast<bool*>(h->impl);
+              bool manual = h->impl && static_cast<P2PEventImpl*>(h->impl)->manual;
               if (!manual) { std::uint64_t sink; ssize_t r = ::read(h->fd, &sink, sizeof sink); (void)r; }
+              //  Take the signaller's writes with us. The auto-reset read above
+              //  is already such an edge; this is the manual-reset path's, and
+              //  running it for both costs one load and keeps them honest.
+              p2p_event_acquire(h->impl);
               return WAIT_OBJECT_0;
           }
       }
@@ -240,8 +298,9 @@
       };
       auto consume = [](HANDLE h) {   // drain an auto-reset event / join a done thread
           if (h->kind == HKind::Event) {
-              bool manual = h->impl && *static_cast<bool*>(h->impl);
+              bool manual = h->impl && static_cast<P2PEventImpl*>(h->impl)->manual;
               if (!manual) { std::uint64_t s; ssize_t r = ::read(h->fd, &s, sizeof s); (void)r; }
+              p2p_event_acquire(h->impl);   // the same edge WaitForSingleObject takes
           } else if (h->kind == HKind::Thread) {
               auto* ti = static_cast<P2PThreadImpl*>(h->impl);
               if (ti && ti->th.joinable()) ti->th.join();
