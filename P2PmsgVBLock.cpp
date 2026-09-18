@@ -1331,7 +1331,15 @@ B08:nSizenn    = sizeof(pData->u.vBlob08);
     pData->u.vBlob08.nBlobSize = (nBlobSize > SIZE08_MAX) ? SIZE08_MAX : (UCHAR)nBlobSize;
     pData->u.vBlob08.nBlobUsed = 0;
     pData->u.vBlob08.cBlob     = 0;
-//ASSERT(VBLockData_Sizenn(pData)<=nSizeof);
+    //  The declared capacity must never exceed the room that was actually left
+    //  for it.  This is the assertion the three //ASSERT(VBLockData_Sizenn...)
+    //  lines meant: that function was removed around 2022-02-25 (refer the two
+    //  comments at P2Pmsg.cpp:1082 and :1118), so they had been referencing a
+    //  symbol that no longer exists and could not have been re-enabled.  Stated
+    //  against nBlobSize instead, which is the value in hand and the one the
+    //  clamp is meant to be bounding.  This arm was always correct; the 16- and
+    //  32-bit arms below tested nSizeof and assigned nBlobSize.
+    ASSERT(pData->u.vBlob08.nBlobSize<=nBlobSize);
     return;
 
     // BLOB16 copy
@@ -1341,10 +1349,19 @@ B16:nSizenn    = sizeof(pData->u.vBlob16);
       EVERR->Message("VBLockData(16) undersized (%i vs %i)"
                     , nSizeof, nSizenn )
            ->Throw ( );
-    pData->u.vBlob16.nBlobSize = (nSizeof > SIZE16_MAX) ? SIZE16_MAX : (UINT16)nBlobSize;
+    //  TESTS nBlobSize, not nSizeof.  It tested nSizeof until 2026-09-19, which
+    //  differs from this by exactly the header and this arm's own nSizenn - 8
+    //  bytes - so for nSizeof in 65536..65543 the test took its TRUE branch and
+    //  wrote SIZE16_MAX as the capacity while the room behind it was nSizeof-8,
+    //  i.e. 65528..65535.  The descriptor then declared up to 7 bytes more than
+    //  had been allocated, and the var-width types size themselves from exactly
+    //  this field (P2Pmsg.cpp:1701), so the over-claim propagated into the next
+    //  copy.  Eight values wide, and the BLOB08 arm above had it right all
+    //  along, which is what made it a slip rather than a convention.
+    pData->u.vBlob16.nBlobSize = (nBlobSize > SIZE16_MAX) ? SIZE16_MAX : (UINT16)nBlobSize;
     pData->u.vBlob16.nBlobUsed = 0;
     pData->u.vBlob16.cBlob     = 0;
-//ASSERT(VBLockData_Sizenn(pData)<=nSizeof);
+    ASSERT(pData->u.vBlob16.nBlobSize<=nBlobSize);
     return;
 
     // BLOB32 copy
@@ -1354,10 +1371,14 @@ B32:nSizenn    = sizeof(pData->u.vBlob32);
       EVERR->Message("VBLockData(32) undersized (%i vs %i)"
                     , nSizeof, nSizenn )
            ->Throw ( );
-    pData->u.vBlob32.nBlobSize = (nSizeof > SIZE32_MAX) ? SIZE32_MAX : (UINT32)nBlobSize;
+    //  Same correction as the 16-bit arm, and for consistency rather than for
+    //  exposure: reaching the window here needs nSizeof > 4294967295, which no
+    //  caller in this tree can produce.  Left in step with its siblings so the
+    //  three arms cannot be read as three different intentions.
+    pData->u.vBlob32.nBlobSize = (nBlobSize > SIZE32_MAX) ? SIZE32_MAX : (UINT32)nBlobSize;
     pData->u.vBlob32.nBlobUsed = 0;
     pData->u.vBlob32.cBlob     = 0;
-//ASSERT(VBLockData_Sizenn(pData)<=nSizeof);
+    ASSERT(pData->u.vBlob32.nBlobSize<=nBlobSize);
     return;
 }
 
