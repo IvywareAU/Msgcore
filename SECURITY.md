@@ -7,11 +7,10 @@ Please do **not** open a public issue for a suspected vulnerability. Report it t
 repository's *Security* tab. That channel is private to the maintainers until an advisory
 is published, and it keeps the report attached to the code it concerns.
 
-> **One setup step, and it must be done before this file is published:** private
-> vulnerability reporting is off by default. Enable it under *Settings → Code security →
-> Private vulnerability reporting*. Until it is on, the button this file tells you to press
-> is not on the page, and a policy that names a channel which does not exist is worse than
-> one that names none.
+If GitHub private reporting is not available to you — or the button is not there — email
+**info@ivyware.com.au** with `SECURITY` in the subject line. It is the general Ivyware mailbox
+rather than a dedicated security one, so say so in the subject or the first line, because that is
+what routes it. There is no PGP key.
 
 Include in the report:
 
