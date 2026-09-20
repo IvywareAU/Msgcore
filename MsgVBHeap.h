@@ -174,6 +174,20 @@ void
 P2PmsgHeap_ScrubFoots ( P2PmsgHANDLE hVBHeap, bool bRestore ) noexcept;
 VBLsize
 P2PmsgHeap_Sizeof ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock );
+// NO POINTER RETURNED BELOW SURVIVES A MUTATION, and that is a LIFETIME rule,
+// not the bounds rule the span note further down is about. The heap addresses
+// its blocks by offset and grows by reallocating its base image, so any call
+// that can allocate - a declare, a rename, a retype, a data write, a load -
+// delete[]s the image these point into and invalidates every one of them.
+// Re-resolve per operation; treat "obtain, use, discard" as the unit of work.
+//
+// This is SECURITY_REVIEW.md H5, and it is stated here because it was not.
+// The flat C surface has had it since it was written - numbered rule 2 of the
+// Msgcore_c.h preamble, restated at each accessor group, and it goes so far as
+// to refuse a positional list walk and pay O(n^2) rather than hand a VBLaddr
+// across the ABI. The C++ declarations said nothing, and the careful span
+// commentary below made that worse rather than better: a reader just warned in
+// detail about one hazard does not go looking for a second.
 VBListIOmage*
 P2PmsgHeap_pIOmage( P2PmsgHANDLE hVBHeap );
 void*
