@@ -1807,9 +1807,18 @@ P2Pevent::Display ( const HWND hWnd )
           // survived so long. Recorded in an internal session log at the time;
           // it went on to obstruct two separate diagnoses before it was tracked
           // down. %ls is wide in both dialects.
+          // EVERY class is named, not just DEBUG and TRACE. This ladder ended
+          // in a bare "ERROR" until 2026-09-19, so WARNING and INFO both
+          // printed as [ERROR] on a console - a deliberate EVWRN read as a
+          // fault, and the fallback path contradicted the event-log sink,
+          // which has always had the classes right. Same shape as the %s
+          // defect above: the label was wrong and the line still printed, so
+          // nothing ever failed on it.
           fwprintf ( stderr, L"\n[%ls] %ls\n%ls\n"
-                   , eClass == P2Pevent_DEBUG ? L"DEBUG" :
-                     eClass == P2Pevent_TRACE ? L"TRACE" : L"ERROR"
+                   , eClass == P2Pevent_DEBUG   ? L"DEBUG"   :
+                     eClass == P2Pevent_TRACE   ? L"TRACE"   :
+                     eClass == P2Pevent_INFO    ? L"INFO"    :
+                     eClass == P2Pevent_WARNING ? L"WARNING" : L"ERROR"
                    , (LPCWSTR)strFunction
                    , (LPCWSTR)csMessage );
           fflush ( stderr );
