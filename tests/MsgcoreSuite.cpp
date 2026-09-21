@@ -6556,6 +6556,234 @@ static void Test_CollectionStack()
     }
 }
 
+// ---------------------------------------------------------------------------
+// Two invariants that were fixed on 2026-09-19 and 2026-09-21 and then shipped
+// with nothing watching them.
+//
+// These are items 3 and 4 of the open-code-work register kept with the product
+// documentation -- named that way rather than cited, because that document is
+// not in this repository and the check below would rightly refuse a filename a
+// reader here cannot open. Both fixes are on master; neither had a gate.
+// Item 3's was to be three restored ASSERTs and the hygiene job refused them --
+// CONTRIBUTING.md rejects structural validation inside ASSERT on sight and
+// tools/ci/assert-baseline.txt holds the three form counts as ceilings -- so
+// the clamp shipped watched by nothing in EITHER configuration, which is worse
+// than the Release-only gap the register had described. Item 4's fix was a
+// comment: the C++ heap declarations now state the invalidation contract that
+// only Msgcore_c.h had. A comment is not a check.
+//
+// These are those checks, in the place the ASSERTs could not be. A case in this
+// suite costs no ASSERT-form budget, runs in Debug and Release alike, and is
+// the difference between an invariant that is documented and one that is
+// measured.
+//
+// STATIC LINK ONLY, and for the reason Test_ImageAddressBounds gives: neither
+// VBLockData_* nor P2PmsgHeap_* is on the DLL's exported surface. So these run
+// in the `static` half of the C4 matrix and announce themselves as skipped in
+// `dll`. That is half the coverage the build jobs get, and it is stated here
+// rather than discovered: these invariants are properties of the library and
+// not of a link mode, and if the heap API is ever exported these guards should
+// lose their #ifdef rather than keep it out of habit.
+#ifdef Msgcore_STATIC
+
+//  The bytes VBLockData_InitBlob subtracts before it clamps, computed the way
+//  it computes them rather than copied as the 8 the register quotes. If either
+//  structure changes, the window moves and this moves with it.
+static VBLsize Blob16_HeaderBytes()
+{
+    VBLockData oProbe;
+    return (VBLsize)( sizeof(VBLockData) - sizeof(oProbe.u) )
+         + (VBLsize)sizeof(VBLob16);
+}
+
+static void Test_Blob16CapacityNeverExceedsRoom()
+{
+    //  Six types reach the B16 arm. Three are var-width and size themselves
+    //  from nBlobSize (P2Pmsg.cpp:1701), which is how the over-claim propagated
+    //  into the next copy; the three fixed-width ones size from nBlobUsed and
+    //  were never the propagation path. All six are here because all six take
+    //  the same arm, and a gate covering only the three that propagate would
+    //  pass a reintroduction on the other three.
+    static const VBLockDataType aTypes[] =
+    {
+        VBLockData_BSTR16var, VBLockData_WSTR16var, VBLockData_BLOB16var,
+        VBLockData_BSTR16   , VBLockData_WSTR16   , VBLockData_BLOB16
+    };
+    static const char *aNames[] =
+    {
+        "BSTR16var", "WSTR16var", "BLOB16var",
+        "BSTR16"   , "WSTR16"   , "BLOB16"
+    };
+
+    const VBLsize nDelta = Blob16_HeaderBytes();
+
+    TF_CASE("the BLOB16 declared capacity never exceeds the room behind it")
+    {
+        //  Walk the whole window and two values either side. The window is
+        //  where the broken test (nSizeof) and the correct one (nBlobSize)
+        //  disagree: nSizeof in SIZE16_MAX+1 .. SIZE16_MAX+nDelta. Outside it
+        //  the two agree, so a case at a round number proves nothing either
+        //  way -- which is why this walks rather than samples.
+        for ( int t = 0; t < (int)( sizeof(aTypes) / sizeof(aTypes[0]) ); ++t )
+        {
+            for ( VBLsize n = SIZE16_MAX - 1; n <= SIZE16_MAX + nDelta + 2; ++n )
+            {
+                VBLockData oData;
+                memset ( &oData, 0, sizeof(oData) );
+                VBLockData_InitBlob ( &oData, 0, aTypes[t], n );
+
+                const VBLsize nRoom     = n - nDelta;
+                const VBLsize nDeclared = (VBLsize)oData.u.vBlob16.nBlobSize;
+
+                //  THE invariant. Until 2026-09-19 this failed for n in
+                //  65536..65542, by up to 7 bytes, on every one of the six.
+                if ( nDeclared > nRoom )
+                  printf ( "      %-10s nSizeof=%llu declared=%llu room=%llu"
+                           "  OVER BY %llu\n"
+                         , aNames[t]
+                         , (unsigned long long)n
+                         , (unsigned long long)nDeclared
+                         , (unsigned long long)nRoom
+                         , (unsigned long long)( nDeclared - nRoom ) );
+                TF_CHECK ( nDeclared <= nRoom );
+
+                //  And the exact value, so a clamp that stopped over-claiming
+                //  by under-claiming instead would not pass this either.
+                const VBLsize nExpect = ( nRoom > SIZE16_MAX )
+                                      ? (VBLsize)SIZE16_MAX : nRoom;
+                TF_CHECK_EQ ( nDeclared, nExpect );
+
+                //  nBlobUsed tracks the fill and starts empty. Named here
+                //  because the library's live bounds check at P2Pmsg.cpp:1568
+                //  reads THIS field rather than the one above, which is why
+                //  that guard never noticed the over-claim.
+                TF_CHECK_EQ ( (VBLsize)oData.u.vBlob16.nBlobUsed, (VBLsize)0 );
+            }
+        }
+    }
+
+    TF_CASE("the BLOB08 arm, which was right all along, is right for the same reason")
+    {
+        //  The 08 arm tested nBlobSize before the 16 and 32 arms did, and that
+        //  asymmetry is what made the defect a slip rather than a convention.
+        //  Pinned so that a later tidy-up cannot make the three arms
+        //  consistently wrong.
+        VBLockData    oProbe;
+        const VBLsize nHdr08 = (VBLsize)( sizeof(VBLockData) - sizeof(oProbe.u) )
+                             + (VBLsize)sizeof(VBLob08);
+
+        for ( VBLsize n = SIZE08_MAX - 1; n <= SIZE08_MAX + nHdr08 + 2; ++n )
+        {
+            VBLockData oData;
+            memset ( &oData, 0, sizeof(oData) );
+            VBLockData_InitBlob ( &oData, 0, VBLockData_BLOB08var, n );
+            TF_CHECK ( (VBLsize)oData.u.vBlob08.nBlobSize <= n - nHdr08 );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+static void Test_HeapGrowthMovesTheBase()
+{
+    //  Item 4. MsgVBHeap.h:177-194 now states that no pointer the heap returns
+    //  survives a mutation, because a grow allocates a new image, copies into
+    //  it and delete[]s the old one (P2PmsgHeap_ResizeIOMAGE). Msgcore_c.h has
+    //  said so since it was written -- numbered rule 2 of its preamble -- and
+    //  the C++ side said nothing at all until 2026-09-21.
+    //
+    //  What this case CANNOT do is read through the stale pointer: that is the
+    //  undefined behaviour the contract exists to forbid, and a test that
+    //  performed it would be asserting on a coin toss. What it can do is show
+    //  the two facts that make re-resolution mandatory -- the image moves, and
+    //  the same VBLaddr resolves somewhere else afterwards -- and that the
+    //  block came with it. The stale pointer is compared, never dereferenced.
+    //
+    //  It also does not ask the heap for its base image. P2PmsgHeap_pIOmage
+    //  asserts AssertValidIOMAGE and AssertVBlocksIOMAGE on the way out, and a
+    //  heap holding a block straight out of P2PmsgHeap_Alloc has no VBLock_Linked
+    //  bit on it yet -- the state Test_IsValidAllocIsPure exists to document --
+    //  so that walk fires three assertions about a heap that is behaving
+    //  exactly as designed. Measured, not assumed: it cost six failed checks
+    //  before this note replaced the call. The block pointer moving is the
+    //  observable the contract is actually about.
+    const UCHAR  uAddr = ( sizeof(void *) == 8 ) ? VBLock_Addr64 : VBLock_Addr32;
+    P2PmsgHANDLE hHeap = P2PmsgHeap_CreateIOMAGE ( uAddr, 2048, 1u << 20 );
+
+    TF_CASE("growing the heap moves the image, and the old pointer is stale by construction")
+    {
+        const VBLaddr aBlock = P2PmsgHeap_Alloc ( hHeap, VBLock_Item, 64 );
+        TF_CHECK ( aBlock != 0 );
+
+        const void *pBlock1 = (const void *)P2PmsgHeap_Addr2Phys ( hHeap, aBlock );
+        const UCHAR uDefs1  = DefsOf ( hHeap, aBlock );
+        TF_CHECK ( pBlock1 != 0 );
+
+        //  Ask for more than the 2048 this heap was created with, so the only
+        //  way to satisfy it is a resize. nSizeMax is 1MB, so it can.
+        const VBLaddr aBig = P2PmsgHeap_Alloc ( hHeap, VBLock_Item, 8192 );
+        TF_CHECK ( aBig != 0 );
+
+        const void *pBlock2 = (const void *)P2PmsgHeap_Addr2Phys ( hHeap, aBlock );
+
+        //  The image was reallocated, so a pointer handed out before the grow
+        //  is worthless after it: the same VBLaddr resolves elsewhere now.
+        //  ResizeIOMAGE allocates the new buffer BEFORE it frees the old one,
+        //  so the two addresses cannot coincide and this is not a
+        //  probabilistic check.
+        TF_CHECK ( pBlock2 != pBlock1 );
+
+        //  And the block survived the move, so re-resolving is sufficient and
+        //  not merely necessary. Were this to fail, the contract would be worse
+        //  than "re-resolve per operation" -- it would be "your data is gone".
+        TF_CHECK_EQ ( (int)DefsOf ( hHeap, aBlock ), (int)uDefs1 );
+
+        //  And the offset is stable across the move, which is the whole reason
+        //  the heap addresses by VBLaddr and the reason the contract is
+        //  satisfiable at all rather than merely stated.
+        TF_CHECK ( P2PmsgHeap_Addr2Phys ( hHeap, aBlock ) == pBlock2 );
+    }
+
+    TF_CASE("the control -- an allocation that does NOT grow leaves the pointer alone")
+    {
+        //  Without this the case above proves nothing: an Addr2Phys that
+        //  returned a fresh address every time would satisfy it while saying
+        //  nothing about growth. Here the second allocation fits inside the
+        //  room this heap already has, no resize happens, and the pointer from
+        //  before it is still the pointer after it.
+        P2PmsgHANDLE hSmall = P2PmsgHeap_CreateIOMAGE ( uAddr, 1u << 16, 1u << 20 );
+        const VBLaddr aOne  = P2PmsgHeap_Alloc ( hSmall, VBLock_Item, 64 );
+        const void   *pOne  = (const void *)P2PmsgHeap_Addr2Phys ( hSmall, aOne );
+
+        const VBLaddr aTwo  = P2PmsgHeap_Alloc ( hSmall, VBLock_Item, 64 );
+        TF_CHECK ( aTwo != 0 );
+        TF_CHECK ( (const void *)P2PmsgHeap_Addr2Phys ( hSmall, aOne ) == pOne );
+
+        P2PmsgHeap_Close ( hSmall );
+    }
+
+    P2PmsgHeap_Close ( hHeap );
+}
+
+#else   // !Msgcore_STATIC -- announce the skip rather than vanish
+
+static void Test_Blob16CapacityNeverExceedsRoom()
+{
+    TF_CASE("BLOB16 capacity vs room -- static link only, VBLockData_* is not exported")
+    {
+        TF_CHECK(true);
+    }
+}
+
+static void Test_HeapGrowthMovesTheBase()
+{
+    TF_CASE("heap growth invalidation -- static link only, heap API is not exported")
+    {
+        TF_CHECK(true);
+    }
+}
+
+#endif  // Msgcore_STATIC
+
 void RunMsgcoreSuite()
 {
     Test_Data_TypedValues();
@@ -6607,4 +6835,6 @@ void RunMsgcoreSuite()
     Test_UntrustedBSTRioGate();
     Test_IsValidAllocIsPure();
     Test_BSTRioValidatorContract();
+    Test_Blob16CapacityNeverExceedsRoom();
+    Test_HeapGrowthMovesTheBase();
 }
