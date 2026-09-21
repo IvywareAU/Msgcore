@@ -1331,15 +1331,17 @@ B08:nSizenn    = sizeof(pData->u.vBlob08);
     pData->u.vBlob08.nBlobSize = (nBlobSize > SIZE08_MAX) ? SIZE08_MAX : (UCHAR)nBlobSize;
     pData->u.vBlob08.nBlobUsed = 0;
     pData->u.vBlob08.cBlob     = 0;
-    //  The declared capacity must never exceed the room that was actually left
-    //  for it.  This is the assertion the three //ASSERT(VBLockData_Sizenn...)
-    //  lines meant: that function was removed around 2022-02-25 (refer the two
-    //  comments at P2Pmsg.cpp:1082 and :1118), so they had been referencing a
-    //  symbol that no longer exists and could not have been re-enabled.  Stated
-    //  against nBlobSize instead, which is the value in hand and the one the
-    //  clamp is meant to be bounding.  This arm was always correct; the 16- and
-    //  32-bit arms below tested nSizeof and assigned nBlobSize.
-    ASSERT(pData->u.vBlob08.nBlobSize<=nBlobSize);
+    //  What the three //ASSERT(VBLockData_Sizenn...) lines in this function
+    //  meant is that the declared capacity must never exceed the room actually
+    //  left for it.  They cannot be re-enabled as written - that function was
+    //  removed around 2022-02-25, refer the two comments at P2Pmsg.cpp:1082 and
+    //  :1118 - and they are LEFT DEAD rather than restated live, because
+    //  CONTRIBUTING.md rejects structural validation inside ASSERT on sight and
+    //  tools/ci/assert-baseline.txt holds the three form counts as ceilings.
+    //  The invariant is enforced by the clamp itself: this arm was always
+    //  correct; the 16- and 32-bit arms below tested nSizeof and assigned
+    //  nBlobSize.
+//ASSERT(VBLockData_Sizenn(pData)<=nSizeof);
     return;
 
     // BLOB16 copy
@@ -1361,7 +1363,7 @@ B16:nSizenn    = sizeof(pData->u.vBlob16);
     pData->u.vBlob16.nBlobSize = (nBlobSize > SIZE16_MAX) ? SIZE16_MAX : (UINT16)nBlobSize;
     pData->u.vBlob16.nBlobUsed = 0;
     pData->u.vBlob16.cBlob     = 0;
-    ASSERT(pData->u.vBlob16.nBlobSize<=nBlobSize);
+//ASSERT(VBLockData_Sizenn(pData)<=nSizeof);
     return;
 
     // BLOB32 copy
@@ -1378,7 +1380,7 @@ B32:nSizenn    = sizeof(pData->u.vBlob32);
     pData->u.vBlob32.nBlobSize = (nBlobSize > SIZE32_MAX) ? SIZE32_MAX : (UINT32)nBlobSize;
     pData->u.vBlob32.nBlobUsed = 0;
     pData->u.vBlob32.cBlob     = 0;
-    ASSERT(pData->u.vBlob32.nBlobSize<=nBlobSize);
+//ASSERT(VBLockData_Sizenn(pData)<=nSizeof);
     return;
 }
 

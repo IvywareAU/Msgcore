@@ -181,7 +181,11 @@ P2PmsgHeap_Sizeof ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock );
 // delete[]s the image these point into and invalidates every one of them.
 // Re-resolve per operation; treat "obtain, use, discard" as the unit of work.
 //
-// This is SECURITY_REVIEW.md H5, and it is stated here because it was not.
+// This is the rule the security review records as H5, named here rather than
+// cited: that document is not in this repository, and a header that sends its
+// reader to a file they cannot open is the defect the citation gate exists to
+// catch - refer tools/ci/check_md_citations.ps1, whose own note names THIS
+// header, for THIS rule, as the site that motivated it.
 // The flat C surface has had it since it was written - numbered rule 2 of the
 // Msgcore_c.h preamble, restated at each accessor group, and it goes so far as
 // to refuse a positional list walk and pay O(n^2) rather than hand a VBLaddr
