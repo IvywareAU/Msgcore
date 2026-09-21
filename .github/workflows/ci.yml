@@ -427,7 +427,12 @@ jobs:
   # --------------------------------------------------------------------------
   hygiene:
     name: Hygiene (citations, ASSERT forms)
-    runs-on: ubuntu-latest
+    # Pinned. `ubuntu-latest` migrates to Ubuntu 26 on 2026-10-19
+    # (actions/runner-images#14748). This is the only job in this repository
+    # that is not a Windows build, and on 2026-09-21 it was the only thing that
+    # caught two policy violations three local Windows builds could not see --
+    # so the image it runs on should change on a commit, not on a date.
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v5
