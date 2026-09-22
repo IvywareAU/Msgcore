@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.1.0 is tag
-//         v3.1.0. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.1.1 is tag
+//         v3.1.1. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,27 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.1.1.0, a PATCH on 3.1.0, and a PATCH in the strict sense: the covered
+//  surface did not move at all. tools\ci\exports-flat.manifest is unchanged
+//  and the only edit to Msgcore_c.h since v3.1.0 is two comment lines
+//  respelling TargetCore as Targetcore. What the release carries is four
+//  defect fixes behind that surface - the BLOB16 clamp tested nSizeof and
+//  assigned nBlobSize, so a var-typed descriptor could claim up to seven
+//  bytes more room than was allocated; the C++ heap declarations never said a
+//  pointer dies at the next mutation; every event class but DEBUG and TRACE
+//  printed as [ERROR] on a console; and a manual-reset wait published no
+//  happens-before edge, so teardown rode on a Sleep. The first two ship with
+//  a gate rather than a comment.
+//
+//  It is NOT numbered in step with Targetcore, which releases 3.2.0 alongside
+//  this. That is the independence below working as intended rather than an
+//  oversight: Targetcore earned a MINOR from a break in its own session
+//  cypher, nothing in this component changed to match, and a shared number
+//  would have had to invent one.
+//
+//  BELOW IS THE 3.1.0 RATIONALE, kept because it is where the 3.x number and
+//  the MINOR it carried are explained.
 //
 //  3.1.0.0. The 3.x number was set by the project rather than derived from
 //  this tree's own release history: the development identity that preceded it
@@ -75,22 +96,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  1
-#define MSGCORE_VERSION_PATCH  0
+#define MSGCORE_VERSION_PATCH  1
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,1,0,0
+#define MSGCORE_VERSION_COMMAS 3,1,1,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.1.0.0"
+#define MSGCORE_VERSION_STRING "3.1.1.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03010000 is 3.1.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03010000
+//  0x03010100 is 3.1.1.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03010100
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"
