@@ -293,6 +293,10 @@ inline std::wstring UnitsToText ( const unsigned char *pb, size_t nUnits )
 //   aPath       names walked DOWN from that item, by name, on every access --
 //               Child() builds it. Empty for Of(). A write creates what is
 //               missing; a read creates nothing.
+//   aAttr       one flag per aPath step: true where that step goes into the
+//               ATTRIBUTES (r_Attr) rather than the descendants.
+//   bAttrs      the fields themselves are attributes of the item aPath ends
+//               at -- Attrs() sets it.
 //   eCoding     how values are stored under it.
 //   pfnAdmit    optional. Called before any write with each name this write
 //               will create directly under the parent (bLeaf true for the
@@ -314,6 +318,8 @@ struct MsgFieldAnchor
     AdmitFn        pfnAdmit   = nullptr;
     IndexFn        pfnIndex   = nullptr;
     std::vector<std::wstring> aPath;
+    std::vector<bool>         aAttr;
+    bool                      bAttrs     = false;
 
     // The common case: an item the CALLER holds still -- a P3PmsgField it
     // owns, or a P3PmsgBSTR's r_item(VBLockBSTR_ROOT), which is a member and
@@ -343,12 +349,37 @@ struct MsgFieldAnchor
     {
         MsgFieldAnchor a ( parent );
         a.aPath.push_back ( lpszName ? lpszName : L"" );
+        a.aAttr.push_back ( parent.bAttrs );
+        a.bAttrs = false;
         return a;
     }
     static MsgFieldAnchor Child ( P3PmsgItem& parent, LPCWSTR lpszName
                                 , MsgFieldCoding eCoding = MsgFieldCoding::Typed )
     {
         return Child ( Of ( parent, eCoding ), lpszName );
+    }
+
+    // The ATTRIBUTES of an anchor's item, as fields:
+    //
+    //     MsgViewOf<Money> money ( MsgFieldAnchor::Attrs ( oTotal ) );
+    //     money->currency = L"AUD";            // oTotal.r_Attr()["currency"]
+    //
+    // Attributes are a second set of named children beside the descendants
+    // (P3PmsgField::r_Attr), with the same name rules; a field reached through
+    // one is invisible to the other. A write creates the attribute set
+    // (AttrCMD_Create) when the item has none; a read creates nothing. What
+    // is under an attribute is ordinary descendants, so Child() and [] go on
+    // from here as usual.
+    static MsgFieldAnchor Attrs ( const MsgFieldAnchor& owner )
+    {
+        MsgFieldAnchor a ( owner );
+        a.bAttrs = true;
+        return a;
+    }
+    static MsgFieldAnchor Attrs ( P3PmsgItem& item
+                                , MsgFieldCoding eCoding = MsgFieldCoding::Typed )
+    {
+        return Attrs ( Of ( item, eCoding ) );
     }
 
   private:
@@ -367,9 +398,12 @@ class MsgFieldRef
     // anchor and `[L"child"]` nesting are one mechanism: the walk, the name
     // checks, create-on-write and the hooks all see a single path.
     MsgFieldRef ( const MsgFieldAnchor& anchor, LPCWSTR lpszName )
-      : m_oAnchor ( anchor ), m_aPath ( anchor.aPath ), m_strName ( Safe ( lpszName ) )
+      : m_oAnchor ( anchor ), m_aPath ( anchor.aPath ), m_aAttr ( anchor.aAttr )
+      , m_strName ( Safe ( lpszName ) ), m_bAttr ( anchor.bAttrs )
     {
         m_oAnchor.aPath.clear ( );
+        m_oAnchor.aAttr.clear ( );
+        m_oAnchor.bAttrs = false;
     }
 
     MsgFieldRef ( const MsgFieldRef& ) = default;
@@ -539,14 +573,15 @@ class MsgFieldRef
     bool Exists ( ) const
     {
         P3PmsgItem *p = Parent ( false );
-        return p && p->Exists ( m_strName.c_str() );
+        return p && Has ( p, m_strName.c_str(), m_bAttr );
     }
 
     // Removes the field and everything under it. False if it was not there.
     bool Erase ( )
     {
         P3PmsgItem *p = Parent ( false );
-        if ( !p || !p->Delete ( m_strName.c_str() ) )
+        if ( !p || !( m_bAttr ? p->r_Attr().Delete ( m_strName.c_str() )
+                              : p->Delete ( m_strName.c_str() ) ) )
           return false;
         if ( m_aPath.empty() && m_oAnchor.pfnIndex )
           m_oAnchor.pfnIndex ( m_oAnchor.pvCtx, m_strName.c_str(), false );
@@ -557,10 +592,16 @@ class MsgFieldRef
     // Reads create nothing.
     MsgFieldRef operator [] ( LPCWSTR lpszChild ) const
     {
-        MsgFieldRef r ( *this );
-        r.m_aPath.push_back ( m_strName );
-        r.m_strName = Safe ( lpszChild );
-        return r;
+        return Step ( lpszChild, false );
+    }
+
+    // An ATTRIBUTE of this field: `Field(o, L"total").Attr(L"currency") = L"AUD"`
+    // is o.SelectItem(L"total").r_Attr()[L"currency"]. A write creates the
+    // field and its attribute set if missing; a read creates nothing. An
+    // attribute is a field in its own right, so [] goes on below it.
+    MsgFieldRef Attr ( LPCWSTR lpszAttr ) const
+    {
+        return Step ( lpszAttr, true );
     }
 
     // This field as an ANCHOR, for a view of its children:
@@ -571,6 +612,9 @@ class MsgFieldRef
         MsgFieldAnchor a ( m_oAnchor );
         a.aPath = m_aPath;
         a.aPath.push_back ( m_strName );
+        a.aAttr = m_aAttr;
+        a.aAttr.push_back ( m_bAttr );
+        a.bAttrs = false;
         return a;
     }
 
@@ -580,6 +624,27 @@ class MsgFieldRef
     static std::wstring Safe ( LPCWSTR lpsz ) { return lpsz ? lpsz : L""; }
 
     bool Bytes ( ) const { return m_oAnchor.eCoding == MsgFieldCoding::Bytes; }
+
+    // One step down, into the descendants or the attributes.
+    MsgFieldRef Step ( LPCWSTR lpszName, bool bAttr ) const
+    {
+        MsgFieldRef r ( *this );
+        r.m_aPath.push_back ( m_strName );
+        r.m_aAttr.push_back ( m_bAttr );
+        r.m_strName = Safe ( lpszName );
+        r.m_bAttr   = bAttr;
+        return r;
+    }
+
+    // Exists() on the attribute set of an item that has none is false and
+    // creates nothing -- measured, as is that the set follows a CURSOR item to
+    // whatever it names now. Its operator bool does not: once the cursor has
+    // moved it reports the set of the item it was first asked about, so
+    // nothing here asks it.
+    static bool Has ( P3PmsgItem *p, LPCWSTR lpszName, bool bAttr )
+    {
+        return bAttr ? p->r_Attr().Exists ( lpszName ) : p->Exists ( lpszName );
+    }
 
     // P2Pevent::Throw throws; the loop is for the compiler, which cannot know.
     [[noreturn]] void Fail ( LPCWSTR lpszFormat ) const
@@ -598,16 +663,18 @@ class MsgFieldRef
         for ( size_t i = 0; p && i < m_aPath.size(); ++i )
         {
             LPCWSTR lpszSeg = m_aPath[i].c_str();
-            if ( !p->Exists ( lpszSeg ) )
+            const bool bAttr = m_aAttr[i];
+            if ( !Has ( p, lpszSeg, bAttr ) )
             {
               if ( !bCreate )
                 return nullptr;
-              p->DeclareItem ( lpszSeg, P3PmsgData() );
+              if ( bAttr ) p->r_Attr ( P3PmsgField::AttrCMD_Create ).DeclareItem ( lpszSeg, P3PmsgData() );
+              else         p->DeclareItem ( lpszSeg, P3PmsgData() );
             }
             // SelectItem's answer is p's cursor item, and nothing moves p's
             // cursor before the next step reads it -- the walk only ever
             // looks DOWN.
-            p = &p->SelectItem ( lpszSeg );
+            p = bAttr ? &p->r_Attr().SelectItem ( lpszSeg ) : &p->SelectItem ( lpszSeg );
         }
         return p;
     }
@@ -615,9 +682,10 @@ class MsgFieldRef
     const P3PmsgData& Cell ( ) const
     {
         P3PmsgItem *p = Parent ( false );
-        if ( !p || !p->Exists ( m_strName.c_str() ) )
+        if ( !p || !Has ( p, m_strName.c_str(), m_bAttr ) )
           Fail ( L"Field [%ls] does not exist" );
-        return p->SelectItem ( m_strName.c_str() ).r_data();
+        return m_bAttr ? p->r_Attr().SelectItem ( m_strName.c_str() ).r_data()
+                       : p->SelectItem ( m_strName.c_str() ).r_data();
     }
 
     // Refused HERE, before anything is constructed, so the error names the
@@ -652,7 +720,8 @@ class MsgFieldRef
         P3PmsgItem *p = Parent ( true );
         if ( !p )
           Fail ( L"Field [%ls] has no parent item to be written under" );
-        p->DeclareItem ( m_strName.c_str(), oData, TRUE );
+        if ( m_bAttr ) p->r_Attr ( P3PmsgField::AttrCMD_Create ).DeclareItem ( m_strName.c_str(), oData, TRUE );
+        else           p->DeclareItem ( m_strName.c_str(), oData, TRUE );
         // LAST: an index hook may move a cursor that `p` came from.
         if ( m_aPath.empty() && m_oAnchor.pfnIndex )
           m_oAnchor.pfnIndex ( m_oAnchor.pvCtx, m_strName.c_str(), true );
@@ -687,7 +756,9 @@ class MsgFieldRef
 
     MsgFieldAnchor            m_oAnchor;
     std::vector<std::wstring> m_aPath;     // parent path below the anchor
+    std::vector<bool>         m_aAttr;     // per step: into the attributes
     std::wstring              m_strName;
+    bool                      m_bAttr = false;   // the leaf is an attribute
 };
 
 // The dynamic form.
@@ -722,6 +793,11 @@ class MsgView
     // declare.
     MsgFieldRef operator [] ( LPCWSTR lpszName ) const { return Ref ( lpszName ); }
     MsgFieldRef Ref ( LPCWSTR lpszName ) const { return MsgFieldRef ( m_oAnchor, lpszName ); }
+    // An attribute of the item the view is bound to.
+    MsgFieldRef Attr ( LPCWSTR lpszName ) const
+    {
+        return MsgFieldRef ( MsgFieldAnchor::Attrs ( m_oAnchor ), lpszName );
+    }
 
   private:
     template <class T> friend class MsgViewOf;
@@ -835,6 +911,8 @@ class MsgTypedField
     bool Exists ( ) const { return Ref().Exists(); }
     bool Erase  ( )       { return Ref().Erase(); }
     MsgFieldRef Ref ( ) const { return m_pView->Ref ( m_lpszName ); }
+    // An attribute of THIS field: msg->Total.Attr(L"currency") = L"AUD".
+    MsgFieldRef Attr ( LPCWSTR lpszAttr ) const { return Ref().Attr ( lpszAttr ); }
 
   private:
     const MsgView *m_pView;
@@ -877,6 +955,7 @@ class MsgViewOf
     const T& operator *  ( ) const { return m_oView; }
 
     MsgFieldRef operator [] ( LPCWSTR lpszName ) const { return m_oView.Ref ( lpszName ); }
+    MsgFieldRef Attr ( LPCWSTR lpszName ) const { return m_oView.Attr ( lpszName ); }
 
   private:
     T m_oView;

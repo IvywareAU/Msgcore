@@ -255,6 +255,11 @@ int up = msg->uptime;
   stores INT16, because `char` and `unsigned short` promote to `int`. `MsgTime(t)`
   (seconds since 1970 UTC) stores the TIME64 cell `P3PmsgTime` makes; its
   constructor is explicit so that a `long long` stays an integer.
+- **Attributes are fields too.** `Field(item, L"total").Attr(L"currency") = L"AUD"`
+  reaches `r_Attr()` instead of the descendants. `MsgViewOf<T> v ( MsgFieldAnchor::Attrs
+  ( item ) )` gives a view of an item's attributes, and `msg->total.Attr(L"x")` /
+  `msg.Attr(L"x")` work from a view. The first write creates the attribute set; a read
+  creates nothing.
 - **Each reader wants its own type.** `AsShort`, `AsInt`, `AsInt64`, `AsReal`,
   `AsBool`, `AsTime`, `AsText` and `AsBlob` neither widen nor narrow, so `AsInt64()`
   refuses a TIME64 cell even though `c_time64()` reads both 64-bit tags.
