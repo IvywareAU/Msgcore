@@ -31,7 +31,8 @@
 //
 // `msg->unknownName` cannot be made to work: C++ has no hook that turns an
 // undeclared member name into a lookup. That is what the dynamic form is for.
-// Refer MsgFieldAccessPlan.md at the MSCS root.
+// The design record is the field-access plan kept with the MSCS solution,
+// which is not published with this repository.
 //
 // HEADER-ONLY, AND THAT IS THE POINT. Nothing here is exported, no exported
 // class gains a member, so the Msgcore DLL's layout is untouched and nothing

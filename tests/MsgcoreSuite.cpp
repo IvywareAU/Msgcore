@@ -197,7 +197,7 @@ static void Test_Field_NameAndData()
     // heap instead of throwing: RenderThisSafe aliases both bases' m_pObject
     // onto the member m_oObject, c_name threw, and the base destructors that
     // unwound the half-built field deleted that member address
-    // (P3PmsgField_UNDO_RENDER in P2Pmsg.cpp). Found by MsgFieldAccessPlan.md.
+    // (P3PmsgField_UNDO_RENDER in P2Pmsg.cpp). Found by the field-access work.
     TF_CASE("a field built with a 64-unit name throws cleanly; the unwind frees nothing it does not own")
     {
         auto throws = []( auto fn ) -> bool {

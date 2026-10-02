@@ -3589,8 +3589,8 @@ P3PmsgObject_IsCommon ( const P3PmsgObject *pObject1, const P3PmsgObject *pObjec
 //         member, inside this object, never allocated. That is heap
 //         corruption, not an exception, and MSVC Debug reports it as
 //         _CrtIsValidHeapPointer.
-//       : Found through DeclareItem with a 64-unit name (MsgFieldAccessPlan.md
-//         F1): P3PmsgDesc::DeclareItem builds P3PmsgField(name, data), c_name
+//       : Found through DeclareItem with a 64-unit name, by the field-access
+//         work's F1 probe: P3PmsgDesc::DeclareItem builds P3PmsgField(name, data), c_name
 //         throws on the overlong name, and the unwind freed the member. Any
 //         throw after RenderThisSafe did the same -- c_name, the copy's
 //         operator=, Connect -- so every such constructor catches, does
@@ -7671,7 +7671,7 @@ P3Pmsg_GetPath ( const P3PmsgDesc *pDesc )
 //         the copy carried on regardless -- so in Release a component past
 //         nObjectnameChars wrote off the end of the CALLER'S STACK ARRAY, and
 //         one of exactly nObjectnameChars left it unterminated for the Goto
-//         that read it next. Found by ASan on Linux (MsgFieldAccessPlan.md):
+//         that read it next. Found by ASan on Linux (the field-access work):
 //         P3PmsgField::Exists with a 64-unit name read 260 bytes out of
 //         P3Pmsg_SelectObjectRecurse's nsObjectname. Paths reach here from
 //         Exists, SelectItem and RootPath2Object, and RootPath2Object is how

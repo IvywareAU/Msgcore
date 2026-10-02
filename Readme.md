@@ -285,7 +285,8 @@ int up = msg->uptime;
 Not thread-safe, like the tree under it. The worked example is
 `_Msgcore_UseExamples/DirectExamples/FieldAccessTest`;
 `_Msgcore_UseExamples/FieldAccessExamples` applies the layer to all eight Msgcore
-example harnesses. The design record is `MsgFieldAccessPlan.md` at the MSCS root.
+example harnesses. The design record is the field-access plan kept with the MSCS
+solution, which is not published with this repository.
 
 ## Repository layout
 
