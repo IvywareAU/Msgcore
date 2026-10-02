@@ -248,10 +248,16 @@ int up = msg->uptime;
 - **`msg->unknownName` is not possible in C++.** There is no hook that turns an
   undeclared member into a lookup, so the dynamic `Field()` form exists for those names.
 - **Writes are create-or-replace, type included** (`DeclareItem(…, TRUE)`). There is
-  one `operator=` per type (`int`, `long long`, `double`, `bool`, wide text, UTF-8
-  `const char*`, `MsgBlob`) and no template, because `P3PmsgData`'s
+  one `operator=` per type (`short`, `int`, `long long`, `double`, `bool`, `MsgTime`,
+  wide text, UTF-8 `const char*`, `MsgBlob`) and no template, because `P3PmsgData`'s
   `LPCSTR`/`LPCWSTR`/`const void*` overloads take a pointer of the wrong kind
-  silently. A narrow string is UTF-8 and is stored as UTF-16.
+  silently. A narrow string is UTF-8 and is stored as UTF-16. Only an exact `short`
+  stores INT16, because `char` and `unsigned short` promote to `int`. `MsgTime(t)`
+  (seconds since 1970 UTC) stores the TIME64 cell `P3PmsgTime` makes; its
+  constructor is explicit so that a `long long` stays an integer.
+- **Each reader wants its own type.** `AsShort`, `AsInt`, `AsInt64`, `AsReal`,
+  `AsBool`, `AsTime`, `AsText` and `AsBlob` neither widen nor narrow, so `AsInt64()`
+  refuses a TIME64 cell even though `c_time64()` reads both 64-bit tags.
 - **Reads throw `P2Pevent*`**, as `c_int()` and `c_wstr()` do, on an absent field
   or the wrong type. Blobs are copied out with `c_vBlobCopy`, never read through the
   unaligned `c_vBlob()` pointer.

@@ -68,7 +68,7 @@
 // NOT THREAD-SAFE, exactly as the item underneath is not.
 //
 // TWO ENCODINGS. MsgFieldCoding::Typed (the default) stores each type under
-// its own tag -- INT32, INT64, DOUBLE, BOOL, WSTR16, BLOB16. MsgFieldCoding::
+// its own tag -- INT16, INT32, INT64, DOUBLE, BOOL, TIME64, WSTR16, BLOB16. MsgFieldCoding::
 // Bytes stores EVERY value as a blob of its native bytes, which is how
 // TargetFacade carries named fields on the wire (FacadeHub::PostMsg); see
 // "THE BYTES ENCODING" below. The readers accept both, so a reader never has
@@ -114,14 +114,41 @@ struct MsgBlob
 };
 
 // ---------------------------------------------------------------------------
+// MsgTime -- a point in time, stored as Msgcore's TIME64 cell (P3PmsgTime)
+//
+// Seconds since 1970-01-01 UTC, the value a 64-bit time_t / CTime holds.
+// Its own type rather than a long long because a long long is already a
+// field type (INT64): `Field(x, L"t") = 1700000000LL` must stay an integer,
+// and a time must say it is one. Hence the explicit constructor.
+// ---------------------------------------------------------------------------
+class MsgTime
+{
+  public:
+    MsgTime ( ) { }
+    explicit MsgTime ( long long seconds ) : m_seconds ( seconds ) { }
+
+    long long Seconds ( ) const { return m_seconds; }
+
+    bool operator == ( const MsgTime& rhs ) const { return m_seconds == rhs.m_seconds; }
+    bool operator != ( const MsgTime& rhs ) const { return m_seconds != rhs.m_seconds; }
+
+  private:
+    long long m_seconds = 0;
+};
+
+// ---------------------------------------------------------------------------
 // THE BYTES ENCODING
 //
 // What a field's value looks like when it travels as a blob. It is
 // TargetFacade's field format, made explicit -- the facade only ever moved
 // bytes, so this is the first place the bytes are given a meaning:
 //
+//     short      2 bytes, native
 //     int        4 bytes, native (little-endian on every target this builds for)
 //     long long  8 bytes, native
+//     time       8 bytes, native: MsgTime's seconds since 1970 UTC, as an int64.
+//                Indistinguishable from a long long on the wire, by design --
+//                the bytes carry no tag, so either reader accepts the other
 //     double     8 bytes, IEEE 754, native
 //     bool       1 byte, 0 or 1
 //     text       UTF-16 code units, native, WITH a terminating NUL unit --
@@ -359,6 +386,22 @@ class MsgFieldRef
     // One overload per type, deliberately: see the overload trap above.
     // Anything that converts to two of them equally well (an unsigned, a
     // long) is a compile error rather than a guess -- cast it.
+    //
+    // short is an exact match only: a char, an unsigned short or a wchar_t
+    // PROMOTES to int, and promotion outranks the conversion to short, so
+    // those still store INT32. Only a value that is already a short is INT16.
+    MsgFieldRef& operator = ( short v )
+    {
+        if ( Bytes() ) { INT16 x = (INT16)v; WriteBlob ( &x, sizeof x ); }
+        else           Write ( P3PmsgData ( (INT16)v ), sizeof(INT16) );
+        return *this;
+    }
+    MsgFieldRef& operator = ( const MsgTime& v )
+    {
+        if ( Bytes() ) { INT64 x = (INT64)v.Seconds(); WriteBlob ( &x, sizeof x ); }
+        else           Write ( P3PmsgTime ( (__int64)v.Seconds() ), sizeof(INT64) );
+        return *this;
+    }
     MsgFieldRef& operator = ( int v )
     {
         if ( Bytes() ) { INT32 x = (INT32)v; WriteBlob ( &x, sizeof x ); }
@@ -417,7 +460,27 @@ class MsgFieldRef
 
     // --- reads: throw P2Pevent* on a missing field or a wrong type ---------
     // Each accepts its own type under either encoding: the typed tag, or a
-    // blob of exactly the encoded size.
+    // blob of exactly the encoded size. Its OWN type: AsInt does not widen a
+    // short, and AsInt64 does not read a time, though Msgcore's c_time64()
+    // takes both 64-bit tags -- a reader that names a type gets that type.
+    short AsShort ( ) const
+    {
+        const P3PmsgData& d = Cell();
+        if ( d.DataType() == VBLockData_INT16 ) return d.c_short();
+        INT16 x = 0; ReadExact ( d, &x, sizeof x, L"a short" ); return (short)x;
+    }
+    // TIME64, which is what MsgTime writes, and the older TIME32 that
+    // P3PmsgData::c_time() reads -- both are times, and only the width differs.
+    // Nothing public constructs a TIME32 cell; it arrives in older images. Not
+    // UINT32, which c_time() also takes: that is an integer with no tag
+    // saying it is a time.
+    MsgTime AsTime ( ) const
+    {
+        const P3PmsgData& d = Cell();
+        if ( d.DataType() == VBLockData_TIME64 ) return MsgTime ( (long long)d.c_time64() );
+        if ( d.DataType() == VBLockData_TIME32 ) return MsgTime ( (long long)d.c_time() );
+        INT64 x = 0; ReadExact ( d, &x, sizeof x, L"a time" ); return MsgTime ( (long long)x );
+    }
     int AsInt ( ) const
     {
         const P3PmsgData& d = Cell();
@@ -667,6 +730,20 @@ class MsgView
 
 template <class T> struct MsgFieldTraits;   // undefined: an unsupported type
 
+template <> struct MsgFieldTraits<short>
+{
+    template <class U> struct Accepts : std::integral_constant<bool,
+        std::is_integral<U>::value && !std::is_same<U, bool>::value &&
+        sizeof(U) <= sizeof(short)> { };
+    static void  Store ( MsgFieldRef& r, short v ) { r = v; }
+    static short Load  ( const MsgFieldRef& r )    { return r.AsShort(); }
+};
+template <> struct MsgFieldTraits<MsgTime>
+{
+    template <class U> struct Accepts : std::is_same<U, MsgTime> { };
+    static void    Store ( MsgFieldRef& r, const MsgTime& v ) { r = v; }
+    static MsgTime Load  ( const MsgFieldRef& r )             { return r.AsTime(); }
+};
 template <> struct MsgFieldTraits<int>
 {
     template <class U> struct Accepts : std::integral_constant<bool,
