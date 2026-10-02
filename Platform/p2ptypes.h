@@ -449,6 +449,7 @@
     #define ERROR_PIPE_LISTENING     536
     #define ERROR_OPERATION_ABORTED  995
     #define ERROR_IO_PENDING         997
+    #define ERROR_CONNECTION_REFUSED 1225
     #define ERROR_NO_SYSTEM_RESOURCES 1450
     #define WAIT_TIMEOUT             258
   #endif
