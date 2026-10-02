@@ -192,6 +192,50 @@ static void Test_Field_NameAndData()
         TF_CHECK(rejects( oAstralBad, a32.c_str() ));
         TF_CHECK(oAstralBad.c_size() == 4);
     }
+
+    // The same overrun through a FIELD. Until 2026-10-02 this corrupted the
+    // heap instead of throwing: RenderThisSafe aliases both bases' m_pObject
+    // onto the member m_oObject, c_name threw, and the base destructors that
+    // unwound the half-built field deleted that member address
+    // (P3PmsgField_UNDO_RENDER in P2Pmsg.cpp). Found by MsgFieldAccessPlan.md.
+    TF_CASE("a field built with a 64-unit name throws cleanly; the unwind frees nothing it does not own")
+    {
+        auto throws = []( auto fn ) -> bool {
+            try { fn(); return false; }
+            catch ( P2Pevent* pEVT ) { if ( pEVT ) pEVT->Cancel(false); return true; }
+        };
+        const std::wstring n64(64, L'n');
+        TF_CHECK(throws([&]{ P3PmsgField f( n64.c_str(), P3PmsgData((int)1) ); }));
+        TF_CHECK(throws([&]{ P3PmsgField f( n64.c_str(), (size_t)0 ); }));
+
+        P3PmsgField oRoot(L"Root");
+        oRoot.DeclareItem(L"kept", P3PmsgData((int)7));
+        TF_CHECK(throws([&]{ oRoot.DeclareItem(n64.c_str(), P3PmsgData((int)1)); }));
+        TF_CHECK(oRoot.SelectItem(L"kept").c_int() == 7);
+        oRoot.DeclareItem(L"after", P3PmsgData((int)8));
+        TF_CHECK(oRoot.SelectItem(L"after").c_int() == 8);
+    }
+
+    // A path component longer than any name: ParseObjectPath wrote it into a
+    // MAX_TNAME_SIZE stack array behind only an ASSERT(0), so 64 units left the
+    // array unterminated and more wrote past it in Release (ASan, Linux). It
+    // now selects nothing, which is what a name that matches nothing gets.
+    TF_CASE("a path component longer than any name selects nothing and overruns nothing")
+    {
+        P3PmsgField oRoot(L"Root");
+        oRoot.DeclareItem(L"a", P3PmsgData((int)1));
+        oRoot.SelectItem(L"a").DeclareItem(L"b", P3PmsgData((int)2));
+        for ( size_t n : { (size_t)63, (size_t)64, (size_t)65, (size_t)1000 } )
+        {
+            const std::wstring big(n, L'z');
+            TF_CHECK(!oRoot.Exists(big.c_str()));
+            TF_CHECK(oRoot.SelectObject(big.c_str()).IsVoid());
+            TF_CHECK(oRoot.SelectObject((L"a." + big).c_str()).IsVoid());
+            TF_CHECK(oRoot.SelectObject((L"." + big).c_str()).IsVoid());
+            TF_CHECK(oRoot.SelectObject((big + L".b").c_str()).IsVoid());
+        }
+        TF_CHECK(!oRoot.SelectObject(L"a.b").IsVoid());
+    }
 }
 
 // ---------------------------------------------------------------------------

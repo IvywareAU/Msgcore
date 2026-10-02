@@ -3581,6 +3581,33 @@ P3PmsgObject_IsCommon ( const P3PmsgObject *pObject1, const P3PmsgObject *pObjec
 //  NOTES: Acts as VBlockField item wrapper
 
 //
+//  Undo what RenderThisSafe aliased, on the way out of a constructor that threw
+//  NOTES: RenderThisSafe points BOTH bases' m_pObject at the member m_oObject,
+//         and only ~P3PmsgField points them away again. A constructor that
+//         throws never reaches that destructor -- but the base destructors
+//         still run, and each one `delete`s its m_pObject: the address of a
+//         member, inside this object, never allocated. That is heap
+//         corruption, not an exception, and MSVC Debug reports it as
+//         _CrtIsValidHeapPointer.
+//       : Found through DeclareItem with a 64-unit name (MsgFieldAccessPlan.md
+//         F1): P3PmsgDesc::DeclareItem builds P3PmsgField(name, data), c_name
+//         throws on the overlong name, and the unwind freed the member. Any
+//         throw after RenderThisSafe did the same -- c_name, the copy's
+//         operator=, Connect -- so every such constructor catches, does
+//         exactly what ~P3PmsgField would have done, and rethrows.
+//       : A macro rather than a member function, deliberately: a new member of
+//         an exported class is a new mangled export, which tools/ci/
+//         check_exports.ps1 would rightly report, for a body-only fix.
+#define P3PmsgField_UNDO_RENDER()                                             \
+    do {                                                                      \
+      P3PmsgData::m_pObject = nullptr;                                        \
+      P3PmsgName::m_pObject = nullptr;                                        \
+      delete m_pP3PmsgAttr; m_pP3PmsgAttr = nullptr;                          \
+      delete m_pP3PmsgDesc; m_pP3PmsgDesc = nullptr;                          \
+      delete m_pMsgStck;    m_pMsgStck    = nullptr;                          \
+    } while ( 0 )
+
+//
 //  Contructors and destructor
 P3PmsgField::P3PmsgField ( )
            : P3PmsgName ( (P3PmsgField *)0 ), P3PmsgData ( (P3PmsgField *)0 )
@@ -3619,29 +3646,39 @@ P3PmsgField::P3PmsgField ( const P3PmsgField& rhs )
            : P3PmsgName ( (P3PmsgField *)0 ), P3PmsgData ( (P3PmsgField *)0 )
 {
     RenderThisSafe ( );
-   *this = rhs;
+    try { *this = rhs; }
+    catch ( ... ) { P3PmsgField_UNDO_RENDER(); throw; }
 }
 P3PmsgField::P3PmsgField ( LPCWSTR lpszName, size_t nSize )
            : P3PmsgName ( (P3PmsgField *)0 ), P3PmsgData ( (P3PmsgField *)0 )
 {
     RenderThisSafe ( );
-    c_name ( lpszName, nSize );
+    try { c_name ( lpszName, nSize ); }
+    catch ( ... ) { P3PmsgField_UNDO_RENDER(); throw; }
     //ASSERT(VerifyContainment());
 }
 P3PmsgField::P3PmsgField ( LPCWSTR lpszName, const P3PmsgData& oData )
            : P3PmsgName ( (P3PmsgField *)0 ), P3PmsgData ( (P3PmsgField *)0 )
 {
     RenderThisSafe ( );
-    c_name ( lpszName, 0 );
-  (*this).r_data() = oData;
+    try
+    {
+      c_name ( lpszName, 0 );
+    (*this).r_data() = oData;
+    }
+    catch ( ... ) { P3PmsgField_UNDO_RENDER(); throw; }
     //ASSERT(VerifyContainment());
 }
 P3PmsgField::P3PmsgField ( const P2PmsgFieldHdl& rhs )
            : P3PmsgName ( (P3PmsgField *)0 ), P3PmsgData ( (P3PmsgField *)0 )
 {
     RenderThisSafe ( );
-    Connect ( (P2PmsgHANDLE)rhs.uiParam1, rhs.uiParam2
-            , rhs.uiParam3 );
+    try
+    {
+      Connect ( (P2PmsgHANDLE)rhs.uiParam1, rhs.uiParam2
+              , rhs.uiParam3 );
+    }
+    catch ( ... ) { P3PmsgField_UNDO_RENDER(); throw; }
 }
 P3PmsgField::P3PmsgField ( P2PmsgHANDLE hVBList, VBLaddr aField, VBLsize nFieldSize )
            : P3PmsgName ( (P3PmsgField *)nullptr ), P3PmsgData ( (P3PmsgField *)nullptr )
@@ -3650,7 +3687,8 @@ P3PmsgField::P3PmsgField ( P2PmsgHANDLE hVBList, VBLaddr aField, VBLsize nFieldS
       nFieldSize = P2PmsgHeap_Sizeof ( hVBList, aField );
     P3PmsgData::m_pObject = &m_oObject;
     P3PmsgName::m_pObject = &m_oObject;
-    m_oObject.Connectx ( hVBList, aField, nFieldSize );
+    try { m_oObject.Connectx ( hVBList, aField, nFieldSize ); }
+    catch ( ... ) { P3PmsgField_UNDO_RENDER(); throw; }
     //m_pP3PmsgAttr  = 0;
     //m_pP3PmsgDesc  = 0;
     //m_pMsgStck     = 0;
@@ -7625,11 +7663,29 @@ P3Pmsg_GetPath ( const P3PmsgDesc *pDesc )
     return strPath;
 }
 
+//
+//  Parse out the immediate object name
+//  NOTES: [.|@|^]objectname[.|@|^]objectname[.|@|^]etc
+//       : RETURNS NULL FOR A COMPONENT TOO LONG TO BE A NAME, and the buffer
+//         is always terminated. The overrun used to be an ASSERT(0) and then
+//         the copy carried on regardless -- so in Release a component past
+//         nObjectnameChars wrote off the end of the CALLER'S STACK ARRAY, and
+//         one of exactly nObjectnameChars left it unterminated for the Goto
+//         that read it next. Found by ASan on Linux (MsgFieldAccessPlan.md):
+//         P3PmsgField::Exists with a 64-unit name read 260 bytes out of
+//         P3Pmsg_SelectObjectRecurse's nsObjectname. Paths reach here from
+//         Exists, SelectItem and RootPath2Object, and RootPath2Object is how
+//         a store is queried across the mesh -- a path is caller data, so the
+//         guard cannot be a debug-build one.
+//       : Both callers answer NULL with "selection path broken", the answer
+//         they already give a name that matches nothing. A stored name holds
+//         at most MAX_TNAME_SIZE-1 units (P3PmsgName::c_name), so a longer
+//         component cannot match anything; that is not a new failure mode,
+//         only the old one reached without the overrun.
+//
 LPCWSTR
 ParseObjectPath ( LPCWSTR lpszObjectPath, LPWSTR lpszObjectname, int nObjectnameChars )
 {
-    // Parse out the immediate object name
-    // NOTES: [.|@|^]objectname[.|@|^]objectname[.|@|^]etc
     ZeroMemory ( (void *)lpszObjectname, nObjectnameChars*sizeof(lpszObjectname[0]) );
     LPCWSTR lpszParsedname = lpszObjectPath;
     int     i = 0;
@@ -7639,9 +7695,12 @@ ParseObjectPath ( LPCWSTR lpszObjectPath, LPWSTR lpszObjectname, int nObjectname
             *lpszParsedname != T_StckDelim &&
             *lpszParsedname != L':'           )
     {
-      if ( i >= nObjectnameChars )
-        ASSERT(0); //TODO:LJM Throw memory overrun exception
-      lpszObjectname[i++] += *lpszParsedname++;
+      if ( i >= nObjectnameChars - 1 )
+      {
+        lpszObjectname[0] = 0;
+        return nullptr;              // no name is this long
+      }
+      lpszObjectname[i++] = *lpszParsedname++;
     }
     return lpszParsedname;
 }
@@ -7651,6 +7710,8 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCWSTR lpszObjectPath
     // Locals;
     WCHAR     nsObjectname[MAX_TNAME_SIZE];
     LPCWSTR lpszParsedname = ParseObjectPath ( lpszObjectPath, nsObjectname, ARRAYSIZE(nsObjectname) );
+    if ( lpszParsedname == nullptr )
+      return P3PmsgObject();           // A component no name can match
 
     //  AN OBJECT THAT NAMES NO BLOCK IS AN ORDINARY ANSWER, NOT A LOGIC ERROR.
     //  r_Attr() on an item that has no attributes hands back one of these, so
@@ -7995,6 +8056,8 @@ P3Pmsg_SelectObject ( const P3PmsgObject *pObject, LPCWSTR lpszObjectPath )
     LPCWSTR lpszWhole = lpszObjectPath;
     WCHAR   nsObjectname[MAX_TNAME_SIZE] = {0};
     lpszObjectPath = ParseObjectPath ( lpszObjectPath + 1, nsObjectname, ARRAYSIZE(nsObjectname) );
+    if ( lpszObjectPath == nullptr )
+      return P3PmsgObject();           // A component no name can match
 
     //  THE COLLECTIONS ARE ASKED ABOUT FIRST, for the reason §16 gives: IsAttr
     //  and IsDesc read the block header, which every block has, while IsField,
