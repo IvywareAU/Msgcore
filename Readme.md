@@ -260,13 +260,21 @@ int up = msg->uptime;
   before any write, so the error names the field.
 - **Refs hold names, not items.** `SelectItem` returns the parent's *cursor* item,
   and the next lookup on that parent retargets it, so every access re-resolves.
+- **A view of a child item binds by name, not by item.** Use
+  `MsgViewOf<Limits> lim ( MsgFieldAnchor::Child ( item, L"limits" ) );`, never
+  `MsgViewOf<Limits> lim ( item.SelectItem ( L"limits" ) )`. `Child` chains for
+  deeper levels, and `Field(item, L"a")[L"b"].Anchor()` is the same anchor spelled
+  as a path. The child is created on the first write. The anchor protects only
+  itself: its lookup still moves the parent's cursor, so a `P3PmsgItem&` that
+  someone else holds from `SelectItem` moves with it.
 - **Two codings.** `Typed` (the default) stores each type under its own tag.
   `Bytes` stores every value as a blob in TargetFacade's field format, which is what
   Targetcore's `AppFields()` uses. Readers accept both.
 
 Not thread-safe, like the tree under it. The worked example is
-`_Msgcore_UseExamples/DirectExamples/FieldAccessTest`, and the design record is
-`MsgFieldAccessPlan.md` at the MSCS root.
+`_Msgcore_UseExamples/DirectExamples/FieldAccessTest`;
+`_Msgcore_UseExamples/FieldAccessExamples` applies the layer to all eight Msgcore
+example harnesses. The design record is `MsgFieldAccessPlan.md` at the MSCS root.
 
 ## Repository layout
 

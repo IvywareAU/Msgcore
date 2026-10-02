@@ -255,14 +255,17 @@ inline std::wstring UnitsToText ( const unsigned char *pb, size_t nUnits )
 // ---------------------------------------------------------------------------
 // MsgFieldAnchor -- where a ref's PARENT item comes from, and on what terms
 //
-// A plain value: function pointers and a context, no allocation, copied into
+// A plain value: function pointers, a context and a path of names, copied into
 // every ref. The context is NOT owned -- whatever it points at (the item, the
-// message) must outlive every ref and view made from it.
+// message) must outlive every ref and view made from it. The path IS owned.
 //
 //   pfnResolve  the parent item, looked up afresh; NULL when bCreate is false
 //               and it does not exist yet. Must not hand back a reference that
 //               a later lookup on some OTHER object can retarget -- which is
 //               why it is a function and not a P3PmsgItem&.
+//   aPath       names walked DOWN from that item, by name, on every access --
+//               Child() builds it. Empty for Of(). A write creates what is
+//               missing; a read creates nothing.
 //   eCoding     how values are stored under it.
 //   pfnAdmit    optional. Called before any write with each name this write
 //               will create directly under the parent (bLeaf true for the
@@ -283,10 +286,12 @@ struct MsgFieldAnchor
     MsgFieldCoding eCoding    = MsgFieldCoding::Typed;
     AdmitFn        pfnAdmit   = nullptr;
     IndexFn        pfnIndex   = nullptr;
+    std::vector<std::wstring> aPath;
 
     // The common case: an item the CALLER holds still -- a P3PmsgField it
     // owns, or a P3PmsgBSTR's r_item(VBLockBSTR_ROOT), which is a member and
-    // not a cursor. Not something SelectItem just returned.
+    // not a cursor. Not something SelectItem just returned: for a child item,
+    // use Child().
     static MsgFieldAnchor Of ( P3PmsgItem& item
                              , MsgFieldCoding eCoding = MsgFieldCoding::Typed )
     {
@@ -295,6 +300,28 @@ struct MsgFieldAnchor
         a.pvCtx      = &item;
         a.eCoding    = eCoding;
         return a;
+    }
+
+    // A NAMED CHILD of an anchor, found afresh by name on every access:
+    //
+    //     MsgViewOf<Limits> lim ( MsgFieldAnchor::Child ( oMgr, L"Limits" ) );
+    //     lim->Low = -40;                      // creates Limits on the write
+    //
+    // The tempting `MsgViewOf<Limits> lim ( oMgr.SelectItem(L"Limits") )` binds
+    // the parent's CURSOR item, and the next lookup on the parent retargets it.
+    // Chains: Child ( Child ( oRoot, L"a" ), L"b" ). Keeps the parent's coding
+    // and hooks; a hook sees the FIRST name below its own parent, as it does
+    // for `Field(anchor, L"a")[L"b"]`.
+    static MsgFieldAnchor Child ( const MsgFieldAnchor& parent, LPCWSTR lpszName )
+    {
+        MsgFieldAnchor a ( parent );
+        a.aPath.push_back ( lpszName ? lpszName : L"" );
+        return a;
+    }
+    static MsgFieldAnchor Child ( P3PmsgItem& parent, LPCWSTR lpszName
+                                , MsgFieldCoding eCoding = MsgFieldCoding::Typed )
+    {
+        return Child ( Of ( parent, eCoding ), lpszName );
     }
 
   private:
@@ -309,8 +336,14 @@ class MsgFieldRef
   public:
     MsgFieldRef ( P3PmsgItem& parent, LPCWSTR lpszName )
       : m_oAnchor ( MsgFieldAnchor::Of ( parent ) ), m_strName ( Safe ( lpszName ) ) { }
+    // The anchor's path becomes the head of this ref's own, so a Child()
+    // anchor and `[L"child"]` nesting are one mechanism: the walk, the name
+    // checks, create-on-write and the hooks all see a single path.
     MsgFieldRef ( const MsgFieldAnchor& anchor, LPCWSTR lpszName )
-      : m_oAnchor ( anchor ), m_strName ( Safe ( lpszName ) ) { }
+      : m_oAnchor ( anchor ), m_aPath ( anchor.aPath ), m_strName ( Safe ( lpszName ) )
+    {
+        m_oAnchor.aPath.clear ( );
+    }
 
     MsgFieldRef ( const MsgFieldRef& ) = default;
 
@@ -465,6 +498,17 @@ class MsgFieldRef
         r.m_aPath.push_back ( m_strName );
         r.m_strName = Safe ( lpszChild );
         return r;
+    }
+
+    // This field as an ANCHOR, for a view of its children:
+    //     MsgViewOf<Pos> pos ( Field ( oRoot, L"body" )[L"pos"].Anchor() );
+    // The same thing MsgFieldAnchor::Child builds, name by name.
+    MsgFieldAnchor Anchor ( ) const
+    {
+        MsgFieldAnchor a ( m_oAnchor );
+        a.aPath = m_aPath;
+        a.aPath.push_back ( m_strName );
+        return a;
     }
 
     const std::wstring& Name ( ) const { return m_strName; }
