@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.1.1 is tag
-//         v3.1.1. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.1.2 is tag
+//         v3.1.2. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,25 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.1.2.0, a PATCH on 3.1.1, and a PATCH in the strict sense again: the
+//  covered surface did not move. tools\ci\exports-flat.manifest and
+//  Msgcore_c.h are byte-identical to v3.1.1.
+//
+//  What the release carries is two defect fixes and a header. The fixes: a
+//  P3PmsgField constructor that threw after RenderThisSafe (DeclareItem with
+//  a name over 63 UTF-16 units) left its render aliased onto its own member,
+//  and the unwind freed it twice -- heap corruption; and ParseObjectPath
+//  overran its stack buffer on a path component of 64 or more units (found
+//  under ASan). The header is MsgFieldRef.hpp, field access by name --
+//  Field(item, L"name") = v, MSG_FIELD typed views, Child() and Attrs()
+//  anchors, short and MsgTime -- HEADER-ONLY, so it adds no export and moves
+//  no class layout. It is C++ surface, which the policy does not cover, so it
+//  informs a MINOR without compelling one; a PATCH says what changed for a
+//  consumer of the covered surface, which is nothing. Platform/p2ptypes.h
+//  gains ERROR_CONNECTION_REFUSED for the Linux build.
+//
+//  BELOW IS THE 3.1.1 RATIONALE.
 //
 //  3.1.1.0, a PATCH on 3.1.0, and a PATCH in the strict sense: the covered
 //  surface did not move at all. tools\ci\exports-flat.manifest is unchanged
@@ -96,22 +115,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  1
-#define MSGCORE_VERSION_PATCH  1
+#define MSGCORE_VERSION_PATCH  2
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,1,1,0
+#define MSGCORE_VERSION_COMMAS 3,1,2,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.1.1.0"
+#define MSGCORE_VERSION_STRING "3.1.2.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03010100 is 3.1.1.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03010100
+//  0x03010200 is 3.1.2.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03010200
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

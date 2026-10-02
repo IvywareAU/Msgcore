@@ -257,6 +257,10 @@ string(REGEX REPLACE "^.*MSGCORE_VERSION_MAJOR[ 	]+([0-9]+).*$" "\\1" _mc_ver_ma
 string(REGEX REPLACE "^.*MSGCORE_VERSION_MINOR[ 	]+([0-9]+).*$" "\\1" _mc_ver_minor "${_mc_ver_minor}")
 string(REGEX REPLACE "^.*MSGCORE_VERSION_PATCH[ 	]+([0-9]+).*$" "\\1" _mc_ver_patch "${_mc_ver_patch}")
 set(MSGCORE_VERSION "${_mc_ver_major}.${_mc_ver_minor}.${_mc_ver_patch}")
+# Read at CONFIGURE time, so a bump must re-run configure; without this an
+# existing build tree keeps advertising the old number in MsgcoreConfigVersion.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             ${CMAKE_CURRENT_SOURCE_DIR}/Msgcore_version.h)
 
 install(TARGETS msgcore EXPORT MsgcoreTargets
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}      # .dll  (Windows)
