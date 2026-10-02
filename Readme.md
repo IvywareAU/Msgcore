@@ -223,6 +223,51 @@ govern; these are the short forms.
   the base image, so every raw pointer previously handed out dangles. Re-resolve from
   the offset after any operation that can allocate.
 
+## Field access by name: `MsgFieldRef.hpp`
+
+A header-only layer over `P3PmsgItem` that turns the declare/select pair into
+assignment. It adds no export and changes no class layout, so it is part of the C++
+row above: same toolset pinning, nothing new for `check_exports.ps1` to see.
+
+```cpp
+#include "MsgFieldRef.hpp"
+
+Field ( item, L"device" ) = L"sensor-04";        // name known at run time
+Field ( item, L"pos" )[L"x"] = 1.5;              // a write creates the path
+
+struct Telemetry : MsgView                        // names known at compile time
+{
+    MSG_FIELD ( device, std::wstring );
+    MSG_FIELD ( uptime, int );
+};
+MsgViewOf<Telemetry> msg ( item );
+msg->uptime = 86400;
+int up = msg->uptime;
+```
+
+- **`msg->unknownName` is not possible in C++.** There is no hook that turns an
+  undeclared member into a lookup, so the dynamic `Field()` form exists for those names.
+- **Writes are create-or-replace, type included** (`DeclareItem(…, TRUE)`). There is
+  one `operator=` per type (`int`, `long long`, `double`, `bool`, wide text, UTF-8
+  `const char*`, `MsgBlob`) and no template, because `P3PmsgData`'s
+  `LPCSTR`/`LPCWSTR`/`const void*` overloads take a pointer of the wrong kind
+  silently. A narrow string is UTF-8 and is stored as UTF-16.
+- **Reads throw `P2Pevent*`**, as `c_int()` and `c_wstr()` do, on an absent field
+  or the wrong type. Blobs are copied out with `c_vBlobCopy`, never read through the
+  unaligned `c_vBlob()` pointer.
+- **A view member takes only its own type.** `msg->uptime = L"x"` and a field name
+  longer than 63 UTF-16 units are compile errors. The dynamic form checks the name
+  before any write, so the error names the field.
+- **Refs hold names, not items.** `SelectItem` returns the parent's *cursor* item,
+  and the next lookup on that parent retargets it, so every access re-resolves.
+- **Two codings.** `Typed` (the default) stores each type under its own tag.
+  `Bytes` stores every value as a blob in TargetFacade's field format, which is what
+  Targetcore's `AppFields()` uses. Readers accept both.
+
+Not thread-safe, like the tree under it. The worked example is
+`_Msgcore_UseExamples/DirectExamples/FieldAccessTest`, and the design record is
+`MsgFieldAccessPlan.md` at the MSCS root.
+
 ## Repository layout
 
 ```
