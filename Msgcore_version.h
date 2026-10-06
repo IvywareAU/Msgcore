@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.1.3 is tag
-//         v3.1.3. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.2.0 is tag
+//         v3.2.0. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,27 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.2.0.0, a MINOR on 3.1.3, taken by choice rather than compelled. The covered
+//  surface did not move: tools\ci\exports-flat.manifest, both
+//  exports-cxx-*.manifest files and Msgcore_c.h are byte-identical to v3.1.3,
+//  so a PATCH would have been allowed. What grew is the C++ field-access layer
+//  in MsgFieldRef.hpp, which 3.1.2's rationale below already says "informs a
+//  MINOR without compelling one": typed views now nest to any depth.
+//  MSG_NODE ( id, View ) declares a child that is a branch and
+//  MSG_FIELD_NODE ( id, type, View ) one that also holds a value, so
+//  obj->window->font->size = 11 reads and writes through one chain of ->, with
+//  a type of its own at every level. It is header-only -- no export, no class
+//  layout -- and nothing existing changed meaning; the one edit to old code
+//  lets a node be assigned from another node of the same type.
+//
+//  Taken because the number is what a C++ consumer reads first, and "3.1.3"
+//  would say nothing changed. It also gives the layer as a whole the MINOR that
+//  3.1.2 shipped it without. Code that needs nested views should test
+//  `#ifdef MSG_FIELD_NODE` rather than MSGCORE_VERSION_AT_LEAST(3,2,0): the
+//  macro names the feature, and the header can be copied without the DLL.
+//
+//  BELOW IS THE 3.1.3 RATIONALE.
 //
 //  3.1.3.0, a PATCH on 3.1.2, and strictly one: tools\ci\exports-flat.manifest,
 //  exports-cxx-x64.manifest and Msgcore_c.h are byte-identical to v3.1.2.
@@ -130,23 +151,23 @@
 //  promises - but a C++ consumer pinned to 3.0.0 has to recompile, and that is
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
-#define MSGCORE_VERSION_MINOR  1
-#define MSGCORE_VERSION_PATCH  3
+#define MSGCORE_VERSION_MINOR  2
+#define MSGCORE_VERSION_PATCH  0
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,1,3,0
+#define MSGCORE_VERSION_COMMAS 3,2,0,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.1.3.0"
+#define MSGCORE_VERSION_STRING "3.2.0.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03010300 is 3.1.3.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03010300
+//  0x03020000 is 3.2.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03020000
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"
