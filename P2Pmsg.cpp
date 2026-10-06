@@ -1964,13 +1964,17 @@ P3PmsgTime::operator = ( const P3PmsgTime& rhs )
 //  P3PmsgName object manager
 //  NOTES: Acts as VBlockName wrapper
 
+//  Defined with the other image bounds, beside P2PmsgObject_pData
+static VBLockName*
+P2PmsgObject_pNameChk ( const P3PmsgObject& oObject, VBLock *pVBLock );
+
 VBLockName*
 P3PmsgName_GetVBLockName ( P3PmsgObject *pObject, bool bIndirect = true )
 {
     VBLock      *pVBLock = ptrVBLOCK(*pObject); //pObject -> GetVBLock();
     ASSERT(VBLock_IsAlloc(pVBLock));
     //VBLockField *pField  = VBLock_pField ( pVBLock ); //TODO:LJM deprecated GetVBLockField ( );
-    VBLockName  *pName   = VBLock_pName ( pVBLock );
+    VBLockName  *pName   = P2PmsgObject_pNameChk ( *pObject, pVBLock );
     //VBLockName *pName = &GetVBLockField(bIndirect)->oVBLockName;
 
     while ( bIndirect && VBLockName_IsChained(pName) )
@@ -1978,9 +1982,9 @@ P3PmsgName_GetVBLockName ( P3PmsgObject *pObject, bool bIndirect = true )
       VBLaddr aVBLock1 = VBLockName_GetChain2Next ( pObject->m_uVBLock, pName );
       VBLock *pVBLock1 = (VBLock *)pObject-> Msg2Phys ( aVBLock1 );
    //ASSERT(pObject->m_uVBLock!=VBLock_Addr64);
-   ASSERT(VBLock_IsLinked(pVBLock1));
+      pName = P2PmsgObject_pNameChk ( *pObject, pVBLock1 );
+   ASSERT(VBLock_IsLinked(pVBLock1));  // after the bound: they read the block
    ASSERT(VBLock_IsName(pVBLock1));
-      pName = VBLock_pName ( pVBLock1 );
     }
     return pName;
 }
@@ -1997,7 +2001,7 @@ P3PmsgName_ResizeName ( P3PmsgObject *pObject, size_t nSizeof )
     {
       VBLaddr aVBLock1 = VBLockName_GetChain2Next ( uVBLock, pName0 );
       VBLock *pVBLock1 = (VBLock *)pObject-> Msg2Phys ( aVBLock1 );
-              uAttr    = VBLock_pName ( pVBLock1 ) -> uVBLockAttr;
+              uAttr    = P2PmsgObject_pNameChk ( *pObject, pVBLock1 ) -> uVBLockAttr;
       //ASSERT(uVBLock!=VBLock_Addr64); becuase following code fails on cutovers
       //uAttr = VBLock_pName ( (VBLock *)pObject->Msg2Phys(pName0->u.vBlin08.aVBLockAddr) )
       //                 -> uVBLockAttr;
@@ -2011,7 +2015,10 @@ P3PmsgName_ResizeName ( P3PmsgObject *pObject, size_t nSizeof )
     // Allocate and lock in new
     // NOTES: Alloc can invalidate pointers
     VBLaddr     aName1 = pObject -> AllocVBLock ( VBLock_Name, nSizeof );
-    pName0  = P3PmsgName_GetVBLockName ( pObject, false );
+    //  Re-derived only because Alloc may have moved the heap: the header was
+    //  bounded on entry and has been rewritten here since, mid-resize, so it
+    //  is not a header to put back through the reader's checks.
+    pName0  = VBLock_pName ( ptrVBLOCK(*pObject) );
     //pName0 -> uVBLockAttr           = 0xFF;
     //pName0 -> u.vBlin08.aVBLockAddr = aName1;
     VBLockName_SetChain2Next ( uVBLock, pName0, aName1 );
@@ -2020,7 +2027,11 @@ P3PmsgName_ResizeName ( P3PmsgObject *pObject, size_t nSizeof )
     pVBLockName1->oHdr.uVBLockDefs |= VBLock_Linked;  //TODO:LJM Added by 2/10/2013
 
     // Initialise new
-    VBLockName *pName1 = P3PmsgName_GetVBLockName ( pObject, true );
+    //  The block just allocated, named directly: its header is not written
+    //  until VBLockName_Init below, so it must not go through the bounded
+    //  reader GetVBLockName uses -- an uninitialised header is what that
+    //  refuses. It is the block the chain pointer above was set to.
+    VBLockName *pName1 = VBLock_pName ( pVBLockName1 );
 //   //pName -> u.vBlin08.nBlobSize   = (UINT08)sizeof(pName->u.vBlin08.aVBLockAddr);
 //   pName -> u.vBlin08.aVBLockAddr = OBJ__Alloc ( VBLock_Name, nSizeof );
 //   pName = GetVBLockName ( );
@@ -2344,11 +2355,11 @@ P3PmsgName::AssertValid ( ) const
       VBLock *pVBLock = (VBLock *)m_pObject-> Msg2Phys ( aVBLock );
       //VBLock *pVBLock = (VBLock *)P2PmsgHeap_Addr2Phys ( m_pObject->m_hVBList //TODO:LJM deprecated GetP2PmsgHandle()
       //                               , pName->u.vBlin08.aVBLockAddr );
+      pName = P2PmsgObject_pNameChk ( *m_pObject, pVBLock );
       if ( !VBLock_IsName(pVBLock) )
         EVERR -> Module ( __FUNCTION__ )
               -> Message("Expected indirect name reference" )
               -> Throw();
-      pName = VBLock_pName ( pVBLock );
     }
 
     // Internal sizing
@@ -2398,7 +2409,7 @@ P3PmsgName::VerifyContainment ( void *pvBlob, VBLsize nSizeofBlob ) const
     {
        const VBLaddr aChain2Next = VBLockName_GetChain2Next (pOBJ__uVBLock, pName );
        pVBLock = (VBLock *)pOBJ__Msg2Phys ( aChain2Next );
-       pName   = VBLock_pName ( pVBLock );
+       pName   = P2PmsgObject_pNameChk ( *pOBJ__, pVBLock );
        nVBLockNameMax = VBLock_Sizeof_Name ( pVBLock );
        if ( !VBLock_IsContainedVBLump(pVBLock,pName,nVBLockNameMax) )
          return FALSE;                  // VBLockName not contained within VBLock             
@@ -2436,12 +2447,12 @@ VBLock*
 P3PmsgName::GetContainerVBLock ( bool bIndirect ) const
 { 
     VBLock     *pVBLock = (VBLock *)m_pObject -> GetVBLock();
-    VBLockName *pName   = VBLock_pName ( pVBLock );
+    VBLockName *pName   = P2PmsgObject_pNameChk ( *m_pObject, pVBLock );
     while ( bIndirect && VBLockName_IsChained(pName) )
     {
       const VBLaddr aChain2Next = VBLockName_GetChain2Next (m_pObject->m_uVBLock, pName );
       pVBLock = (VBLock *)m_pObject -> Msg2Phys ( aChain2Next );
-      pName   = VBLock_pName ( pVBLock );
+      pName   = P2PmsgObject_pNameChk ( *m_pObject, pVBLock );
     }
     return pVBLock;
 }
@@ -2952,9 +2963,28 @@ static VBLaddr
 P2PmsgObject_CopyHeapVBLock ( P2PmsgHANDLE hVBList, VBLaddr aVBLock )
 {
     VBLock       *pVBLock    = (VBLock *)P2PmsgHeap_Addr2Phys ( hVBList, aVBLock );
+    const VBLsize nSizeofHdr = P2PmsgHeap_Sizeof_Hdr ( hVBList );
+    //  The memcpy below reads nVBLockSize bytes from aVBLock, and BOTH came out
+    //  of the image: the address is a chain pointer, the size is the block's own
+    //  header. Addr2Phys bounds where the block starts and nothing more, so a
+    //  block declaring more of itself than the image holds was copied out of
+    //  whatever lay past the end. Header first, because reading the size reads
+    //  it; then the block. Same two steps as P2PmsgObject_ChkVBLock, and skipped
+    //  the same way where the block is not in an image at all. Found sweeping
+    //  for F12.
+    const bool    bInImage   = pVBLock != nullptr &&
+                               P2PmsgHeap_IsPhysSpan ( hVBList, pVBLock, 1 );
+    if ( pVBLock == nullptr ||
+         ( bInImage && !P2PmsgHeap_IsPhysSpan ( hVBList, pVBLock, nSizeofHdr ) ) )
+      EVERR->MODULE
+           ->Message("Chained VBLock header leaves the image")
+           ->Throw();
     const VBLsize nVBLockSize= VBLock_Hdr_u_SizeNN ( pVBLock );
     const UCHAR   uVBLockType= pVBLock->oHdr.uVBLockDefs & VBLock_TypeMask;
-    const VBLsize nSizeofHdr = P2PmsgHeap_Sizeof_Hdr ( hVBList );
+    if ( bInImage && !P2PmsgHeap_IsPhysSpan ( hVBList, pVBLock, nVBLockSize ) )
+      EVERR->MODULE
+           ->Message("Chained VBLock of %u leaves the image", (UINT)nVBLockSize )
+           ->Throw();
     //  THE SAME UNSIGNED SUBTRACTION AS RehomeInlineItem, and a worse input:
     //  nVBLockSize is read out of the block's OWN header, so on a heap opened
     //  from an image it is attacker-shaped. Under an ASSERT the guard is in no
@@ -3047,8 +3077,11 @@ P3PmsgObject::PrivatiseInlineChain ( )
       VBLaddr aOwner = 0;
       for ( ;; )
       {
-        VBLockName *pName = VBLock_pName ( aOwner ? (VBLock *)Msg2Phys ( aOwner )
-                                                  : (VBLock *)&m_oVBLock[0] );
+        //  Bounded: past the first hop aOwner is OUR copy, but the first chain
+        //  pointer is whatever the source carried, which may be off the wire.
+        VBLockName *pName = P2PmsgObject_pNameChk ( *this
+                                                  , aOwner ? (VBLock *)Msg2Phys ( aOwner )
+                                                           : (VBLock *)&m_oVBLock[0] );
         if ( !VBLockName_IsChained ( pName ) )
           return;
         const VBLaddr aChain2Next = VBLockName_GetChain2Next ( m_uVBLock, pName );
@@ -6485,6 +6518,69 @@ P2PmsgObject_ChkVBLockData ( const P3PmsgObject& oObject, VBLock *pVBLock
            ->Throw();
 }
 
+//
+//  Resolves a block's name with the block bounded against the image and the
+//  name bounded against the block
+//  NOTES: THE NAME-SIDE TWIN OF P2PmsgObject_pData, and the name side had
+//         none. Found sweeping for F12: every name-chain walk in this file took
+//         the next address out of the name header, translated it with Msg2Phys
+//         -- which bounds where a block STARTS and nothing else -- and read the
+//         name there behind ASSERTs that Release does not compile. A receiver
+//         looks fields up by name, so that is the receive path, and the fuzz
+//         harness had never probed it.
+//       : Four checks, each for a reason the data side already learned. The
+//         block inside the image (P2PmsgObject_ChkVBLock); the name header
+//         inside the block before anything reads it; the header one this
+//         library could have written (VBLockName_ChkWellFormed -- nBlobSize 0
+//         and nBlobUsed > nBlobSize); and, unchained, the whole name inside the
+//         block, because the readers go on to read nBlobUsed units of it. A
+//         chained name's body is in the next block, which is checked when the
+//         walk gets there.
+//       : For reading an EXISTING name. Construction sites that are about to
+//         VBLockName_Init a header must keep calling VBLock_pName: an
+//         uninitialised header is exactly what ChkWellFormed refuses.
+//       : ONLY FOR A BLOCK IN AN IMAGE, the same scope P2PmsgObject_ChkVBLock
+//         keeps, and not as a courtesy: the whole-name bound is FALSE for a
+//         valid inline block. A standalone P3PmsgName renamed to 63 units
+//         holds a name longer than its inline block declares -- the first
+//         draft of this applied it everywhere and the suite's own 63-unit
+//         case was refused. Inline and SYSTEM-heap blocks are built by this
+//         process; nothing in them came off a socket.
+static VBLockName*
+P2PmsgObject_pNameChk ( const P3PmsgObject& oObject, VBLock *pVBLock )
+{
+    P2PmsgObject_ChkVBLock ( oObject, pVBLock );
+    VBLockName *pName   = VBLock_pName ( pVBLock );
+    if ( !P2PmsgHeap_IsPhysSpan ( oObject.m_hVBList, pVBLock, 1 ) )
+      return pName;
+    const UCHAR uVBLock = oObject.m_uVBLock;
+    VBLock_ChkContained ( pVBLock, pName, VBLockName_Sizeof_Min(uVBLock)
+                        , __FUNCTION__ );
+    VBLockName_ChkWellFormed ( uVBLock, pName, __FUNCTION__ );
+    if ( !VBLockName_IsChained ( pName ) )
+    {
+      VBLock_ChkContained ( pVBLock, pName
+                          , VBLockName_Sizeof_Alloc(uVBLock,pName)
+                          , __FUNCTION__ );
+      //  And TERMINATED where it says it ends. On Windows c_name() hands back a
+      //  pointer into the store itself, and c_wcscmp / c_wcsicmp -- name
+      //  lookup -- read it to a NUL, not to nBlobUsed. The write path always
+      //  puts one there, and the slot is inside the bound just checked:
+      //  Sizeof_Alloc holds nBlobSize+1 units and ChkWellFormed has held
+      //  nBlobUsed to nBlobSize. A name without it is one this library did
+      //  not write, and reading it as a string runs off the block.
+      P2PWCHAR wcEnd = 0;
+      std::memcpy ( &wcEnd, &pName->u.vBlob08.cBlob + pName->u.vBlob08.nBlobUsed
+                  , sizeof(wcEnd) );
+      if ( wcEnd != 0 )
+        EVERR->MODULE
+             ->Message("VBLockName of %u units is not terminated"
+                      , (UINT)pName->u.vBlob08.nBlobUsed )
+             ->Throw();
+    }
+    return pName;
+}
+
 VBLockData*
 P2PmsgObject_pData ( const P3PmsgObject& oObject, bool bChain )
 {
@@ -6518,22 +6614,37 @@ P2PmsgObject_Sizeof_VBLockData ( const P3PmsgObject& oObject, BOOL bChain )
 {
     const    UCHAR uVBLock = oObject.m_uVBLock;
     VBLock *pVBLock = (VBLock *)oObject.GetVBLock(); //TODO:LJM deprecated m_aData );
+    //  Every hop bounded the way P2PmsgObject_pData bounds it. This walks the
+    //  same chain, off the same wire, and sizes every value read and copy in
+    //  this file -- and had none of those checks (found sweeping for F12).
+    P2PmsgObject_ChkVBLock ( oObject, pVBLock );
     if ( VBLock_IsData(pVBLock) )      // Raw VBLockData container
     {
       VBLockData *pData = VBLock_pData ( pVBLock );
+      P2PmsgObject_ChkVBLockData ( oObject, pVBLock, pData, g_nSizeofVBLockDataHdr );
       while ( bChain && VBLockData_IsChained(pData) )
 	    {
+        P2PmsgObject_ChkVBLockData ( oObject, pVBLock, pData
+                                   , g_nSizeofVBLockDataHdr
+                                   + VBLockData_Sizeof_Chain2Next(uVBLock) );
         const VBLaddr aChain2Next = VBLockData_GetChain2Next ( uVBLock, pData );
         pVBLock = (VBLock *)oObject.Msg2Phys ( aChain2Next );
+        P2PmsgObject_ChkVBLock ( oObject, pVBLock );
         pData   = VBLock_pData ( pVBLock );
+        P2PmsgObject_ChkVBLockData ( oObject, pVBLock, pData, g_nSizeofVBLockDataHdr );
       }
       return VBLockData_Sizeof_Alloc ( pVBLock );
     }
     VBLockData *pData = VBLock_pData ( pVBLock ); ///P2PmsgObject_pData ( oObject, false );
+    P2PmsgObject_ChkVBLockData ( oObject, pVBLock, pData, g_nSizeofVBLockDataHdr );
     if ( bChain && VBLockData_IsChained(pData) )
     {
+      P2PmsgObject_ChkVBLockData ( oObject, pVBLock, pData
+                                 , g_nSizeofVBLockDataHdr
+                                 + VBLockData_Sizeof_Chain2Next(uVBLock) );
       const VBLaddr aChain2Next = VBLockData_GetChain2Next ( uVBLock, pData );
       VBLock *pVBLock1 = (VBLock *)oObject.Msg2Phys ( aChain2Next );
+      P2PmsgObject_ChkVBLock ( oObject, pVBLock1 );
       return VBLockData_Sizeof_Alloc ( pVBLock1 );
     }
     return VBLockData_Sizeof_Alloc(pVBLock);
@@ -6614,17 +6725,17 @@ P2PmsgObject_pName ( const P3PmsgObject& oObject, bool bIndirect )
     //VBLockField *pField = P2PmsgObject_pField ( OBJ__ );
     //VBLockData  *pData  = VBLockField_pData ( pField );
     VBLock     *pVBLock = (VBLock *)oObject.GetVBLock ( );
-    ASSERT(VBLock_IsAlloc(pVBLock));
-    VBLockName *pName   = VBLock_pName ( pVBLock );
+    VBLockName *pName   = P2PmsgObject_pNameChk ( oObject, pVBLock );
+    ASSERT(VBLock_IsAlloc(pVBLock));   // after the bound: it reads the block
 
     while ( bIndirect && VBLockName_IsChained(pName) )
     {
       //VBLock *pVBLock1 = (VBLock *)oObject.Msg2Phys ( pName->u.vBlin08.aVBLockAddr );
       VBLaddr aVBLock1 = VBLockName_GetChain2Next ( oObject.m_uVBLock, pName );
       VBLock *pVBLock1 = (VBLock *)oObject.Msg2Phys ( aVBLock1 );
+      pName = P2PmsgObject_pNameChk ( oObject, pVBLock1 );
       ASSERT(VBLock_IsAlloc(pVBLock1));
       ASSERT(VBLock_IsLinked(pVBLock1));
-      pName = VBLock_pName ( pVBLock1 );
     }
     return pName;
 }

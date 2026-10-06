@@ -189,6 +189,18 @@ void WalkHeap ( P2PmsgHANDLE hHeap, const uint8_t *data, size_t size )
                 }
             }
         } );
+
+        // 4a. The NAME side, which nothing here touched until the F12 sweep --
+        //     and which is why the sweep found it open: every name-chain walk
+        //     in P2Pmsg.cpp followed wire addresses behind Release-dead ASSERTs.
+        //     A receiver looks fields up by name, so this is the read it does.
+        //     c_wcsicmp reads the name as a string, to a NUL, which is the read
+        //     the terminator check in P2PmsgObject_pNameChk exists for.
+        Probe ( [&] {
+            P3PmsgField oField ( hHeap, a, sizeof(VBLock) );
+            oField.r_name ( ).c_size ( );
+            oField.r_name ( ).c_wcsicmp ( L"probe" );
+        } );
     }
 
     // 4b. MUTATION, which is where the rest of the unchecked translations live.

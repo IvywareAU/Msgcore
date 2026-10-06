@@ -1701,7 +1701,10 @@ ASSERT((uVBLock&VBLock_AddrMask)!=3||nSizeData>=10);
       {
         VBLsize      nSizeof_List  = VBLockItem_Sizeof_ut ( pVBLock );
         VBLockList  *pList         = VBLock_pList ( pVBLock );
-        VBLaddr      nAddrData     = (VBLaddr)VBLockList_pData ( uVBLock, pList );
+        //  Through VBLock_pData, as the Field arm above goes, so the owner is
+        //  handed down (F12): the result is subtracted from the block's end
+        //  below, and an unbounded one makes that an unsigned wrap.
+        VBLaddr      nAddrData     = (VBLaddr)VBLock_pData ( pVBLock );
         VBLaddr      nAddrEoField   = (VBLaddr)pList + nSizeof_List;
         //VBLaddr      nVBLockAddrEnd = nVBLockAddrBegin + nSizeof_VBLock - 1;
         VBLaddr      nSizeof_Data   = nVBLockAddrEnd - nAddrData + 1;
@@ -1713,7 +1716,7 @@ ASSERT((uVBLock&VBLock_AddrMask)!=3||nSizeof_Data>=10);
       if ( VBLockItem_IsVect(pVBLockItem) )
       {
         VBLockVect  *pVect        = VBLock_pVect ( pVBLock );
-        VBLaddr      nAddrData    = (VBLaddr)VBLockVect_pData ( uVBLock, pVect );
+        VBLaddr      nAddrData    = (VBLaddr)VBLock_pData ( pVBLock );  // as above
         VBLsize      nSizeof_Data = (VBLsize)(nVBLockAddrEnd - nAddrData + 1);
 ASSERT((uVBLock&VBLock_AddrMask)!=3||nSizeof_Data>=10);
         return nSizeof_Data;
