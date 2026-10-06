@@ -679,9 +679,13 @@ VBLock_pData ( VBLock *pVBLock )
     UCHAR uVBLock = pVBLock->oHdr.uVBLockDefs;
     if ( (uVBLock&VBLock_TypeMask) == VBLock_Data )
       return (VBLockData *)VBLock_pud(pVBLock);
-    //  The block is handed down as the owner from here: everything the two
+    //  The block is handed down as the owner from here: everything the four
     //  branches below reach is derived from ITS header, so it is the extent
     //  those derivations have to stay inside. See VBLock_ChkContained.
+    //  F12: List and Vect were left out when this went in, and a recv_image
+    //  fuzz run found the gap -- a Vect whose field sits past the image read
+    //  the name header in VBLockName_ChkWellFormed, unbounded (crash-058ba49a,
+    //  scheduled Fuzz run 37223423181, 2026-10-04).
     if ( (uVBLock&VBLock_TypeMask) == VBLock_Field )
       return VBLockField_pData ( uVBLock, VBLock_pField(pVBLock), pVBLock );
     //if ( (uVBLock&VBLock_TypeMask) == VBLock_Node )
@@ -689,9 +693,9 @@ VBLock_pData ( VBLock *pVBLock )
     if ( (uVBLock&VBLock_TypeMask) == VBLock_Item )
       return VBLockItem_pDataChk ( uVBLock, VBLock_pItem(pVBLock), pVBLock );
     if ( (uVBLock&VBLock_TypeMask) == VBLock_List )
-      return VBLockList_pData ( uVBLock, VBLock_pList(pVBLock) );
+      return VBLockList_pData ( uVBLock, VBLock_pList(pVBLock), pVBLock );
     if ( (uVBLock&VBLock_TypeMask) == VBLock_Vect )
-      return VBLockVect_pData ( uVBLock, VBLock_pVect(pVBLock) );
+      return VBLockVect_pData ( uVBLock, VBLock_pVect(pVBLock), pVBLock );
     //  No ASSERT(0) here. The block type is a byte off the wire and an unknown
     //  one is a hostile image, not a broken invariant -- and the refusal is
     //  already written, three lines down, unconditionally. Asserting first only
@@ -2692,10 +2696,10 @@ VBLockList_pName ( UCHAR uVBLock, const VBLockList *pList )
 }
 
 VBLockData*
-VBLockList_pData ( UCHAR uVBLock, const VBLockList *pList )
+VBLockList_pData ( UCHAR uVBLock, const VBLockList *pList, const VBLock *pOwner )
 {
     VBLockField *pField = VBLockList_pField ( uVBLock, pList );
-    return VBLockField_pData ( uVBLock, pField );
+    return VBLockField_pData ( uVBLock, pField, pOwner );
 }
 
 VBLsize
@@ -2868,10 +2872,10 @@ VBLockVect_pName ( UCHAR uVBLock, const VBLockVect *pVect )
 }
 
 VBLockData*
-VBLockVect_pData ( UCHAR uVBLock, const VBLockVect *pVect )
+VBLockVect_pData ( UCHAR uVBLock, const VBLockVect *pVect, const VBLock *pOwner )
 {
     VBLockField *pField = VBLockVect_pField ( uVBLock, pVect );
-    return VBLockField_pData ( uVBLock, pField );
+    return VBLockField_pData ( uVBLock, pField, pOwner );
 }
 
 VBLsize
@@ -4375,10 +4379,10 @@ VBLockItem_pDataChk ( UCHAR uVBLock, VBLockItem *pItem, const VBLock *pOwner )
       return (VBLockData *)VBLockItem_vpu ( uVBLock, pItem );
     if ( VBLockItem_IsList(pItem) )
       return VBLockList_pData ( uVBLock
-                              , VBLockItem_pList(uVBLock,pItem) );
+                              , VBLockItem_pList(uVBLock,pItem), pOwner );
     if ( VBLockItem_IsVect(pItem) )
       return VBLockVect_pData ( uVBLock
-                              , VBLockItem_pVect(uVBLock,pItem) );
+                              , VBLockItem_pVect(uVBLock,pItem), pOwner );
     VBLockItem_ThrowUnknown ( __FUNCTION__, pItem );
     return 0;
 }
