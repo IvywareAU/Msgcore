@@ -29,6 +29,10 @@
 //     msg->uptime = 86400;
 //     int up      = msg->uptime;
 //
+//     struct Window   : MsgView { MSG_FIELD_NODE ( x, int, XFields ); };
+//     struct Settings : MsgView { MSG_NODE ( window, Window ); };
+//     obj->window->x->something = "qu";              // nested views, any depth
+//
 // `msg->unknownName` cannot be made to work: C++ has no hook that turns an
 // undeclared member name into a lookup. That is what the dynamic form is for.
 // The design record is the field-access plan kept with the MSCS solution,
@@ -802,6 +806,7 @@ class MsgView
 
   private:
     template <class T> friend class MsgViewOf;
+    template <class V> friend class MsgSubView;
     MsgFieldAnchor m_oAnchor;
 };
 
@@ -886,11 +891,12 @@ class MsgTypedField
 
     // Everything else -- `msg->uptime = L"x"` -- stops here, with a sentence
     // rather than a page of overload candidates. Another field of the SAME
-    // type is excluded so that it reaches the copy below.
+    // type, or a MSG_FIELD_NODE of it, is excluded so that it reaches the
+    // copy below.
     template <class U, class D = typename std::decay<U>::type
              , class = typename std::enable_if<
                  !MsgFieldTraits<T>::template Accepts<D>::value &&
-                 !std::is_same<D, MsgTypedField>::value>::type
+                 !std::is_base_of<MsgTypedField, D>::value>::type
              , class = void>
     MsgTypedField& operator = ( U&& )
     {
@@ -929,6 +935,120 @@ class MsgTypedField
                     "MSG_FIELD(" #id "): a Msgcore name holds at most 63 "     \
                     "UTF-16 units" );                                           \
     ::MsgTypedField<type> id { this, L"" #id }
+
+// ---------------------------------------------------------------------------
+// Nested views: obj->f1->f2->f3 = v, to any depth
+//
+// A field with CHILDREN names a view of them, and its operator-> hands that
+// view out bound to the child by NAME:
+//
+//     struct XFields  : MsgView { MSG_FIELD ( something, std::wstring ); };
+//     struct Window   : MsgView { MSG_FIELD_NODE ( x, int, XFields );
+//                                 MSG_FIELD ( y, int ); };
+//     struct Settings : MsgView { MSG_NODE ( window, Window ); };
+//
+//     MsgViewOf<Settings> obj ( mgr );
+//     obj->window->x = 1240;                   // x holds a value ...
+//     obj->window->x->something = "qu";        // ... and has children too
+//
+// MSG_NODE is a child that is only a branch; MSG_FIELD_NODE is one that holds
+// a value of its own as well, with everything MSG_FIELD gives it. A child
+// view may declare nodes in turn, so the depth is whatever the structs say,
+// and each level has its own types. Every `->` adds one name to the path, and
+// the whole path is walked afresh on each read and write -- the same rule as
+// Field(...)[...], so a write creates the missing levels and a read creates
+// nothing.
+//
+// The view `->` hands out is a TEMPORARY that lives to the end of the full
+// expression. Use it in place; do not keep a reference into it:
+//
+//     auto& x = obj->window->x;                // dangles at the semicolon
+//     MsgViewOf<Window> win ( obj->window.Anchor() );   // keeps one instead
+//
+// Returned through `return { anchor }`, which constructs in place, so the
+// view never moves: its members point back at it. That needs nothing past
+// C++11.
+// ---------------------------------------------------------------------------
+template <class V>
+class MsgSubView
+{
+    static_assert ( std::is_base_of<MsgView, V>::value
+                  , "MSG_NODE: the child view must derive from MsgView" );
+  public:
+    // Not explicit: `return { anchor }` is what keeps it from being moved.
+    MsgSubView ( const MsgFieldAnchor& anchor )
+    {
+        static_cast<MsgView&>(m_oView).m_oAnchor = anchor;
+    }
+    MsgSubView             ( const MsgSubView& ) = delete;
+    MsgSubView& operator = ( const MsgSubView& ) = delete;
+
+    V* operator -> ( ) { return &m_oView; }
+    V& operator *  ( ) { return m_oView; }
+
+  private:
+    V m_oView;
+};
+
+// The branch half, shared by both macros.
+template <class V>
+class MsgNode
+{
+  public:
+    MsgNode ( const MsgView *pView, LPCWSTR lpszName )
+      : m_pView ( pView ), m_lpszName ( lpszName ) { }
+    MsgNode ( const MsgNode& ) = delete;
+    MsgNode& operator = ( const MsgNode& ) = delete;
+
+    MsgSubView<V> operator -> ( ) const { return { Anchor() }; }
+
+    // This child as an anchor, for a view that outlives the expression.
+    MsgFieldAnchor Anchor ( ) const { return Ref().Anchor(); }
+    bool Exists ( ) const { return Ref().Exists(); }
+    // Removes the child and everything under it.
+    bool Erase  ( )       { return Ref().Erase(); }
+    MsgFieldRef Ref ( ) const { return m_pView->Ref ( m_lpszName ); }
+    MsgFieldRef operator [] ( LPCWSTR lpszChild ) const { return Ref()[lpszChild]; }
+    MsgFieldRef Attr ( LPCWSTR lpszAttr ) const { return Ref().Attr ( lpszAttr ); }
+
+  private:
+    const MsgView *m_pView;
+    LPCWSTR        m_lpszName;      // a string literal, from the macro
+};
+
+// A typed field that also has children: MsgTypedField's value, MsgNode's ->.
+template <class T, class V>
+class MsgTypedNode : public MsgTypedField<T>
+{
+    typedef MsgTypedField<T> Base;
+  public:
+    MsgTypedNode ( const MsgView *pView, LPCWSTR lpszName )
+      : Base ( pView, lpszName ) { }
+
+    using Base::operator=;
+    // Node to node copies the VALUE, as field to field does; children stay.
+    MsgTypedNode& operator = ( const MsgTypedNode& rhs )
+    {
+        Base::operator= ( static_cast<const Base&>(rhs) );
+        return *this;
+    }
+
+    MsgSubView<V> operator -> ( ) const { return { Anchor() }; }
+    MsgFieldAnchor Anchor ( ) const { return this->Ref().Anchor(); }
+    MsgFieldRef operator [] ( LPCWSTR lpszChild ) const { return this->Ref()[lpszChild]; }
+};
+
+#define MSG_NODE(id, view)                                                      \
+    static_assert ( sizeof ( L"" #id ) / sizeof ( wchar_t ) - 1 <= 63,         \
+                    "MSG_NODE(" #id "): a Msgcore name holds at most 63 "      \
+                    "UTF-16 units" );                                           \
+    ::MsgNode<view> id { this, L"" #id }
+
+#define MSG_FIELD_NODE(id, type, view)                                          \
+    static_assert ( sizeof ( L"" #id ) / sizeof ( wchar_t ) - 1 <= 63,         \
+                    "MSG_FIELD_NODE(" #id "): a Msgcore name holds at most 63 "\
+                    "UTF-16 units" );                                           \
+    ::MsgTypedNode<type, view> id { this, L"" #id }
 
 template <class T>
 class MsgViewOf
