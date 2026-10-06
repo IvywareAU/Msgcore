@@ -278,6 +278,14 @@ int up = msg->uptime;
   as a path. The child is created on the first write. The anchor protects only
   itself: its lookup still moves the parent's cursor, so a `P3PmsgItem&` that
   someone else holds from `SelectItem` moves with it.
+- **Views nest to any depth.** A member that has children names a view of them:
+  `MSG_NODE ( window, Window )` is a pure branch, and `MSG_FIELD_NODE ( x, int,
+  XFields )` also holds a value. Its `->` hands out the child view, so
+  `obj->window->x = 1240;` and `obj->window->x->something = "qu";` both work, with
+  each level using its own types. Every `->` adds one name to the path, and the path
+  is walked again on each access: a write creates missing levels, and a read creates
+  nothing. The view that `->` returns is a temporary, so don't keep a reference into
+  it. For a view that lasts, use `MsgViewOf<Window> win ( obj->window.Anchor() );`.
 - **Two codings.** `Typed` (the default) stores each type under its own tag.
   `Bytes` stores every value as a blob in TargetFacade's field format, which is what
   Targetcore's `AppFields()` uses. Readers accept both.
