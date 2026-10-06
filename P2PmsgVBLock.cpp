@@ -1715,7 +1715,6 @@ ASSERT((uVBLock&VBLock_AddrMask)!=3||nSizeof_Data>=10);
       }
       if ( VBLockItem_IsVect(pVBLockItem) )
       {
-        VBLockVect  *pVect        = VBLock_pVect ( pVBLock );
         VBLaddr      nAddrData    = (VBLaddr)VBLock_pData ( pVBLock );  // as above
         VBLsize      nSizeof_Data = (VBLsize)(nVBLockAddrEnd - nAddrData + 1);
 ASSERT((uVBLock&VBLock_AddrMask)!=3||nSizeof_Data>=10);
