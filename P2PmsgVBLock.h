@@ -759,8 +759,10 @@ VBLockField*
 VBLockList_pField   ( UCHAR uVBLock, const VBLockList *pList );
 VBLockName*
 VBLockList_pName    ( UCHAR uVBLock, const VBLockList *pList );
+// pOwner as for VBLockField_pData.
 VBLockData*
-VBLockList_pData    ( UCHAR uVBLock, const VBLockList *pList );
+VBLockList_pData    ( UCHAR uVBLock, const VBLockList *pList
+                    , const VBLock *pOwner = nullptr );
 
 VBLaddr
 VBLockList_Sizeof   ( UCHAR uVBLock );
@@ -783,8 +785,10 @@ VBLockField*
 VBLockVect_pField   ( UCHAR uVBLock, const VBLockVect *pVect );
 VBLockName*
 VBLockVect_pName    ( UCHAR uVBLock, const VBLockVect *pVect );
+// pOwner as for VBLockField_pData.
 VBLockData*
-VBLockVect_pData    ( UCHAR uVBLock, const VBLockVect *pVect );
+VBLockVect_pData    ( UCHAR uVBLock, const VBLockVect *pVect
+                    , const VBLock *pOwner = nullptr );
 
 VBLsize
 VBLockVect_Sizeof   ( UCHAR uVBLock );

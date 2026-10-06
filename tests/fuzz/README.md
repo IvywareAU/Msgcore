@@ -19,7 +19,7 @@ Work directories and artifacts are **per harness**; `corpus/` is **shared**, bec
 harnesses take a raw image as their input and nothing else, so a seed means the same thing
 to each and either one's discoveries are legitimate seeds for the other.
 
-## Current state — both green again, and `recv_image` has now found four defects
+## Current state — both green again, and `recv_image` has now found five defects
 
 `iomage_load`'s first ninety-second run found **F1**; that is closed, and the harness has
 since run an hour clean on the schedule.
@@ -116,6 +116,28 @@ a second. Both are closed:
   measures the same binary twice. It read as "the fix does nothing" for one round here. Build
   with `-BuildOnly` first, then replay.
 
+- **F12** — heap-buffer-overflow in `VBLockName_ChkWellFormed`, found by the schedule on
+  2026-10-04 (run `37223423181`, `crash-058ba49a…`, 2,035 bytes). A one-byte read 36 bytes
+  past the image, from `VBLock_pData` → `VBLockVect_pData` → `VBLockField_pData`.
+
+  **A guard that was in place and not handed what it needed.** D64 bounded every derivation
+  on the receive path against the block that owns it, by threading `pOwner` down to
+  `VBLock_ChkContained` — and `ChkContained` returns at once when `pOwner` is null, because
+  the in-memory callers have no owner to pass. `VBLock_pData` passed it down its Field and
+  Item branches and not its List and Vect ones, and `VBLockItem_pDataChk` repeated the
+  omission for an Item wrapping a list or vect. So on those two paths the bound was
+  *present in the code and vacuous at runtime*, and the name header was read wherever the
+  image said it was.
+
+  Fixed by giving `VBLockList_pData` and `VBLockVect_pData` the same defaulted `pOwner` as
+  `VBLockField_pData` and passing it on all four branches. Neither is exported, so the
+  default is binary-safe for the reason the header gives for `VBLockField_pData`. The
+  reproducer replays clean in 63 ms; a 300 s run on the fixed build was clean.
+
+  **F12 has its seed but not yet a unit case** — F11's gap again, recorded the same way.
+  The two `VBLockList_pData` / `VBLockVect_pData` calls in the block-sizing code still pass
+  no owner; whether wire data reaches them has not been walked.
+
 F8 and F9 are pinned by `MsgcoreSuite::Test_ImageAddressBounds` and their reproducer replays
 clean.
 
@@ -186,6 +208,7 @@ listed and not counted:
 | `f2_walk_oob.dat` | promoted when F2 was fixed — the block-chain validator's out-of-bounds read |
 | `f8_sizeof_hdr_oob.iom` | promoted when **F8 and F9** were fixed. The address at offset 8 is the arena size exactly, which is the case a start-only bound lets through |
 | `f11_collate_nogrow.dat` | promoted when **F11** was fixed. A BSTRio image whose width is `VBLock_Addr08`, carrying a free block whose physical neighbour declares **size zero** — the input that made collation loop without advancing. The reproducer unchanged at 3,487 bytes, because minimising a *timeout* needs the pre-fix binary |
+| `f12_vect_name_oob.dat` | promoted when **F12** was fixed. An image whose Vect block's field name lies past the end of the image — the List/Vect branch of `VBLock_pData` that was walked without its owner. Unminimised, 2,035 bytes |
 
 Every one after the first two arrived the same way: it crashed something, the something was
 fixed, and the bytes stopped crashing and started seeding.
