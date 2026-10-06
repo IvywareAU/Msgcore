@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.1.2 is tag
-//         v3.1.2. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.1.3 is tag
+//         v3.1.3. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,22 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.1.3.0, a PATCH on 3.1.2, and strictly one: tools\ci\exports-flat.manifest,
+//  exports-cxx-x64.manifest and Msgcore_c.h are byte-identical to v3.1.2.
+//
+//  What it carries is three receive-path memory-safety fixes, all reachable by
+//  a peer sending a malformed frame. F12: VBLock_pData handed its owner down
+//  the Field and Item branches and not List and Vect, so the D64 bound was
+//  present and vacuous there -- a heap read past the image, found by the
+//  scheduled recv_image fuzz run. F13: no name-chain walk was bounded at all;
+//  a name chained to address 0 faulted P3PmsgName::c_size, and names were read
+//  as strings with no terminator check. P2PmsgObject_pNameChk now bounds every
+//  hop. F14: P2PmsgObject_CopyHeapVBLock memcpy'd a block whose address and
+//  length both came from the image. VBLockList_pData / VBLockVect_pData gained
+//  a defaulted owner parameter; neither is exported, so no symbol moved.
+//
+//  BELOW IS THE 3.1.2 RATIONALE.
 //
 //  3.1.2.0, a PATCH on 3.1.1, and a PATCH in the strict sense again: the
 //  covered surface did not move. tools\ci\exports-flat.manifest and
@@ -115,22 +131,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  1
-#define MSGCORE_VERSION_PATCH  2
+#define MSGCORE_VERSION_PATCH  3
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,1,2,0
+#define MSGCORE_VERSION_COMMAS 3,1,3,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.1.2.0"
+#define MSGCORE_VERSION_STRING "3.1.3.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03010200 is 3.1.2.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03010200
+//  0x03010300 is 3.1.3.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03010300
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"
