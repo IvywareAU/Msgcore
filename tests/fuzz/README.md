@@ -19,7 +19,7 @@ Work directories and artifacts are **per harness**; `corpus/` is **shared**, bec
 harnesses take a raw image as their input and nothing else, so a seed means the same thing
 to each and either one's discoveries are legitimate seeds for the other.
 
-## Current state — both green again, and `recv_image` has now found five defects
+## Current state — both green again, and `recv_image` has now found six defects
 
 `iomage_load`'s first ninety-second run found **F1**; that is closed, and the harness has
 since run an hour clean on the schedule.
@@ -134,9 +134,50 @@ a second. Both are closed:
   default is binary-safe for the reason the header gives for `VBLockField_pData`. The
   reproducer replays clean in 63 ms; a 300 s run on the fixed build was clean.
 
-  **F12 has its seed but not yet a unit case** — F11's gap again, recorded the same way.
-  The two `VBLockList_pData` / `VBLockVect_pData` calls in the block-sizing code still pass
-  no owner; whether wire data reaches them has not been walked.
+  Pinned by `MsgcoreSuite::Test_ContainerNameBounds`: a List, a Vect, and an Item wrapping
+  each, every one declaring a block that ends where its name begins. All four failed on the
+  pre-fix library and pass on the fix. The two List/Vect calls in `VBLockData_Sizeof_Alloc`
+  now go through `VBLock_pData` as its Field arm does, so they get the owner too.
+
+- **F13** — **the name side of the receive path had no bounds at all.** Found by the sweep
+  that followed F12, not by the schedule, and then *confirmed* by it: `recv_image` had never
+  read a name, so a probe was added (step 4a, `r_name().c_size()` and `c_wcsicmp`), and
+  pointed at the **pre-sweep** library it faulted inside five minutes — a name chained to
+  address 0, dereferenced by `VBLock_pName` under `P3PmsgName::c_size`
+  (`crash-bfae7e52…`, now `corpus/f13_name_chain_null.dat`).
+
+  The shape is D64's, one structure over. `P2PmsgObject_pData` bounds every hop of a data
+  chain — block in the image, lump in the block. Every **name**-chain walk in `P2Pmsg.cpp`
+  (`P3PmsgName_GetVBLockName`, `P2PmsgObject_pName`, `GetContainerVBLock`, `ResizeName`,
+  `AssertValid`, `VerifyContainment`, `PrivatiseInlineChain`) took the next address out of
+  the name header, translated it with `Msg2Phys` — which bounds where a block *starts* and
+  nothing else — and read there behind `ASSERT`s Release does not compile.
+
+  Fixed by `P2PmsgObject_pNameChk`, the name-side twin of `P2PmsgObject_pData`, on every hop:
+  the block inside the image; the name header inside the block; the header well-formed
+  (`VBLockName_ChkWellFormed`); and, unchained, the whole name inside the block **and
+  terminated at `nBlobUsed`** — on Windows `c_name()` returns a pointer into the store and
+  the comparisons read it to a NUL, not to a count. The write path always leaves that NUL,
+  inside the bound.
+
+  **Applied only to blocks in an image, and that is load-bearing.** The first draft applied
+  the whole-name bound everywhere and refused the suite's own 63-unit rename: a valid name
+  can outgrow its inline block. Construction sites that are about to `VBLockName_Init` a
+  header keep the unchecked `VBLock_pName` — two in `ResizeName` were found that way.
+  `P2PmsgObject_Sizeof_VBLockData`, which sizes every value read and copy, walked its data
+  chain with none of `P2PmsgObject_pData`'s checks either, and now has them.
+
+  Pinned by `MsgcoreSuite::Test_NameReadBounds`: a heap field's name chained to 0,
+  unterminated, and declaring more capacity than its block. On the pre-fix library the
+  first faults the runner (`0xC0000005`) and the other two fail.
+
+- **F14** — `P2PmsgObject_CopyHeapVBLock` copied a chained block with a `memcpy` whose source
+  address and length **both** came out of the image, after checking only that the length
+  could hold a header. An out-of-bounds read whose size the sender chooses, on the path that
+  copies a received value. Found by reading, during the F13 sweep; **no reproducer and no
+  unit case** — the function is `static` and reached only through a value copy of a chained
+  inline block. Now bounded header-first, then the block, the way `P2PmsgObject_ChkVBLock`
+  does it.
 
 F8 and F9 are pinned by `MsgcoreSuite::Test_ImageAddressBounds` and their reproducer replays
 clean.
@@ -209,6 +250,7 @@ listed and not counted:
 | `f8_sizeof_hdr_oob.iom` | promoted when **F8 and F9** were fixed. The address at offset 8 is the arena size exactly, which is the case a start-only bound lets through |
 | `f11_collate_nogrow.dat` | promoted when **F11** was fixed. A BSTRio image whose width is `VBLock_Addr08`, carrying a free block whose physical neighbour declares **size zero** — the input that made collation loop without advancing. The reproducer unchanged at 3,487 bytes, because minimising a *timeout* needs the pre-fix binary |
 | `f12_vect_name_oob.dat` | promoted when **F12** was fixed. An image whose Vect block's field name lies past the end of the image — the List/Vect branch of `VBLock_pData` that was walked without its owner. Unminimised, 2,035 bytes |
+| `f13_name_chain_null.dat` | promoted when **F13** was fixed. Found by the name probe (step 4a) against the pre-sweep library: a name chained to address 0. The only seed that exercises the name side |
 
 Every one after the first two arrived the same way: it crashed something, the something was
 fixed, and the bytes stopped crashing and started seeding.

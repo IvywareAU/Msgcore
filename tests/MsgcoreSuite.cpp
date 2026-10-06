@@ -5689,6 +5689,179 @@ static void Test_ImageAddressBounds()
 #endif
 
 // ---------------------------------------------------------------------------
+// F12: a List or Vect block's field name, declared outside the block.
+//
+// D64 bounds every derivation VBLock_pData makes against the block it was read
+// out of, by handing that block down as pOwner to VBLock_ChkContained -- which
+// returns at once when pOwner is null, because in-memory callers have none. The
+// Field and Item branches handed it down; List and Vect did not, nor did
+// VBLockItem_pDataChk for an item wrapping either. On those four paths the
+// bound was in the code and vacuous at runtime. Found by the scheduled Fuzz run
+// 37223423181 (recv_image), a one-byte read 36 bytes past a 2,035-byte image.
+//
+// The cases build each shape in a buffer far larger than the block, so the name
+// is always readable memory and nothing here depends on ASan: what is checked is
+// the REFUSAL. The block declares a size that ends exactly where its name
+// begins. Before the fix every one of these resolved that name and returned a
+// data pointer; after it, every one refuses. The same block declaring room for
+// its name must still resolve -- the bound is not allowed to become a blanket
+// refusal.
+//
+// STATIC LINK ONLY, for the reason Test_ImageAddressBounds gives: VBLock_pData
+// is not on the DLL's exported surface.
+#ifdef Msgcore_STATIC
+static void Test_ContainerNameBounds()
+{
+    auto rejects = []( auto fn ) -> bool {
+        try { fn(); return false; }
+        catch ( P2Pevent* pEVT ) { if ( pEVT ) pEVT->Cancel(false); return true; }
+    };
+
+    // uBlockType is the block's own type; uItemType is what an Item block wraps
+    // and is ignored otherwise.
+    auto check = [&]( UCHAR uBlockType, UCHAR uItemType )
+    {
+        alignas(8) unsigned char aBuf[512];
+        std::memset ( aBuf, 0, sizeof(aBuf) );
+        VBLock *pBlock = (VBLock *)aBuf;
+        VBLock_Init ( pBlock, VBLock_Addr32 | uBlockType, sizeof(aBuf) );
+        if ( uBlockType == VBLock_Item )
+          VBLock_pItem ( pBlock )->uItemType = uItemType;
+
+        // A well-formed unchained name: four units of capacity, none used.
+        VBLockName *pName = VBLock_pName ( pBlock );
+        TF_CHECK(pName != nullptr);
+        if ( !pName ) return;
+        pName->uVBLockAttr         = 0;
+        pName->u.vBlob08.nBlobSize = 4;
+        pName->u.vBlob08.nBlobUsed = 0;
+
+        VBLockData *pData = nullptr;
+        TF_CHECK(!rejects([&]{ pData = VBLock_pData ( pBlock ); }));
+        TF_CHECK(pData != nullptr);
+
+        // Now the block ends where its name begins.
+        pBlock->oHdr.u.nSize32 = (UINT32)((unsigned char *)pName - aBuf);
+        TF_CHECK(rejects([&]{ VBLock_pData ( pBlock ); }));
+    };
+
+    TF_CASE("a List block's name outside the block is refused (F12)")
+    {
+        check ( VBLock_List, 0 );
+    }
+    TF_CASE("a Vect block's name outside the block is refused (F12)")
+    {
+        check ( VBLock_Vect, 0 );
+    }
+    TF_CASE("an Item wrapping a List, name outside the block, is refused (F12)")
+    {
+        check ( VBLock_Item, VBLock_List );
+    }
+    TF_CASE("an Item wrapping a Vect, name outside the block, is refused (F12)")
+    {
+        check ( VBLock_Item, VBLock_Vect );
+    }
+    TF_CASE("an Item wrapping a Field, name outside the block, is refused (D64)")
+    {
+        // The branch D64 did cover, pinned alongside so the five stay together.
+        check ( VBLock_Item, VBLock_Field );
+    }
+}
+#else
+static void Test_ContainerNameBounds()
+{
+    TF_CASE("container name bounds (F12) -- static link only, VBLock_pData is not exported")
+    {
+        TF_CHECK(true);
+    }
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// The NAME side of the receive path, found sweeping for F12.
+//
+// Every name-chain walk in P2Pmsg.cpp took the next address out of the name
+// header and read the name there behind ASSERTs Release does not compile. With
+// a name probe added to fuzz_recv_image it took under five minutes to fault the
+// pre-sweep library: a chain to address 0, dereferenced in VBLock_pName from
+// P3PmsgName::c_size. P2PmsgObject_pNameChk now bounds every hop.
+//
+// These cases take a real field on a real heap -- so its block is in an image,
+// the scope the checks apply to -- corrupt its name header IN PLACE the way a
+// frame would arrive, and read the name back through the public surface. Each
+// restores the header after, and the last case proves the restored name still
+// reads: the guard must not have become a blanket refusal.
+//
+// The chain-to-zero case faulted rather than failed before the fix; the other
+// two returned normally, reading past the name.
+//
+// STATIC LINK ONLY: VBLock_pName and VBLockName_SetChain2Next are not exported.
+#ifdef Msgcore_STATIC
+static void Test_NameReadBounds()
+{
+    auto rejects = []( auto fn ) -> bool {
+        try { fn(); return false; }
+        catch ( P2Pevent* pEVT ) { if ( pEVT ) pEVT->Cancel(false); return true; }
+    };
+
+    P2PmsgMgr mgr(VBLock_Addr32, 2048, 1u << 20);
+    mgr.r_Desc(P3PmsgField::AttrCMD_Create);
+    mgr.r_Desc() += P3PmsgField(L"AAA", P3PmsgData((int)1));
+    P3PmsgField oHnd = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+
+    VBLockName *pName = VBLock_pName ( (VBLock *)oHnd.r_Object().GetVBLock() );
+    unsigned char aSaved[16];
+    std::memcpy ( aSaved, pName, sizeof(aSaved) );
+    auto restore = [&]{ std::memcpy ( pName, aSaved, sizeof(aSaved) ); };
+
+    TF_CASE("a heap field's name reads before anything is corrupted")
+    {
+        TF_CHECK(!rejects([&]{ oHnd.r_name().c_size(); }));
+        TF_CHECK(oHnd.r_name().c_wcsicmp(L"AAA") == 0);
+    }
+
+    TF_CASE("a name chained to address 0 is refused, not dereferenced")
+    {
+        VBLockName_SetChain2Next ( VBLock_Addr32, pName, 0 );
+        TF_CHECK(rejects([&]{ oHnd.r_name().c_size(); }));
+        restore();
+    }
+
+    TF_CASE("a name with no terminator where it says it ends is refused")
+    {
+        // c_name() hands back a pointer into the store on Windows and the
+        // comparisons read it to a NUL, so a missing NUL reads off the block.
+        const P2PWCHAR wcX = L'X';
+        std::memcpy ( &pName->u.vBlob08.cBlob + pName->u.vBlob08.nBlobUsed
+                    , &wcX, sizeof(wcX) );
+        TF_CHECK(rejects([&]{ oHnd.r_name().c_wcsicmp(L"AAA"); }));
+        restore();
+    }
+
+    TF_CASE("a name declaring more capacity than its block holds is refused")
+    {
+        pName->u.vBlob08.nBlobSize = 120;   // 240 bytes, in a block of a few dozen
+        TF_CHECK(rejects([&]{ oHnd.r_name().c_size(); }));
+        restore();
+    }
+
+    TF_CASE("the restored name still reads -- the bound is not a blanket refusal")
+    {
+        TF_CHECK(!rejects([&]{ oHnd.r_name().c_size(); }));
+        TF_CHECK(oHnd.r_name().c_wcsicmp(L"AAA") == 0);
+    }
+}
+#else
+static void Test_NameReadBounds()
+{
+    TF_CASE("name read bounds -- static link only, VBLock_pName is not exported")
+    {
+        TF_CHECK(true);
+    }
+}
+#endif
+
+// ---------------------------------------------------------------------------
 // The untrusted BSTRio load path must REFUSE without ASSERTING.
 //
 // P2PmsgHeap_CreateBSTRio(pBSTRio,nBufferLen) opens a P2PmsgHeap_UntrustedGate
@@ -6876,6 +7049,8 @@ void RunMsgcoreSuite()
     Test_IOmageEndianSentinel();
     Test_IOmageLayoutGeneration();
     Test_ImageAddressBounds();
+    Test_ContainerNameBounds();
+    Test_NameReadBounds();
     Test_UntrustedBSTRioGate();
     Test_IsValidAllocIsPure();
     Test_BSTRioValidatorContract();
