@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.2.0 is tag
-//         v3.2.0. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.2.1 is tag
+//         v3.2.1. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,21 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.2.1.0, a PATCH on 3.2.0, and strictly one: tools\ci\exports-flat.manifest,
+//  both exports-cxx-*.manifest files and Msgcore_c.h are byte-identical to
+//  v3.2.0, and no class layout moved.
+//
+//  It carries one fix to heap accounting on the receive path. A heap rebuilt
+//  from a wire image counted the image's free bytes as used, so the first
+//  allocation into a received message -- a reply or relay that adds to it --
+//  overran the guard in P2PmsgHeap_pIOmage. In Debug that is an ASSERT box,
+//  and it is what hung TargetFacade's FacadeSmokeTest on a declined broadcast;
+//  in Release the guard is compiled out and the only effect was a high
+//  nSizeofUsed against the nSizeofMax early check. Pinned by MsgcoreSuite
+//  Test_ReceivedImageReserialises.
+//
+//  BELOW IS THE 3.2.0 RATIONALE.
 //
 //  3.2.0.0, a MINOR on 3.1.3, taken by choice rather than compelled. The covered
 //  surface did not move: tools\ci\exports-flat.manifest, both
@@ -152,22 +167,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  2
-#define MSGCORE_VERSION_PATCH  0
+#define MSGCORE_VERSION_PATCH  1
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,2,0,0
+#define MSGCORE_VERSION_COMMAS 3,2,1,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.2.0.0"
+#define MSGCORE_VERSION_STRING "3.2.1.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03020000 is 3.2.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03020000
+//  0x03020100 is 3.2.1.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03020100
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"
