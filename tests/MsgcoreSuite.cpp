@@ -6981,6 +6981,59 @@ static void Test_HeapGrowthMovesTheBase()
     P2PmsgHeap_Close ( hHeap );
 }
 
+// ---------------------------------------------------------------------------
+static void Test_ReceivedImageReserialises()
+{
+    //  A message rebuilt from a wire image, changed, and serialised again --
+    //  the shape of every reply built on a received message, and the one
+    //  Targetcore's ExceptionFactory takes for a declined broadcast
+    //  (WrappedResponseFactory copies the received message's image into the
+    //  exception). In Debug that opened the ASSERT box in P2PmsgHeap_pIOmage
+    //  that hung TargetFacade's FacadeSmokeTest at shutdown.
+    //
+    //  The cause was accounting, not memory. A fresh heap's image is its whole
+    //  arena, free tail included, and CreateIOMAGE(VBListIOmage*) set
+    //  nSizeofUsed to the image size less the sync word -- counting every free
+    //  byte as used. The first allocation into that free space then pushed
+    //  nSizeofUsed past what uHiWM (unchanged, the block was inside the image)
+    //  could hold, and the overflow guard fired on a heap that was fine.
+    char    *pWire = nullptr;
+    VBLsize  nWire = 0;
+    {
+        P3PmsgBSTR oSent ( VBLock_Addr32, 2048 );
+        oSent.InitItem ( VBLockBSTR_MSG, P3PmsgData ( (int)7 ) );
+        oSent.PrepareP2Piomage ( ~(DWORD)0 );
+        nWire = oSent.P2PiomageSize ( );
+        pWire = new char [ nWire ];
+        memcpy ( pWire, oSent.P2Piomage ( ), nWire );
+        oSent.ReleaseP2Piomage ( );
+    }
+
+    TF_CASE("a received message that grows into its free space serialises again")
+    {
+        P3PmsgBSTR oRecv ( *(const VBListIOmage *)pWire, nWire );
+        TF_CHECK ( oRecv.Exists ( VBLockBSTR_MSG ) );
+
+        //  Allocates inside the received image -- the free tail the sender's
+        //  arena carried -- so uHiWM does not move.
+        oRecv.InitItem ( VBLockBSTR_EVT, P3PmsgData ( (int)9 ) );
+
+        oRecv.PrepareP2Piomage ( ~(DWORD)0 );
+        const VBLsize nAgain = oRecv.P2PiomageSize ( );
+        char *pAgain = new char [ nAgain ];
+        memcpy ( pAgain, oRecv.P2Piomage ( ), nAgain );
+        oRecv.ReleaseP2Piomage ( );
+
+        //  And the next hop reads both items back.
+        P3PmsgBSTR oNext ( *(const VBListIOmage *)pAgain, nAgain );
+        TF_CHECK ( oNext.Exists ( VBLockBSTR_MSG ) );
+        TF_CHECK ( oNext.Exists ( VBLockBSTR_EVT ) );
+        delete [] pAgain;
+    }
+
+    delete [] pWire;
+}
+
 #else   // !Msgcore_STATIC -- announce the skip rather than vanish
 
 static void Test_Blob16CapacityNeverExceedsRoom()
@@ -6994,6 +7047,14 @@ static void Test_Blob16CapacityNeverExceedsRoom()
 static void Test_HeapGrowthMovesTheBase()
 {
     TF_CASE("heap growth invalidation -- static link only, heap API is not exported")
+    {
+        TF_CHECK(true);
+    }
+}
+
+static void Test_ReceivedImageReserialises()
+{
+    TF_CASE("received image re-serialisation -- static link only, heap API is not exported")
     {
         TF_CHECK(true);
     }
@@ -7056,4 +7117,5 @@ void RunMsgcoreSuite()
     Test_BSTRioValidatorContract();
     Test_Blob16CapacityNeverExceedsRoom();
     Test_HeapGrowthMovesTheBase();
+    Test_ReceivedImageReserialises();
 }
