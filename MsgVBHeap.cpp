@@ -3350,6 +3350,18 @@ P2PmsgHeap_CreateIOMAGE ( VBListIOmage *pIOmage )
     pHandle -> u.IOMAGE.aIOmage = (VBLaddr)pHandle -> u.IOMAGE.pIOmage;
     pHandle -> u.IOMAGE.pRoot   = (VBHeapRoot *)&pHandle->u.IOMAGE.pIOMAGE->oRoot;
 
+    // nSizeofUsed is live bytes, so the image's FREE bytes come off it. An image
+    // is its sender's whole arena, free tail included, and counting that tail as
+    // used made the first allocation into it -- any reply or relay built on a
+    // received message -- overrun the P2PmsgHeap_pIOmage guard against a uHiWM
+    // that had not moved: the declined-broadcast ASSERT behind FacadeSmokeTest's
+    // Debug hang. The figure is the root's, which the length-validated overload
+    // checks against a real free-list walk before the heap is used; clamped so a
+    // forged one cannot wrap the subtraction on the single-argument path.
+    const VBLsize nSizeofFree = VBHeapRoot_GetFreeSize ( pHandle->u.IOMAGE.pRoot );
+    if ( nSizeofFree <= pHandle->nSizeofUsed )
+      pHandle -> nSizeofUsed -= nSizeofFree;
+
     // Tidy up, and
     //  NOT inside a gate. When the length-validated overload above delegates
     //  here it is about to run both of these for real and act on the answer, so
@@ -3981,7 +3993,9 @@ P2PmsgHeap_pIOmage ( P2PmsgHANDLE hVBList )
 // form (nSizeofUsed+sizeof(VBHeapIOMAGE)-1 <= uHiWM) therefore failed for EVERY reconstructed
 // message re-serialised for another hop (multi-hop P2PeerHub::RouteP2PeerMsg forwarding) or reply
 // (ResponseFactory on a received message), where it reduced to sizeof(VBHeapIOMAGE) <= 9. This
-// form holds with equality on that path and is implied by the previous form on fresh heaps.
+// form is implied by the previous form on fresh heaps. On the reconstructed path it held with
+// equality only until something was allocated into the image's free space; CreateIOMAGE now takes
+// the free bytes off nSizeofUsed, so such an allocation moves the two figures together.
 ASSERT(pHandle->nSizeofUsed+sizeof(pIOmage->oSync)<=pHandle -> u.IOMAGE.uHiWM);
     // Synchronisation header
     // NOTES: VBLock_SyncMake stamps the endian sentinel into bits 2-7 of the
