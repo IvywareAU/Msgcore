@@ -299,6 +299,110 @@ int up = msg->uptime;
   `Bytes` stores every value as a blob in TargetFacade's field format, which is what
   Targetcore's `AppFields()` uses. Readers accept both.
 
+### Examples
+
+**By name, at run time.** `Field()` takes any `P3PmsgItem`, a `P2PmsgMgr` included.
+`[]` steps to a child, and a write creates every missing level.
+
+```cpp
+#include "P2PmsgMgr.h"
+#include "MsgFieldRef.hpp"
+
+P2PmsgMgr mgr;
+mgr.r_name() = L"Store";
+
+Field ( mgr, L"device" )    = L"sensor-04";            // .Store.device, UTF-16 text
+Field ( mgr, L"uptime" )    = 86400;                   // INT32
+Field ( mgr, L"pos" )[L"x"] = 1.5;                     // .Store.pos.x, creates pos
+Field ( mgr, L"pos" )[L"y"] = 2.5;
+
+std::wstring dev = Field ( mgr, L"device" ).AsText ();
+int          up  = Field ( mgr, L"uptime" ).AsInt ();
+double       x   = Field ( mgr, L"pos" )[L"x"].AsReal ();
+
+bool b = Field ( mgr, L"missing" ).Exists ();          // false, and nothing is created
+Field ( mgr, L"uptime" ).Erase ();
+```
+
+**By member, at compile time.** A view declares the names and their types once, so a
+misspelt name or a value of the wrong type does not compile.
+
+```cpp
+struct Pos       : MsgView { MSG_FIELD ( x, double );
+                             MSG_FIELD ( y, double ); };
+struct Telemetry : MsgView
+{
+    MSG_FIELD      ( device, std::wstring );
+    MSG_FIELD      ( uptime, int );
+    MSG_NODE       ( pos, Pos );                       // a branch: children, no value
+    MSG_FIELD_NODE ( battery, double, Pos );           // a value and children
+};
+
+MsgViewOf<Telemetry> msg ( mgr );
+msg->device     = L"sensor-04";                        // .Store.device
+msg->uptime     = 86400;
+msg->pos->x     = 1.5;                                 // .Store.pos.x
+msg->battery    = 3.7;                                 // .Store.battery
+msg->battery->x = 0.5;                                 // .Store.battery.x
+
+int  up = msg->uptime;                                 // reads convert to the type
+bool b  = msg->uptime.Exists ();
+// msg->uptime = L"x";                                 // compile error: not an int
+
+MsgViewOf<Pos> pos ( msg->pos.Anchor () );             // a view that outlives the statement
+pos->y = 2.5;                                          // .Store.pos.y
+```
+
+Both forms address the same tree, so `Field ( mgr, L"pos" )[L"y"].AsReal ()` reads
+the `2.5` written through `pos->y`.
+
+**Attributes, by name.** `L"Unit"_attr` is a C++11 user-defined literal:
+`MsgLiterals::operator""_attr` makes the string a `MsgAttrName`, and `[]` given a
+`MsgAttrName` steps to the `@` side instead of the children.
+
+```cpp
+using namespace MsgLiterals;
+
+Field ( mgr, L"Temperature" )                          = 21.5;       // .Store.Temperature
+Field ( mgr, L"Temperature" )[L"Reading"]              = 21.5;       // .Temperature.Reading
+Field ( mgr, L"Temperature" )[L"Unit"_attr]            = L"Celsius"; // .Temperature@Unit
+Field ( mgr, L"Temperature" )[L"Unit"_attr][L"SI"]     = L"kelvin";  // @Unit.SI
+Field ( mgr, L"Temperature" )[L"Sensor"_attr]          = 7;          // @Sensor, INT32
+
+int n = Field ( mgr, L"Temperature" )[L"Sensor"_attr].AsInt ();     // 7
+Field ( mgr, L"Temperature" ).Attr ( L"Sensor" ) = 9;                // the same step, spelled out
+
+P3PmsgField temp ( L"Temperature", P3PmsgData ( 21.5 ) );
+Field ( temp, L"Unit"_attr ) = L"Celsius";                          // temp's own @Unit
+std::wstring strName = L"Sensor";
+Field ( temp, MsgAttrName ( strName.c_str () ) ) = 7;               // a name chosen at run time
+```
+
+**Attributes, by member.** The `_ATTRS` macros add `Attrs()`, a typed view of the
+member's `@` side.
+
+```cpp
+struct TempAttrs : MsgView { MSG_FIELD ( Unit,   std::wstring );
+                             MSG_FIELD ( Sensor, int ); };       // the @ side
+struct TempDesc  : MsgView { MSG_FIELD ( Reading, double ); };   // the . side
+struct Station   : MsgView { MSG_FIELD_NODE_ATTRS ( Temperature, double,
+                                                    TempDesc, TempAttrs ); };
+
+MsgViewOf<Station> s ( mgr );
+s->Temperature                  = 21.5;                // .Store.Temperature
+s->Temperature->Reading         = 21.5;                // .Temperature.Reading
+s->Temperature.Attrs()->Unit    = L"Celsius";          // .Temperature@Unit
+s->Temperature.Attrs()->Sensor  = 7;                   // .Temperature@Sensor
+
+int n = s->Temperature.Attrs()->Sensor;                // 7
+s->Temperature.Attrs()->Sensor.Erase ();
+```
+
+`MSG_FIELD_ATTRS ( id, type, AttrView )` and `MSG_NODE_ATTRS ( id, View, AttrView )`
+do the same for a plain field and for a branch. Either form leaves a path the tree
+already understands: `mgr.RootPath2Object ( L".Store.Temperature@Unit" )` finds the
+attribute written above.
+
 Not thread-safe, like the tree under it. The worked example is
 `_Msgcore_UseExamples/DirectExamples/FieldAccessTest`;
 `_Msgcore_UseExamples/FieldAccessExamples` applies the layer to all eight Msgcore
