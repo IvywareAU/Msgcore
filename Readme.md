@@ -260,6 +260,15 @@ int up = msg->uptime;
   ( item ) )` gives a view of an item's attributes, and `msg->total.Attr(L"x")` /
   `msg.Attr(L"x")` work from a view. The first write creates the attribute set; a read
   creates nothing.
+- **Attribute syntax in both forms.** Dynamic: with `using namespace MsgLiterals;`,
+  `Field(mgr, L"Temperature")[L"Unit"_attr] = L"Celsius"` is the `@Unit` of a path, and
+  a plain `[L"x"]` stays a descendant, so one subscript chain walks both trees.
+  `Field(item, L"Unit"_attr)` is an attribute of the item itself. Static:
+  `MSG_FIELD_ATTRS ( id, type, AttrView )`, `MSG_NODE_ATTRS ( id, View, AttrView )` and
+  `MSG_FIELD_NODE_ATTRS ( id, type, View, AttrView )` add `Attrs()`, so
+  `s->Temperature.Attrs()->Unit = L"Celsius"` is typed and checked at compile time like
+  any `MSG_FIELD`. An `_attr` name's 63-unit cap is checked on the write, since C++17
+  cannot `static_assert` on a literal operator's length.
 - **Each reader wants its own type.** `AsShort`, `AsInt`, `AsInt64`, `AsReal`,
   `AsBool`, `AsTime`, `AsText` and `AsBlob` neither widen nor narrow, so `AsInt64()`
   refuses a TIME64 cell even though `c_time64()` reads both 64-bit tags.

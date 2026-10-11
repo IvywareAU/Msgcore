@@ -33,6 +33,11 @@
 //     struct Settings : MsgView { MSG_NODE ( window, Window ); };
 //     obj->window->x->something = "qu";              // nested views, any depth
 //
+// ATTRIBUTES (r_Attr, the '@' of a path) in both forms:
+//
+//     Field ( mgr, L"Temperature" )[L"Unit"_attr] = L"Celsius";   // MsgLiterals
+//     s->Temperature.Attrs()->Unit = L"Celsius";      // MSG_*_ATTRS members
+//
 // `msg->unknownName` cannot be made to work: C++ has no hook that turns an
 // undeclared member name into a lookup. That is what the dynamic form is for.
 // The design record is the field-access plan kept with the MSCS solution,
@@ -392,6 +397,40 @@ struct MsgFieldAnchor
 };
 
 // ---------------------------------------------------------------------------
+// MsgAttrName and the _attr literal -- an ATTRIBUTE name, as a subscript
+//
+//     using namespace MsgLiterals;
+//     Field ( mgr, L"Temperature" )[L"Unit"_attr] = L"Celsius";   // @Unit
+//     Field ( mgr, L"Temperature" )[L"Unit"_attr][L"SI"] = L"kelvin";
+//     Field ( temp, L"Sensor"_attr ) = 7;          // an attribute of temp itself
+//
+// A plain wide string in [] is a DESCENDANT, a MsgAttrName is an ATTRIBUTE, so
+// one subscript chain walks both trees the way a path's '.' and '@' do. It is
+// the same step as Attr(): `[L"x"_attr]` and `.Attr(L"x")` are one call.
+//
+// A name, not a string: it does not convert from or to LPCWSTR, so `[L"x"]`
+// can never pick it up by accident. For a name chosen at run time, say so:
+// `[MsgAttrName ( str.c_str() )]`. Not owning -- every ref copies the name
+// out on the spot, so a temporary string's c_str() is fine there.
+//
+// The 63-unit cap is checked on the write, like any dynamic name: a string-
+// literal operator receives its length as a FUNCTION ARGUMENT, which no
+// static_assert can read before C++20, and C++17 is the floor here.
+// ---------------------------------------------------------------------------
+struct MsgAttrName
+{
+    explicit MsgAttrName ( LPCWSTR lpsz ) : lpszName ( lpsz ) { }
+    LPCWSTR lpszName;
+};
+
+namespace MsgLiterals {
+inline MsgAttrName operator""_attr ( const wchar_t *lpsz, size_t )
+{
+    return MsgAttrName ( lpsz );
+}
+} // namespace MsgLiterals
+
+// ---------------------------------------------------------------------------
 // MsgFieldRef -- one named field, written on operator=, read on As*()
 // ---------------------------------------------------------------------------
 class MsgFieldRef
@@ -608,6 +647,11 @@ class MsgFieldRef
     {
         return Step ( lpszAttr, true );
     }
+    // The same, as a subscript: `Field(o, L"total")[L"currency"_attr]`.
+    MsgFieldRef operator [] ( MsgAttrName attr ) const
+    {
+        return Step ( attr.lpszName, true );
+    }
 
     // This field as an ANCHOR, for a view of its children:
     //     MsgViewOf<Pos> pos ( Field ( oRoot, L"body" )[L"pos"].Anchor() );
@@ -775,6 +819,16 @@ inline MsgFieldRef Field ( const MsgFieldAnchor& anchor, LPCWSTR lpszName )
 {
     return MsgFieldRef ( anchor, lpszName );
 }
+// An ATTRIBUTE of the item itself: `Field ( temp, L"Unit"_attr )` is
+// temp.r_Attr()[L"Unit"], the set created on the first write.
+inline MsgFieldRef Field ( P3PmsgItem& item, MsgAttrName attr )
+{
+    return MsgFieldRef ( MsgFieldAnchor::Attrs ( item ), attr.lpszName );
+}
+inline MsgFieldRef Field ( const MsgFieldAnchor& anchor, MsgAttrName attr )
+{
+    return MsgFieldRef ( MsgFieldAnchor::Attrs ( anchor ), attr.lpszName );
+}
 
 // ---------------------------------------------------------------------------
 // Typed views
@@ -803,6 +857,7 @@ class MsgView
     {
         return MsgFieldRef ( MsgFieldAnchor::Attrs ( m_oAnchor ), lpszName );
     }
+    MsgFieldRef operator [] ( MsgAttrName attr ) const { return Attr ( attr.lpszName ); }
 
   private:
     template <class T> friend class MsgViewOf;
@@ -920,6 +975,8 @@ class MsgTypedField
     MsgFieldRef Ref ( ) const { return m_pView->Ref ( m_lpszName ); }
     // An attribute of THIS field: msg->Total.Attr(L"currency") = L"AUD".
     MsgFieldRef Attr ( LPCWSTR lpszAttr ) const { return Ref().Attr ( lpszAttr ); }
+    // The same, as a subscript: msg->Total[L"currency"_attr] = L"AUD".
+    MsgFieldRef operator [] ( MsgAttrName attr ) const { return Ref()[attr]; }
 
   private:
     const MsgView *m_pView;
@@ -1009,6 +1066,7 @@ class MsgNode
     bool Erase  ( )       { return Ref().Erase(); }
     MsgFieldRef Ref ( ) const { return m_pView->Ref ( m_lpszName ); }
     MsgFieldRef operator [] ( LPCWSTR lpszChild ) const { return Ref()[lpszChild]; }
+    MsgFieldRef operator [] ( MsgAttrName attr ) const  { return Ref()[attr]; }
     MsgFieldRef Attr ( LPCWSTR lpszAttr ) const { return Ref().Attr ( lpszAttr ); }
 
   private:
@@ -1036,6 +1094,7 @@ class MsgTypedNode : public MsgTypedField<T>
     MsgSubView<V> operator -> ( ) const { return { Anchor() }; }
     MsgFieldAnchor Anchor ( ) const { return this->Ref().Anchor(); }
     MsgFieldRef operator [] ( LPCWSTR lpszChild ) const { return this->Ref()[lpszChild]; }
+    using Base::operator[];                     // [MsgAttrName], hidden by the line above
 };
 
 #define MSG_NODE(id, view)                                                      \
@@ -1049,6 +1108,108 @@ class MsgTypedNode : public MsgTypedField<T>
                     "MSG_FIELD_NODE(" #id "): a Msgcore name holds at most 63 "\
                     "UTF-16 units" );                                           \
     ::MsgTypedNode<type, view> id { this, L"" #id }
+
+// ---------------------------------------------------------------------------
+// Typed attributes: obj->f.Attrs()->a = v
+//
+// A member's ATTRIBUTES named by a view of their own, beside (not inside)
+// whatever its -> reaches:
+//
+//     struct UnitParts : MsgView { MSG_FIELD ( Symbol, std::wstring ); };
+//     struct TempAttrs : MsgView { MSG_FIELD_NODE ( Unit, std::wstring, UnitParts );
+//                                  MSG_FIELD ( Sensor, int ); };
+//     struct TempDesc  : MsgView { MSG_FIELD ( Reading, double ); };
+//     struct Store     : MsgView
+//     {   MSG_FIELD_NODE_ATTRS ( Temperature, double, TempDesc, TempAttrs ); };
+//
+//     s->Temperature = 21.5;                          // .Store.Temperature
+//     s->Temperature->Reading = 21.5;                 // .Temperature.Reading
+//     s->Temperature.Attrs()->Unit = L"Celsius";      // .Temperature@Unit
+//     s->Temperature.Attrs()->Unit->Symbol = L"°C";   // @Unit.Symbol
+//
+// `->` is already the descendants, and a field has two separate sets of named
+// children, so the attributes take a word of their own -- the split the
+// '.' / '@' path grammar makes, kept visible in the code. Each _ATTRS macro is
+// its plain twin plus Attrs():
+//
+//     MSG_FIELD_ATTRS      ( id, type, attrs )          a value
+//     MSG_NODE_ATTRS       ( id, view, attrs )          children
+//     MSG_FIELD_NODE_ATTRS ( id, type, view, attrs )    a value and children
+//
+// Attrs() returns a temporary view, as -> does: use it in place. To keep one,
+// MsgViewOf<TempAttrs> a ( MsgFieldAnchor::Attrs ( s->Temperature.Anchor() ) ).
+// A read creates nothing; a write creates the member and its attribute set.
+// ---------------------------------------------------------------------------
+template <class T, class A>
+class MsgTypedFieldAttrs : public MsgTypedField<T>
+{
+    static_assert ( std::is_base_of<MsgView, A>::value
+                  , "MSG_FIELD_ATTRS: the attribute view must derive from MsgView" );
+    typedef MsgTypedField<T> Base;
+  public:
+    MsgTypedFieldAttrs ( const MsgView *pView, LPCWSTR lpszName )
+      : Base ( pView, lpszName ) { }
+
+    using Base::operator=;
+    MsgTypedFieldAttrs& operator = ( const MsgTypedFieldAttrs& rhs )
+    {
+        Base::operator= ( static_cast<const Base&>(rhs) );
+        return *this;
+    }
+
+    MsgSubView<A>  Attrs  ( ) const { return { MsgFieldAnchor::Attrs ( Anchor() ) }; }
+    MsgFieldAnchor Anchor ( ) const { return this->Ref().Anchor(); }
+};
+
+template <class V, class A>
+class MsgNodeAttrs : public MsgNode<V>
+{
+    static_assert ( std::is_base_of<MsgView, A>::value
+                  , "MSG_NODE_ATTRS: the attribute view must derive from MsgView" );
+  public:
+    MsgNodeAttrs ( const MsgView *pView, LPCWSTR lpszName )
+      : MsgNode<V> ( pView, lpszName ) { }
+
+    MsgSubView<A> Attrs ( ) const { return { MsgFieldAnchor::Attrs ( this->Anchor() ) }; }
+};
+
+template <class T, class V, class A>
+class MsgTypedNodeAttrs : public MsgTypedNode<T, V>
+{
+    static_assert ( std::is_base_of<MsgView, A>::value
+                  , "MSG_FIELD_NODE_ATTRS: the attribute view must derive from MsgView" );
+    typedef MsgTypedNode<T, V> Base;
+  public:
+    MsgTypedNodeAttrs ( const MsgView *pView, LPCWSTR lpszName )
+      : Base ( pView, lpszName ) { }
+
+    using Base::operator=;
+    MsgTypedNodeAttrs& operator = ( const MsgTypedNodeAttrs& rhs )
+    {
+        Base::operator= ( static_cast<const Base&>(rhs) );
+        return *this;
+    }
+
+    MsgSubView<A> Attrs ( ) const { return { MsgFieldAnchor::Attrs ( this->Anchor() ) }; }
+};
+
+#define MSG_FIELD_ATTRS(id, type, attrs)                                        \
+    static_assert ( sizeof ( L"" #id ) / sizeof ( wchar_t ) - 1 <= 63,         \
+                    "MSG_FIELD_ATTRS(" #id "): a Msgcore name holds at most "  \
+                    "63 UTF-16 units" );                                        \
+    ::MsgTypedFieldAttrs<type, attrs> id { this, L"" #id }
+
+#define MSG_NODE_ATTRS(id, view, attrs)                                         \
+    static_assert ( sizeof ( L"" #id ) / sizeof ( wchar_t ) - 1 <= 63,         \
+                    "MSG_NODE_ATTRS(" #id "): a Msgcore name holds at most "   \
+                    "63 UTF-16 units" );                                        \
+    ::MsgNodeAttrs<view, attrs> id { this, L"" #id }
+
+#define MSG_FIELD_NODE_ATTRS(id, type, view, attrs)                             \
+    static_assert ( sizeof ( L"" #id ) / sizeof ( wchar_t ) - 1 <= 63,         \
+                    "MSG_FIELD_NODE_ATTRS(" #id "): a Msgcore name holds at "  \
+                    "most 63 UTF-16 units" );                                   \
+    ::MsgTypedNodeAttrs<type, view, attrs> id { this, L"" #id }
 
 template <class T>
 class MsgViewOf
@@ -1076,6 +1237,7 @@ class MsgViewOf
     const T& operator *  ( ) const { return m_oView; }
 
     MsgFieldRef operator [] ( LPCWSTR lpszName ) const { return m_oView.Ref ( lpszName ); }
+    MsgFieldRef operator [] ( MsgAttrName attr ) const { return m_oView.Attr ( attr.lpszName ); }
     MsgFieldRef Attr ( LPCWSTR lpszName ) const { return m_oView.Attr ( lpszName ); }
 
   private:
