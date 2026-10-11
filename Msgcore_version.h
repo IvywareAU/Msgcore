@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.2.1 is tag
-//         v3.2.1. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.3.0 is tag
+//         v3.3.0. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,27 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.3.0.0, a MINOR on 3.2.1, taken by choice rather than compelled, for the
+//  same reason as 3.2.0 below. tools\ci\exports-flat.manifest, both
+//  exports-cxx-*.manifest files and Msgcore_c.h are byte-identical to v3.2.1,
+//  and no class layout moved: the only source change is MsgFieldRef.hpp.
+//
+//  What grew is attribute syntax in the field-access layer, in both its forms.
+//  Static: MSG_FIELD_ATTRS ( id, type, AttrView ), MSG_NODE_ATTRS ( id, View,
+//  AttrView ) and MSG_FIELD_NODE_ATTRS ( id, type, View, AttrView ) add
+//  Attrs(), a typed view of the member's '@' side, so
+//  s->Temperature.Attrs()->Unit = L"Celsius" is checked at compile time like
+//  any MSG_FIELD. Dynamic: MsgLiterals::operator""_attr, a C++11 user-defined
+//  literal, makes a name a MsgAttrName, and [] given one steps to '@' --
+//  Field ( mgr, L"Temperature" )[L"Unit"_attr]. It is the same step as the
+//  existing Attr(), whose meaning did not change. The literal's 63-unit cap is
+//  checked on the write, since C++17 cannot static_assert on its length.
+//
+//  Code that needs it should test `#ifdef MSG_FIELD_ATTRS`, not
+//  MSGCORE_VERSION_AT_LEAST(3,3,0), as with MSG_FIELD_NODE in 3.2.0.
+//
+//  BELOW IS THE 3.2.1 RATIONALE.
 //
 //  3.2.1.0, a PATCH on 3.2.0, and strictly one: tools\ci\exports-flat.manifest,
 //  both exports-cxx-*.manifest files and Msgcore_c.h are byte-identical to
@@ -166,23 +187,23 @@
 //  promises - but a C++ consumer pinned to 3.0.0 has to recompile, and that is
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
-#define MSGCORE_VERSION_MINOR  2
-#define MSGCORE_VERSION_PATCH  1
+#define MSGCORE_VERSION_MINOR  3
+#define MSGCORE_VERSION_PATCH  0
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,2,1,0
+#define MSGCORE_VERSION_COMMAS 3,3,0,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.2.1.0"
+#define MSGCORE_VERSION_STRING "3.3.0.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03020100 is 3.2.1.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03020100
+//  0x03030000 is 3.3.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03030000
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"
