@@ -35,6 +35,8 @@
 //
 // ATTRIBUTES (r_Attr, the '@' of a path) in both forms:
 //
+//     // L"Unit"_attr is a C++11 user-defined literal: MsgLiterals::operator""_attr
+//     // makes the string a MsgAttrName, and [] given a MsgAttrName steps to '@'.
 //     Field ( mgr, L"Temperature" )[L"Unit"_attr] = L"Celsius";   // MsgLiterals
 //     s->Temperature.Attrs()->Unit = L"Celsius";      // MSG_*_ATTRS members
 //
