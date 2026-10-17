@@ -26,6 +26,7 @@
 #include "MsgList.h"
 #include "MsgVect.h"
 #include "MsgStck.h"
+#include "MsgVBHeap.h"
 
 #include <string>
 #include <cstring>
@@ -1239,6 +1240,50 @@ msgcore_mgr_p2pos2path(MsgMgrHandle hMgr, unsigned long long pos)
         return nullptr;
     }
     return (LPCWSTR)s_strPath;
+}
+
+// The inode's three fields. The address is the low 32 bits, so a P2Pos past that
+// gets no inode; the generation and the stamp are 16 bits each. Refer
+// P2PmsgHeap_InodeStamp for what the two tags mean.
+static const unsigned long long kInodeAddrMask = 0xFFFFFFFFULL;
+static const unsigned int       kInodeGenShift = 32;
+static const unsigned int       kInodeStampShift = 48;
+
+MSGCORE_C_API unsigned long long
+msgcore_field_get_inode(MsgFieldHandle hField)
+{
+    if (!toField(hField)) return 0ULL;
+    try {
+        const P3PmsgField* pField = toField(hField);
+        const P2PmsgHANDLE hHeap = pField->GetP2PmsgHandle();
+        const P2Pos pos = pField->GetP2Pos();
+        // An inline item has no heap address to name, only the field's own storage.
+        if (!hHeap || pos == 0 || pField->IsInline() || (unsigned long long)pos > kInodeAddrMask)
+            return 0ULL;
+        const unsigned long long nStamp = P2PmsgHeap_InodeStamp(hHeap);
+        const unsigned long long nGen = (unsigned long long)P2PmsgHeap_InodeGeneration(hHeap, pos) & 0xFFFF;
+        return (nStamp << kInodeStampShift) | (nGen << kInodeGenShift) | (unsigned long long)pos;
+    } catch (...) { return 0ULL; }
+}
+
+MSGCORE_C_API MsgFieldHandle
+msgcore_mgr_inode2field(MsgMgrHandle hMgr, unsigned long long inode)
+{
+    if (!toMgr(hMgr) || inode == 0) return nullptr;
+    try {
+        P2PmsgMgr* pMgr = toMgr(hMgr);
+        const P2PmsgHANDLE hHeap = pMgr->r_Object().m_hVBList;
+        const P2Pos pos = (P2Pos)(inode & kInodeAddrMask);
+        const unsigned int nStamp = (unsigned int)(inode >> kInodeStampShift);
+        const unsigned int nGen = (unsigned int)((inode >> kInodeGenShift) & 0xFFFF);
+        // In this order: the two tags are lookups, and only an address they
+        // vouch for is read as a block.
+        if (!hHeap || nStamp != P2PmsgHeap_InodeStamp(hHeap)) return nullptr;
+        if (((unsigned int)P2PmsgHeap_InodeGeneration(hHeap, pos) & 0xFFFF) != nGen) return nullptr;
+        if (!P2PmsgHeap_IsValidAlloc(hHeap, pos) || !pMgr->IsField(pos)) return nullptr;
+        // Constructed FROM the object, as msgcore_mgr_root is, so it aliases the node.
+        return MsgcoreHandleAdd(new P3PmsgField(pMgr->P2Pos2Object(pos)), MsgcoreHandle_Field);
+    } catch (...) { return nullptr; }
 }
 
 MSGCORE_C_API const char*

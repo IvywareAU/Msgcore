@@ -612,6 +612,41 @@ msgcore_mgr_p2pos2field(MsgMgrHandle hMgr, unsigned long long pos);
 MSGCORE_C_API const wchar_t*
 msgcore_mgr_p2pos2path(MsgMgrHandle hMgr, unsigned long long pos);
 
+// Checked inodes -- a p2pos that knows when it has gone stale.
+//
+// A p2pos is recycled: delete a node and the next allocation may be handed the
+// same offset, so a p2pos held across the delete resolves, silently, to the new
+// node. An inode is the same offset with two tags beside it -- how many times
+// that offset has been freed, and which open store minted it -- and
+// msgcore_mgr_inode2field returns NULL for one whose tags no longer match. It
+// never resolves to a node other than the one it was minted for.
+//
+//   bits  0..31   the p2pos
+//   bits 32..47   the offset's free count when the inode was minted
+//   bits 48..63   the store's stamp, 1..65535, from one process-wide counter
+//
+// An inode is valid for ONE OPEN of a store, as a FUSE inode is for one mount:
+// it is runtime state, never saved, and the image format does not change. A Load,
+// a defragmenting Save and a reopen each mint a new stamp, so every inode from
+// before is refused afterwards. So is an inode from another store. Whatever moves
+// a node to a new block refuses its inodes too -- msgcore_field_move_child is
+// one -- because the old block has been freed; fetch a new inode after.
+//
+// Limits, stated rather than hidden: a p2pos past 32 bits gets no inode (0); a
+// free count wraps after 65,536 frees at one offset, and a stamp after 65,535
+// stores, and only an inode carrying the exact wrapped-onto value could then
+// misresolve. msgcore_field_get_inode returns 0 for a null, detached or inline
+// handle, which inode2field refuses.
+//
+// Since 3.4.0. Guard a portable call with MSGCORE_VERSION_AT_LEAST(3,4,0).
+MSGCORE_C_API unsigned long long
+msgcore_field_get_inode(MsgFieldHandle hField);
+
+// The node an inode names, as a LIVE caller-owned handle (msgcore_field_destroy),
+// or NULL when it is stale, from another store, or not a node of this one.
+MSGCORE_C_API MsgFieldHandle
+msgcore_mgr_inode2field(MsgMgrHandle hMgr, unsigned long long inode);
+
 // Stable ASCII name for a MSGCORE_DATA_* type constant (for the ".type" file).
 // Never NULL; returns "UNKNOWN" for an unrecognised code.
 MSGCORE_C_API const char*
@@ -642,7 +677,12 @@ MSGCORE_C_API int
 msgcore_field_rename_child(MsgFieldHandle hField, const wchar_t* lpszOldName, const wchar_t* lpszNewName);
 
 // Move the child named lpszName from hSrcField to hDstField (rename(2) across
-// directories). Returns 1 on success (the source child existed), 0 otherwise.
+// directories). Returns 1 on success, 0 otherwise -- and 0 changes nothing. Two
+// moves are refused rather than made: onto a name hDstField already holds
+// (rename(2) would replace it; this keeps both), and into the child itself or
+// anything beneath it. Through 3.3.0 the first deleted the source and the
+// second overflowed the stack. The move is a copy and a delete, so the moved child,
+// and everything under it, has a new msgcore_field_get_p2pos.
 MSGCORE_C_API int
 msgcore_field_move_child(MsgFieldHandle hSrcField, MsgFieldHandle hDstField, const wchar_t* lpszName);
 

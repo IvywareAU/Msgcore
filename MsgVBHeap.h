@@ -334,3 +334,10 @@ P2PmsgHeap_ProcTriggers  ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock, UINT nMaskTrig
 //  state; not persisted.
 void
 P2PmsgHeap_SetTriggerSink ( P2PmsgHANDLE hVBHeap, P2PmsgTriggerSink pfn, void* pUser );
+//  Inode support: the heap's stamp (minted, and generation tracking started, on
+//  first call) and the number of times a block address has been freed since.
+//  Runtime-only handle state; not persisted. Refer the implementation.
+UINT32
+P2PmsgHeap_InodeStamp ( P2PmsgHANDLE hVBHeap );
+VBLaddr
+P2PmsgHeap_InodeGeneration ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock ) noexcept;

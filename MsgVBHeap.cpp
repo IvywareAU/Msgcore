@@ -821,6 +821,10 @@ typedef struct
     // allocation below, so a manager with no sink installed leaves this nullptr.
     P2PmsgTriggerSink pfnTriggerSink;
     void*             pTriggerSinkUser;
+    // Inode generations (runtime-only, like the sink above, and zero until the
+    // first P2PmsgHeap_InodeStamp). Refer that function for the whole of it.
+    CMapAlloc        *pGenerations;
+    UINT32            nInodeStamp;
     // Report budgets for the two collation refusals. Runtime-only, like the
     // sink above, and zero-initialised by the ZeroMemory in every handle
     // allocation below.
@@ -3853,6 +3857,7 @@ P2PmsgHeap_Close ( P2PmsgHANDLE hVBList )
            ->Cancel();
 
     // Tidy up, and
+    delete pHandle->pGenerations;
     delete pHandle;                    // Garbage collection
     return 0;
 }
@@ -4202,8 +4207,78 @@ ASSERT(pHandle->nSizeofUsed>=VBLock_Hdr_u_SizeNN(pVBLock));
       P2PmsgHeap_FreeBSTRio ( hVBList, aVBLock );
     else { ASSERT(0); }
 
+    // Inode generations
+    // NOTES: A block back on the heap is an address that can be handed out
+    //        again, so every inode minted for it before now is stale. Here and
+    //        not in the three arms above, because this is the one door all
+    //        three are reached through.
+    if ( pHandle->pGenerations )
+    {
+      VBLaddr nGeneration = 0;
+      pHandle->pGenerations->Lookup ( aVBLock, nGeneration );
+      pHandle->pGenerations->SetAt ( aVBLock, nGeneration + 1 );
+    }
+
     // Tidy up, and
     return 0;
+}
+
+//
+//  This heap's inode stamp, minting it -- and starting generation tracking --
+//  on first use.
+//  NOTES: An inode is (stamp, generation, address). The address is a P2Pos,
+//         which the allocator recycles: free a block and the next allocation
+//         may be handed the same address, so a P2Pos held across a delete
+//         resolves to whatever took its place. The generation is the count of
+//         frees at that address, bumped by P2PmsgHeap_Free; the stamp names the
+//         heap, so an inode from another heap -- another store, or this store
+//         before a Load or a defragmenting Save, both of which replace the
+//         handle -- matches nothing here.
+//       : Runtime-only and never persisted: an inode means something for one
+//         open of a store, as a FUSE inode does for one mount. Nothing about
+//         the image changes.
+//       : Tracking starts here rather than at creation, which costs a heap
+//         nobody asks for inodes nothing at all. That is sound because a free
+//         can only stale an inode minted before it, and none is minted before
+//         the stamp exists.
+//       : Stamps come from one process-wide counter, as the C++23 line's
+//         epochs do, so two live heaps never share one until 65,535 have been
+//         minted.
+//
+//  Parameters:  P2PmsgHANDLE hVBList
+//
+//  Returns:     UINT32
+//               Stamp, 1..65535; 0 for a null handle
+UINT32
+P2PmsgHeap_InodeStamp ( P2PmsgHANDLE hVBList )
+{
+    VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    if ( pHandle == nullptr )
+      return 0;
+    if ( pHandle->nInodeStamp == 0 )
+    {
+      static std::atomic<UINT32> s_nNextStamp { 0 };
+      UINT32 nStamp;
+      do
+        nStamp = ++s_nNextStamp & 0xFFFF;
+      while ( nStamp == 0 );
+      pHandle->pGenerations = new CMapAlloc;
+      pHandle->nInodeStamp  = nStamp;
+    }
+    return pHandle->nInodeStamp;
+}
+
+//
+//  How many times the block at aVBLock has been freed since tracking started.
+//  NOTES: 0 before P2PmsgHeap_InodeStamp, and for any address never freed.
+VBLaddr
+P2PmsgHeap_InodeGeneration ( P2PmsgHANDLE hVBList, VBLaddr aVBLock ) noexcept
+{
+    const VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    VBLaddr nGeneration = 0;
+    if ( pHandle != nullptr && pHandle->pGenerations != nullptr )
+      pHandle->pGenerations->Lookup ( aVBLock, nGeneration );
+    return nGeneration;
 }
 
 //

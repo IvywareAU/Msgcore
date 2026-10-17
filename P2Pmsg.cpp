@@ -8713,56 +8713,88 @@ P3PmsgRefactor_Rename ( P3PmsgAttr& oAttr, LPCWSTR lpszItemName, LPCWSTR lpszIte
 }
 
 //
-//  Moves item(s) if they exist.
+//  Is the object nAncestor, or inside it?
+//  NOTES: Climbs owning items -- a field to the collection it is linked into,
+//         a collection to the item that owns it -- until the root, comparing
+//         positions, so an attribute collection counts as inside its owner.
 //
-//  Parameters:  P3PmsgAttr& oAttrSource
-//               Item source
+static bool
+P3PmsgRefactor__IsWithin ( P3PmsgObject oObject, P2Pos nAncestor )
+{
+    while ( !oObject.IsVoid() )
+    {
+      if ( oObject.GetP2Pos() == nAncestor )
+        return true;
+      if ( oObject.IsRoot() )
+        return false;
+      oObject = oObject.GetParentItem();
+    }
+    return false;
+}
+
 //
-//               P3PmsgField& oItemDestin
-//               Item destination
+//  Moves an item if it exists.
+//
+//  Parameters:  Source& oSource
+//               Item source, a field's descendants or an attribute collection
+//
+//               Destin& oDestin
+//               Item destination, likewise
 //
 //               LPCWSTR lpszItemName
 //               Item name
 //
+//  NOTES: A move is a copy into oDestin and then a delete from oSource, so
+//         both refusals below are made before either half, and a refused move
+//         changes nothing.
+//       : THE DESTINATION MUST NOT HOLD THE NAME. This loop used to copy only
+//         when it did not and delete from the source either way, so a move onto
+//         an existing name destroyed the source and kept the destination --
+//         and with several same-named items in the source, it moved the first
+//         and destroyed the rest. rename(2) would replace; refusing is the
+//         choice that cannot lose anything, and TreeFs answers EEXIST here.
+//       : NOR MAY IT BE THE ITEM OR INSIDE IT. Copying an item into its own
+//         subtree recursed until the stack overflowed (0xC00000FD), and had it
+//         returned the delete would have removed the copy with the original.
+//       : Exactly one item moves: the first of that name, which is the one
+//         both SelectItem and Delete find.
+//
+template < class Source, class Destin >
+static void
+P3PmsgRefactor__Move ( Source& oSource, Destin& oDestin, LPCWSTR lpszItemName )
+{
+    if ( !oSource.Exists(lpszItemName) )
+      return;
+    if ( oDestin.Exists(lpszItemName) )
+      EVERR -> Module ( __FUNCTION__ )
+            -> Message( L"Move refused: the destination already holds '%s'", lpszItemName )
+            -> Throw();
+    if ( P3PmsgRefactor__IsWithin ( oDestin.r_Object(), oSource.SelectItem(lpszItemName).GetP2Pos() ) )
+      EVERR -> Module ( __FUNCTION__ )
+            -> Message( L"Move refused: the destination is '%s' or inside it", lpszItemName )
+            -> Throw();
+    oDestin += oSource.SelectItem(lpszItemName);
+    oSource.Delete ( lpszItemName );
+}
 Msgcore_EXT void
 P3PmsgRefactor_Move ( P3PmsgAttr& oAttrSource, P3PmsgField& oItemDestin, LPCWSTR lpszItemName )
-{ 
-    while ( oAttrSource.Exists(lpszItemName) )
-    {
-      if ( !oItemDestin.Exists(lpszItemName) )
-        oItemDestin += oAttrSource.SelectItem(lpszItemName);
-      oAttrSource.Delete ( lpszItemName );
-    }
+{
+    P3PmsgRefactor__Move ( oAttrSource, oItemDestin, lpszItemName );
 }
 Msgcore_EXT void
 P3PmsgRefactor_Move ( P3PmsgField& oFieldSource, P3PmsgAttr& oAttrDestin, LPCWSTR lpszItemName )
-{ 
-    while ( oFieldSource.Exists(lpszItemName) )
-    {
-      if ( !oAttrDestin.Exists(lpszItemName) )
-        oAttrDestin += oFieldSource.SelectItem(lpszItemName);
-      oFieldSource.Delete ( lpszItemName );
-    }
+{
+    P3PmsgRefactor__Move ( oFieldSource, oAttrDestin, lpszItemName );
 }
 Msgcore_EXT void
 P3PmsgRefactor_Move ( P3PmsgField& oFieldSource, P3PmsgField& oItemDestin, LPCWSTR lpszItemName )
-{ 
-    while ( oFieldSource.Exists(lpszItemName) )
-    {
-      if ( !oItemDestin.Exists(lpszItemName) )
-        oItemDestin += oFieldSource.SelectItem(lpszItemName);
-      oFieldSource.Delete ( lpszItemName );
-    }
+{
+    P3PmsgRefactor__Move ( oFieldSource, oItemDestin, lpszItemName );
 }
 Msgcore_EXT void
 P3PmsgRefactor_Move ( P3PmsgAttr& oAttrSource, P3PmsgAttr& oAttrDestin, LPCWSTR lpszItemName )
-{ 
-    while ( oAttrSource.Exists(lpszItemName) )
-    {
-      if ( !oAttrDestin.Exists(lpszItemName) )
-        oAttrDestin += oAttrSource.SelectItem(lpszItemName);
-      oAttrSource.Delete ( lpszItemName );
-    }
+{
+    P3PmsgRefactor__Move ( oAttrSource, oAttrDestin, lpszItemName );
 }
 
 //

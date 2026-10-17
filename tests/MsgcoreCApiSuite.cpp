@@ -239,6 +239,159 @@ static void Test_CApi_P2PosRoundTrip()
 }
 
 // ---------------------------------------------------------------------------
+// Checked inodes: msgcore_field_get_inode / msgcore_mgr_inode2field. A p2pos
+// held across a delete resolves to whatever took its block; an inode refuses.
+// ---------------------------------------------------------------------------
+static const wchar_t* InodeName(MsgMgrHandle hMgr, unsigned long long inode, wchar_t* szOut, size_t nOut)
+{
+    szOut[0] = 0;
+    MsgFieldHandle h = msgcore_mgr_inode2field(hMgr, inode);
+    if (!h) return nullptr;
+    const wchar_t* nm = msgcore_field_get_name(h);
+    if (nm) wcsncpy_s(szOut, nOut, nm, _TRUNCATE);
+    msgcore_field_destroy(h);
+    return szOut;
+}
+
+static void Test_CApi_Inode()
+{
+    TF_CASE("an inode refuses once its node is deleted and the block reused; the p2pos does not")
+    {
+        wchar_t szName[64];
+        MsgMgrHandle hMgr = msgcore_mgr_create_nn(MSGCORE_ADDR_64, 4096, 1u << 20);
+        MsgFieldHandle hRoot = msgcore_mgr_root(hMgr);
+        msgcore_field_destroy(msgcore_field_declare_int(hRoot, L"T1", 1, 1));
+        MsgFieldHandle hT1 = msgcore_field_child(hRoot, L"T1");
+        const unsigned long long pos1   = msgcore_field_get_p2pos(hT1);
+        const unsigned long long inode1 = msgcore_field_get_inode(hT1);
+        msgcore_field_destroy(hT1);
+        TF_CHECK(inode1 != 0ULL);
+        TF_CHECK(InodeName(hMgr, inode1, szName, 64) && wcscmp(szName, L"T1") == 0);
+
+        TF_CHECK_EQ(msgcore_field_delete_item(hRoot, L"T1"), 1);
+        msgcore_field_destroy(msgcore_field_declare_int(hRoot, L"T2", 2, 1));
+        MsgFieldHandle hT2 = msgcore_field_child(hRoot, L"T2");
+        const unsigned long long inode2 = msgcore_field_get_inode(hT2);
+        //  The precondition that makes this case mean anything: T2 really was
+        //  handed T1's block, so T1's p2pos now names T2.
+        TF_CHECK_EQ(msgcore_field_get_p2pos(hT2), pos1);
+        msgcore_field_destroy(hT2);
+        MsgFieldHandle hStale = msgcore_mgr_p2pos2field(hMgr, pos1);
+        const wchar_t* nm = hStale ? msgcore_field_get_name(hStale) : nullptr;
+        TF_CHECK(nm && wcscmp(nm, L"T2") == 0);
+        msgcore_field_destroy(hStale);
+
+        TF_CHECK(InodeName(hMgr, inode1, szName, 64) == nullptr);
+        TF_CHECK(inode2 != inode1);
+        TF_CHECK(InodeName(hMgr, inode2, szName, 64) && wcscmp(szName, L"T2") == 0);
+        msgcore_field_destroy(hRoot);
+        msgcore_mgr_destroy(hMgr);
+    }
+
+    TF_CASE("an inode from another store, or from before a reload, is refused")
+    {
+        wchar_t szName[64];
+        wchar_t szPath[MAX_PATH] = { 0 };
+        MakeTempP2pPath(szPath, L"mscs_capi_inode.p2p");
+
+        MsgMgrHandle hMgr = msgcore_mgr_create_nn(MSGCORE_ADDR_64, 4096, 1u << 20);
+        MsgFieldHandle hRoot = msgcore_mgr_root(hMgr);
+        msgcore_field_destroy(msgcore_field_declare_int(hRoot, L"Node", 1, 1));
+        MsgFieldHandle hNode = msgcore_field_child(hRoot, L"Node");
+        const unsigned long long inode = msgcore_field_get_inode(hNode);
+        msgcore_field_destroy(hNode);
+        msgcore_field_destroy(hRoot);
+
+        //  Built the same way, so the same p2pos names the same-named node.
+        MsgMgrHandle hOther = msgcore_mgr_create_nn(MSGCORE_ADDR_64, 4096, 1u << 20);
+        MsgFieldHandle hRootO = msgcore_mgr_root(hOther);
+        msgcore_field_destroy(msgcore_field_declare_int(hRootO, L"Node", 1, 1));
+        msgcore_field_destroy(hRootO);
+        TF_CHECK(InodeName(hOther, inode, szName, 64) == nullptr);
+        msgcore_mgr_destroy(hOther);
+
+        TF_CHECK_EQ(msgcore_mgr_save(hMgr, szPath), 1);
+        MsgMgrHandle hReopened = msgcore_mgr_open_file(szPath);
+        TF_CHECK(hReopened != nullptr);
+        if (hReopened)
+        {
+            TF_CHECK(InodeName(hReopened, inode, szName, 64) == nullptr);
+            MsgFieldHandle hRootR = msgcore_mgr_root(hReopened);
+            MsgFieldHandle hNodeR = hRootR ? msgcore_field_child(hRootR, L"Node") : nullptr;
+            const unsigned long long inodeR = hNodeR ? msgcore_field_get_inode(hNodeR) : 0ULL;
+            TF_CHECK(InodeName(hReopened, inodeR, szName, 64) && wcscmp(szName, L"Node") == 0);
+            msgcore_field_destroy(hNodeR);
+            msgcore_field_destroy(hRootR);
+            msgcore_mgr_destroy(hReopened);
+        }
+        TF_CHECK(InodeName(hMgr, inode, szName, 64) && wcscmp(szName, L"Node") == 0);
+        msgcore_mgr_destroy(hMgr);
+        _wremove(szPath);
+    }
+
+    TF_CASE("a moved node's old inode is refused; a new one resolves")
+    {
+        wchar_t szName[64];
+        MsgMgrHandle hMgr = msgcore_mgr_create_nn(MSGCORE_ADDR_64, 4096, 1u << 20);
+        MsgFieldHandle hRoot = msgcore_mgr_root(hMgr);
+        msgcore_field_destroy(msgcore_field_declare_int(hRoot, L"Dir", 0, 1));
+        msgcore_field_destroy(msgcore_field_declare_int(hRoot, L"Leaf", 7, 1));
+        MsgFieldHandle hLeaf = msgcore_field_child(hRoot, L"Leaf");
+        const unsigned long long inode = msgcore_field_get_inode(hLeaf);
+        msgcore_field_destroy(hLeaf);
+
+        MsgFieldHandle hDir = msgcore_field_child(hRoot, L"Dir");
+        TF_CHECK_EQ(msgcore_field_move_child(hRoot, hDir, L"Leaf"), 1);
+        msgcore_field_destroy(hDir);
+        TF_CHECK(InodeName(hMgr, inode, szName, 64) == nullptr);
+
+        hDir = msgcore_field_child(hRoot, L"Dir");
+        hLeaf = hDir ? msgcore_field_child(hDir, L"Leaf") : nullptr;
+        const unsigned long long inodeMoved = hLeaf ? msgcore_field_get_inode(hLeaf) : 0ULL;
+        TF_CHECK(InodeName(hMgr, inodeMoved, szName, 64) && wcscmp(szName, L"Leaf") == 0);
+        msgcore_field_destroy(hLeaf);
+        msgcore_field_destroy(hDir);
+        msgcore_field_destroy(hRoot);
+        msgcore_mgr_destroy(hMgr);
+    }
+
+    TF_CASE("an inode resolves to a LIVE handle; null and made-up inodes are refused")
+    {
+        MsgMgrHandle hMgr = msgcore_mgr_create_nn(MSGCORE_ADDR_64, 4096, 1u << 20);
+        MsgFieldHandle hRoot = msgcore_mgr_root(hMgr);
+        msgcore_field_destroy(msgcore_field_declare_wstr(hRoot, L"F", L"before", 1));
+        MsgFieldHandle hF = msgcore_field_child(hRoot, L"F");
+        const unsigned long long inode = msgcore_field_get_inode(hF);
+        msgcore_field_destroy(hF);
+
+        MsgFieldHandle hByInode = msgcore_mgr_inode2field(hMgr, inode);
+        TF_CHECK(hByInode != nullptr);
+        if (hByInode) msgcore_field_set_wstr(hByInode, L"after");
+        msgcore_field_destroy(hByInode);
+        hF = msgcore_field_child(hRoot, L"F");
+        const wchar_t* v = hF ? msgcore_field_get_wstr(hF) : nullptr;
+        TF_CHECK(v && wcscmp(v, L"after") == 0);
+        msgcore_field_destroy(hF);
+
+        //  A detached copy is not the store's node: whatever its inode, the
+        //  store must not resolve it.
+        MsgFieldHandle hCopy = msgcore_field_select_item(hRoot, L"F");
+        const unsigned long long inodeCopy = hCopy ? msgcore_field_get_inode(hCopy) : 0ULL;
+        printf("      a detached copy's inode                            %s\n", inodeCopy ? "nonzero" : "0");
+        TF_CHECK(msgcore_mgr_inode2field(hMgr, inodeCopy) == nullptr);
+        msgcore_field_destroy(hCopy);
+
+        TF_CHECK_EQ(msgcore_field_get_inode(nullptr), 0ULL);
+        TF_CHECK(msgcore_mgr_inode2field(hMgr, 0ULL) == nullptr);
+        TF_CHECK(msgcore_mgr_inode2field(nullptr, inode) == nullptr);
+        //  Right stamp and generation, an address that is no block's.
+        TF_CHECK(msgcore_mgr_inode2field(hMgr, (inode & ~0xFFFFFFFFULL) | 3ULL) == nullptr);
+        msgcore_field_destroy(hRoot);
+        msgcore_mgr_destroy(hMgr);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // st_mtime: set_tstamp / get_tstamp. Also pins the P3Pmsg_GetTStamp fix (the
 // getter previously read the wrong attribute key and always returned 0).
 // Handles are re-resolved per op (VBHeap-relocation discipline, §4.4).
@@ -459,6 +612,74 @@ static void Test_CApi_MoveChild()
             msgcore_field_destroy(hRoot);
         }
 
+        msgcore_mgr_destroy(hMgr);
+    }
+
+    //  The source used to be deleted whether or not it had been copied, so this
+    //  move kept the destination's 222 and destroyed the source's 111.
+    TF_CASE("move_child onto a name the destination holds is refused; both survive")
+    {
+        MsgMgrHandle hMgr = msgcore_mgr_create_nn(MSGCORE_ADDR_64, 4096, 1u << 20);
+        MsgFieldHandle hRoot = msgcore_mgr_root(hMgr);
+        msgcore_field_destroy(msgcore_field_declare_int(hRoot, L"Src", 0, 1));
+        msgcore_field_destroy(msgcore_field_declare_int(hRoot, L"Dst", 0, 1));
+        MsgFieldHandle hSrc = msgcore_field_child(hRoot, L"Src");
+        MsgFieldHandle hDst = msgcore_field_child(hRoot, L"Dst");
+        msgcore_field_destroy(msgcore_field_declare_int(hSrc, L"n", 111, 1));
+        msgcore_field_destroy(msgcore_field_declare_int(hDst, L"n", 222, 1));
+        msgcore_field_destroy(hDst);
+        msgcore_field_destroy(hSrc);
+
+        hSrc = msgcore_field_child(hRoot, L"Src");
+        hDst = msgcore_field_child(hRoot, L"Dst");
+        TF_CHECK_EQ(msgcore_field_move_child(hSrc, hDst, L"n"), 0);
+        msgcore_field_destroy(hDst);
+        msgcore_field_destroy(hSrc);
+
+        hSrc = msgcore_field_child(hRoot, L"Src");
+        hDst = msgcore_field_child(hRoot, L"Dst");
+        MsgFieldHandle hSrcN = hSrc ? msgcore_field_child(hSrc, L"n") : nullptr;
+        MsgFieldHandle hDstN = hDst ? msgcore_field_child(hDst, L"n") : nullptr;
+        TF_CHECK(hSrcN && msgcore_field_get_int(hSrcN) == 111);
+        TF_CHECK(hDstN && msgcore_field_get_int(hDstN) == 222);
+        msgcore_field_destroy(hDstN);
+        msgcore_field_destroy(hSrcN);
+        msgcore_field_destroy(hDst);
+        msgcore_field_destroy(hSrc);
+        msgcore_field_destroy(hRoot);
+        msgcore_mgr_destroy(hMgr);
+    }
+
+    //  Copying an item into its own subtree recursed until the stack
+    //  overflowed (0xC00000FD). Both spellings: into the item, and below it.
+    TF_CASE("move_child into the child itself or beneath it is refused; the tree is intact")
+    {
+        MsgMgrHandle hMgr = msgcore_mgr_create_nn(MSGCORE_ADDR_64, 4096, 1u << 20);
+        MsgFieldHandle hRoot = msgcore_mgr_root(hMgr);
+        msgcore_field_destroy(msgcore_field_declare_int(hRoot, L"A", 1, 1));
+        MsgFieldHandle hA = msgcore_field_child(hRoot, L"A");
+        msgcore_field_destroy(msgcore_field_declare_int(hA, L"B", 2, 1));
+        MsgFieldHandle hB = msgcore_field_child(hA, L"B");
+        msgcore_field_destroy(msgcore_field_declare_int(hB, L"Leaf", 3, 1));
+        msgcore_field_destroy(hB);
+        msgcore_field_destroy(hA);
+
+        hA = msgcore_field_child(hRoot, L"A");
+        TF_CHECK_EQ(msgcore_field_move_child(hRoot, hA, L"A"), 0);
+        MsgFieldHandle hB2 = hA ? msgcore_field_child(hA, L"B") : nullptr;
+        TF_CHECK_EQ(msgcore_field_move_child(hRoot, hB2, L"A"), 0);
+        msgcore_field_destroy(hB2);
+        msgcore_field_destroy(hA);
+
+        hA = msgcore_field_child(hRoot, L"A");
+        hB = hA ? msgcore_field_child(hA, L"B") : nullptr;
+        MsgFieldHandle hLeaf = hB ? msgcore_field_child(hB, L"Leaf") : nullptr;
+        TF_CHECK(hA && msgcore_field_get_int(hA) == 1);
+        TF_CHECK(hLeaf && msgcore_field_get_int(hLeaf) == 3);
+        msgcore_field_destroy(hLeaf);
+        msgcore_field_destroy(hB);
+        msgcore_field_destroy(hA);
+        msgcore_field_destroy(hRoot);
         msgcore_mgr_destroy(hMgr);
     }
 }
@@ -905,6 +1126,7 @@ void RunMsgcoreCApiSuite()
     Test_CApi_LiveVsDetached();
     Test_CApi_PersistThroughSaveLoad();
     Test_CApi_P2PosRoundTrip();
+    Test_CApi_Inode();
     Test_CApi_Tstamp();
     Test_CApi_RenameChild();
     Test_CApi_MoveChild();

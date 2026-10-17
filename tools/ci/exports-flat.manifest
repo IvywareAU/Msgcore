@@ -110,6 +110,7 @@ msgcore_field_get_double
 msgcore_field_get_float
 msgcore_field_get_guid_str
 msgcore_field_get_guid_str_u8
+msgcore_field_get_inode
 msgcore_field_get_int
 msgcore_field_get_int_any
 msgcore_field_get_int64
@@ -200,6 +201,7 @@ msgcore_mgr_get_filename
 msgcore_mgr_get_filename_u8
 msgcore_mgr_get_rootname
 msgcore_mgr_get_rootname_u8
+msgcore_mgr_inode2field
 msgcore_mgr_is_dirty
 msgcore_mgr_is_valid
 msgcore_mgr_load

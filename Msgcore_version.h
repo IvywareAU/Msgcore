@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.3.0 is tag
-//         v3.3.0. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.4.0 is tag
+//         v3.4.0. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,41 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.4.0.0, a MINOR on 3.3.0, and this time compelled: the flat surface grew.
+//  tools\ci\exports-flat.manifest gains two names, msgcore_field_get_inode and
+//  msgcore_mgr_inode2field, and nothing in it was removed or changed signature.
+//  exports-cxx-*.manifest is unchanged and no exported class layout moved; the
+//  heap handle that gained two fields is private to MsgVBHeap.cpp.
+//
+//  It carries three data-loss fixes, found by asking the library to do what a
+//  file system does (the AST use case's fsops suite):
+//
+//  Move onto an existing name destroyed the source. P3PmsgRefactor_Move copied
+//  only when the destination lacked the name and deleted from the source
+//  either way, so msgcore_field_move_child onto a taken name kept the
+//  destination and lost the source -- and with several same-named items in the
+//  source it moved one and deleted the rest. It is now refused, before either
+//  half, and exactly one item moves otherwise.
+//
+//  Move into the item's own subtree overflowed the stack (0xC00000FD): the copy
+//  recursed into itself. It is now refused the same way. TreeFs had refused
+//  both itself; MsgFacade's Move reached them unguarded. Refused moves throw in
+//  C++ and make msgcore_field_move_child return 0 with nothing changed.
+//
+//  A p2pos outlives its node. The allocator recycles blocks, so a p2pos held
+//  across a delete resolves, silently, to whatever took the block -- which
+//  Msgcore_c.h documented as a contract rather than fixed. The two new calls
+//  are the fix: an inode is the p2pos tagged with the block's free count and a
+//  per-heap stamp, and inode2field refuses one whose tags no longer match. It
+//  is runtime state, never saved, so the image format did not change; an inode
+//  is valid for one open of a store, as C++23's epochs are. The p2pos calls
+//  are unchanged. Pinned by MsgcoreCApiSuite Test_CApi_Inode, and the two moves
+//  by Test_CApi_MoveChild.
+//
+//  Guard a portable call with MSGCORE_VERSION_AT_LEAST(3,4,0).
+//
+//  BELOW IS THE 3.3.0 RATIONALE.
 //
 //  3.3.0.0, a MINOR on 3.2.1, taken by choice rather than compelled, for the
 //  same reason as 3.2.0 below. tools\ci\exports-flat.manifest, both
@@ -187,23 +222,23 @@
 //  promises - but a C++ consumer pinned to 3.0.0 has to recompile, and that is
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
-#define MSGCORE_VERSION_MINOR  3
+#define MSGCORE_VERSION_MINOR  4
 #define MSGCORE_VERSION_PATCH  0
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,3,0,0
+#define MSGCORE_VERSION_COMMAS 3,4,0,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.3.0.0"
+#define MSGCORE_VERSION_STRING "3.4.0.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03030000 is 3.3.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03030000
+//  0x03040000 is 3.4.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03040000
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"
