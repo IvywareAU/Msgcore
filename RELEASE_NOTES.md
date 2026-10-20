@@ -3,6 +3,39 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.4.1
+
+A patch release that brings **Android**. The flat C API, the C++ export surface, the image
+format and every class layout are unchanged, and a Windows build compiles to the same code.
+
+### New: Android (NDK), over an epoll backend
+
+The cores now build with the Android NDK (clang, libc++, bionic) for `arm64-v8a` and `x86_64`,
+API 29 and later. P2PeerLan's Android app is the first consumer: it runs them natively.
+
+- **`Platform/p2piocp_epoll.cpp`** implements the `p2piocp` hooks over **epoll**. Android
+  blocks io_uring for apps. The completion model is the same as on Windows and io_uring:
+  - reads and writes on a socket complete in order;
+  - every operation reports its completion;
+  - a write completes in full or fails;
+  - closing a socket cancels its pending work first.
+- **Choosing it:** Targetcore's `P2P_IO_BACKEND=epoll` selects it, and it is the default when
+  building for Android. Linux keeps io_uring by default. epoll also serves a Linux kernel too
+  old for io_uring.
+- **Tested:** the new `platform_iocp_epoll_test` passes 125/125 on Linux, clean under ASan and
+  TSan. The whole MSCS suite built on epoll passes on Linux. P2PeerLan's native tests pass on an
+  Android 14 emulator.
+
+### Fixed (Linux and Android; nothing changes on Windows)
+
+- **MSVC format sizes crashed bionic's printf.** `%I64`, `%I32` and `%I` are now rewritten to
+  `ll`, nothing and `z` before formatting, for narrow and wide formats alike. glibc tolerated
+  them by accident; on Android, `P3PmsgField::Print` crashed.
+- **Pipe paths:** `p2p_pipe_path` falls back from `$XDG_RUNTIME_DIR` to `$TMPDIR`, then
+  `/tmp`. Android has no `/tmp`.
+- **Smaller fixes:** `CList` gains const `GetNext`/`GetPrev`, and `sys/timeb.h` is included
+  only where it exists.
+
 ## 3.4.0
 
 A minor release. The flat C API gains two calls, and nothing in it was removed or changed

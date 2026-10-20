@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.4.0 is tag
-//         v3.4.0. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.4.1 is tag
+//         v3.4.1. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,30 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.4.1.0, a PATCH on 3.4.0, and strictly one: tools\ci\exports-flat.manifest,
+//  both exports-cxx-*.manifest files and Msgcore_c.h are byte-identical to v3.4.0,
+//  no class layout moved, and a Windows build compiles to the same code.
+//
+//  It carries ANDROID. P2PeerLan's Android app (P2PeerLanAndroid, phase A0) runs
+//  the cores natively through the NDK, and Android's seccomp policy blocks
+//  io_uring for apps, so Platform/ gains a second Linux backend for the p2piocp
+//  hooks: p2piocp_epoll.cpp, the same completion model over epoll -- ordered
+//  per-fd queues, every completion delivered, all-or-error writes, synchronous
+//  cancel before close. Targetcore's P2P_IO_BACKEND chooses it (the default on
+//  ANDROID); io_uring stays the default elsewhere. Pinned by
+//  platform_iocp_epoll_test (125/125 on the box, ASan and TSan clean) and by the
+//  full ctest built on epoll (100/101; the one a timing flake that passes alone).
+//
+//  And four fixes bionic and clang found, none observable on Windows. MSVC size
+//  prefixes in a format (%I64, %I32, %I) are rewritten to ll / none / z before
+//  formatting, narrow and wide: glibc read I as a flag and survived, bionic did
+//  not know it, so every later argument shifted and P3PmsgField::Print's
+//  "%s(%Ii)" faulted. p2p_pipe_path falls back $XDG_RUNTIME_DIR -> $TMPDIR ->
+//  /tmp, since Android has no /tmp. CList gains const GetNext/GetPrev, and
+//  sys/timeb.h is included only where it exists.
+//
+//  BELOW IS THE 3.4.0 RATIONALE.
 //
 //  3.4.0.0, a MINOR on 3.3.0, and this time compelled: the flat surface grew.
 //  tools\ci\exports-flat.manifest gains two names, msgcore_field_get_inode and
@@ -223,22 +247,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  4
-#define MSGCORE_VERSION_PATCH  0
+#define MSGCORE_VERSION_PATCH  1
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,4,0,0
+#define MSGCORE_VERSION_COMMAS 3,4,1,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.4.0.0"
+#define MSGCORE_VERSION_STRING "3.4.1.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03040000 is 3.4.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03040000
+//  0x03040100 is 3.4.1.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03040100
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

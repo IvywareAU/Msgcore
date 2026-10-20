@@ -81,7 +81,7 @@ it is the first thing to read if you are considering depending on it.
 |---|---|
 | Toolchain | Visual Studio 2026 (v145), "Desktop development with C++" — or, for Linux, GCC/Clang through the top-level CMake build |
 | Libraries | MFC (shared/DLL) on Windows; the `Platform/` shim stands in for it on Linux |
-| Platforms | Windows `x64` and `Win32`; Linux `x86-64` |
+| Platforms | Windows `x64` and `Win32`; Linux `x86-64`; Android `arm64-v8a` and `x86_64` (NDK, API 29+, epoll backend; since 3.4.1) |
 | Floor | Windows 8.1 (`_WIN32_WINNT=0x0603`) |
 | Language | C++17 (`/std:c++17`) and C17 (`/std:c17`) — on all eight `.vcxproj` configurations **and under CMake**, on both platforms |
 
@@ -551,7 +551,7 @@ as compile-time macros — so a consumer's `MSGCORE_VERSION_*` can never disagre
 ```
 
 Releases are annotated git tags named `vMAJOR.MINOR.PATCH`, matching the header. The current
-release is **`v3.4.0`**. If you have a `Msgcore.dll` and want to know what built it, read its
+release is **`v3.4.1`**. If you have a `Msgcore.dll` and want to know what built it, read its
 `FileVersion` and check out the tag of the same number — that correspondence is verified at
 tag time against the DLL's own version resource, not assumed from the header.
 
