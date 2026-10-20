@@ -19,7 +19,9 @@
 
 #include "stdafx.h"
 #include "afxwin.h"
+#if __has_include(<sys/timeb.h>)   // nothing here calls ftime any more; bionic (Android) has no such header
 #include <sys/timeb.h>   // was <sys\timeb.h> — backslash is non-portable (MSVC accepts /)
+#endif
 #include <cstdlib>       // getenv, for the P2PMSG_NO_UI knob (AFTER stdafx.h: /Yu drops anything before it)
 #include <cstdio>        // fopen/fwprintf, for the configured log file
 #include <ctime>         // localtime_s / localtime_r, for the log timestamp

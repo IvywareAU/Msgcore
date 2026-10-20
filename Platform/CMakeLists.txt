@@ -101,4 +101,17 @@ if(NOT WIN32)
         enable_testing()
         add_test(NAME platform_iocp_test COMMAND platform_iocp_test)
     endif()
+    # The same suite against the epoll backend (p2piocp_epoll.cpp, P2P_IO_BACKEND=epoll).
+    # Needs no library, so it is built wherever Linux is -- Android included.
+    option(MSCS_BUILD_IOCP_EPOLL_TEST "Build the p2piocp epoll shim test" ON)
+    if(MSCS_BUILD_IOCP_EPOLL_TEST)
+        add_executable(platform_iocp_epoll_test checks/iocp_test.cpp p2piocp_epoll.cpp)
+        target_include_directories(platform_iocp_epoll_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+        if(NOT ANDROID)
+            target_link_libraries(platform_iocp_epoll_test PRIVATE pthread)   # bionic has it in libc
+        endif()
+        target_compile_features(platform_iocp_epoll_test PRIVATE cxx_std_23)
+        enable_testing()
+        add_test(NAME platform_iocp_epoll_test COMMAND platform_iocp_epoll_test)
+    endif()
 endif()

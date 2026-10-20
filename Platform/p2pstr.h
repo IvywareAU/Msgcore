@@ -48,6 +48,7 @@
   #include <cwctype>
   #include <cstdarg>
   #include <cstdlib>
+  #include <cstring>      // p2p_fix_format: strchr
   #include <algorithm>
 
   //  In-memory wide char stays wchar_t (4 bytes on Linux) — API surface only.
@@ -100,6 +101,12 @@
   //  (this silently corrupted every Format()/Message() and, e.g., the atomic-Save temp
   //  path). Rewrite the format to glibc conventions before formatting: %s->%ls, %c->%lc,
   //  %ws/%wc->%ls/%lc, %hs/%hc->%s/%c; numeric/other specifiers pass through unchanged.
+  //
+  //  MSVC's integer SIZE prefixes are rewritten too: I64 -> ll, I32 -> (none), and a bare
+  //  I (pointer-sized, e.g. %Ii / %Iu) -> z. glibc happens to survive them -- it reads I as
+  //  its "locale digits" flag and consumes the argument as an int -- but bionic (Android)
+  //  does not know I at all, so every argument after it shifted and P3PmsgField::Print's
+  //  "%s(%Ii)" took a size as a string pointer (SIGSEGV in wcslen, P2PeerLanAndroid A0).
   inline std::wstring p2p_fix_wformat(const wchar_t* fmt) {
       std::wstring out;
       if (!fmt) return out;
@@ -109,8 +116,13 @@
           if (*p == L'%') { out += L"%%"; continue; }
           while (*p && wcschr(L"-+ #0123456789.*", *p)) { spec.push_back(*p); ++p; }
           int wide = 0;   // 1 = force wide (l), -1 = force narrow, 0 = MSVC default (wide)
-          while (*p && wcschr(L"hlLjztw", *p)) {
+          while (*p && wcschr(L"hlLjztwI", *p)) {
               if      (*p == L'w')                 wide = 1;              // drop 'w'
+              else if (*p == L'I') {                                      // MSVC size prefix
+                  if      (p[1] == L'6' && p[2] == L'4') { spec += L"ll"; p += 2; }
+                  else if (p[1] == L'3' && p[2] == L'2') { p += 2; }
+                  else                                     spec.push_back(L'z');
+              }
               else if (*p == L'l' || *p == L'L') { wide = 1; spec.push_back(*p); }
               else if (*p == L'h')               { wide = -1; spec.push_back(*p); }
               else                                 spec.push_back(*p);
@@ -158,17 +170,41 @@
   //  all of which read as "the identity store is broken on Linux" and none of
   //  which were. Overloads, not macros, so the array form binds correctly and a
   //  genuinely wrong call fails to compile instead of misbehaving.
+  //  The NARROW twin of p2p_fix_wformat, for MSVC's integer size prefixes only (a narrow
+  //  %s means char* on every library, so nothing else needs rewriting): I64 -> ll,
+  //  I32 -> (none), I -> z. Msgcore's error texts use "%Ii" and "%I32i"; bionic does not
+  //  know I. Formats without an 'I' are passed through untouched, unallocated.
+  inline const char* p2p_fix_format(const char* fmt, std::string& keep) {
+      if (!fmt || !std::strchr(fmt, 'I')) return fmt;
+      keep.clear();
+      for (const char* p = fmt; *p; ++p) {
+          if (*p != '%') { keep.push_back(*p); continue; }
+          keep.push_back(*p++);
+          if (*p == '%') { keep.push_back(*p); continue; }
+          while (*p && std::strchr("-+ #0123456789.*", *p)) keep.push_back(*p++);
+          if (*p == 'I') {
+              if      (p[1] == '6' && p[2] == '4') { keep += "ll"; p += 3; }
+              else if (p[1] == '3' && p[2] == '2') { p += 3; }
+              else                                   { keep.push_back('z'); ++p; }
+          }
+          if (!*p) break;
+          keep.push_back(*p);
+      }
+      return keep.c_str();
+  }
   inline int sprintf_s(char* d, size_t n, const char* fmt, ...) {
+      std::string k; const char* f = p2p_fix_format(fmt, k);
       va_list ap; va_start(ap, fmt);
-      int r = ::vsnprintf(d, n, fmt, ap); va_end(ap); return r; }
+      int r = ::vsnprintf(d, n, f, ap); va_end(ap); return r; }
   template <size_t N> inline int sprintf_s(char (&d)[N], const char* fmt, ...) {
+      std::string k; const char* f = p2p_fix_format(fmt, k);
       va_list ap; va_start(ap, fmt);
-      int r = ::vsnprintf(d, N, fmt, ap); va_end(ap); return r; }
+      int r = ::vsnprintf(d, N, f, ap); va_end(ap); return r; }
 
   inline int vsprintf_s(char* d, size_t n, const char* fmt, va_list ap)
-  { return ::vsnprintf(d, n, fmt, ap); }
+  { std::string k; return ::vsnprintf(d, n, p2p_fix_format(fmt, k), ap); }
   template <size_t N> inline int vsprintf_s(char (&d)[N], const char* fmt, va_list ap)
-  { return ::vsnprintf(d, N, fmt, ap); }
+  { std::string k; return ::vsnprintf(d, N, p2p_fix_format(fmt, k), ap); }
 
   //  MSVC _snprintf_s(buf, bufsize, count, fmt, ...) — the extra `count` arg (usually
   //  _TRUNCATE) bounds writes to count chars; the shim honours only the buffer size,
@@ -177,8 +213,9 @@
     #define _TRUNCATE ((size_t)-1)
   #endif
   inline int p2p_snprintf_s(char* buf, size_t bufsize, size_t /*count*/, const char* fmt, ...) {
+      std::string k; const char* f = p2p_fix_format(fmt, k);
       va_list ap; va_start(ap, fmt);
-      int r = ::vsnprintf(buf, bufsize, fmt, ap);
+      int r = ::vsnprintf(buf, bufsize, f, ap);
       va_end(ap);
       return r;
   }

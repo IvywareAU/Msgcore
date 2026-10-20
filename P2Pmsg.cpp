@@ -8564,8 +8564,13 @@ P3Pmsg_GetTStamp ( const P3PmsgItem& oItem )
 Msgcore_EXT INT64
 P3Pmsg_SetTStamp ( const P3PmsgItem& oItem, INT64 tsValue, BOOL bRecurse )
 {
-    if ( tsValue == -1 ) 
-      time(&tsValue);   // Get the current time from the 
+    if ( tsValue == -1 )
+    {
+      // Get the current time. Through a time_t: INT64 is long long and time_t is long on
+      // LP64 Linux/Android, so &tsValue is not a time_t* there.
+      time_t tNow = time(NULL);
+      tsValue = (INT64)tNow;
+    }
     oItem.ATTR.DeclareItem ( L"$TStamp$", tsValue, TRUE );
     return tsValue;
 }

@@ -244,6 +244,10 @@
 
       T& GetNext(POSITION& p) { Node* n = nd(p); p = mk(n->next); return n->val; }
       T& GetPrev(POSITION& p) { Node* n = nd(p); p = mk(n->prev); return n->val; }
+      //  MFC's const overloads: walking a const list (P2Peer.cpp's domain check) is legal
+      //  there; GCC only let the non-const call through under -fpermissive.
+      const T& GetNext(POSITION& p) const { const Node* n = nd(p); p = mk(n->next); return n->val; }
+      const T& GetPrev(POSITION& p) const { const Node* n = nd(p); p = mk(n->prev); return n->val; }
       T& GetHead() { return m_head->val; }
       T& GetTail() { return m_tail->val; }
       //  GetAt(pos): element at the cursor WITHOUT advancing (MFC).

@@ -367,7 +367,9 @@
     #define PIPE_UNLIMITED_INSTANCES  255
   #endif
 
-  //  \\.\pipe\Name -> socket path. Uses $XDG_RUNTIME_DIR else /tmp; dir is created best-effort.
+  //  \\.\pipe\Name -> socket path. Uses $XDG_RUNTIME_DIR, else $TMPDIR, else /tmp; dir is
+  //  created best-effort. $TMPDIR is for Android, which has no /tmp and no XDG runtime
+  //  directory: the shell sets TMPDIR, and an app points it at its own cache directory.
   inline std::string p2p_pipe_path(const wchar_t* name) {
       std::string w;
       if (name) for (const wchar_t* p = name; *p; ++p) w.push_back((char)(unsigned char)*p);
@@ -375,6 +377,7 @@
       std::size_t pos = w.find_last_of("\\/");
       std::string leaf = (pos == std::string::npos) ? w : w.substr(pos + 1);
       const char* root = std::getenv("XDG_RUNTIME_DIR");
+      if (!root || !*root) root = std::getenv("TMPDIR");
       std::string dir = (root && *root) ? std::string(root) + "/p2pmsg" : std::string("/tmp/p2pmsg");
       ::mkdir(dir.c_str(), 0700);
       return dir + "/" + leaf + ".sock";
