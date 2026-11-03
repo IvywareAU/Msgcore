@@ -84,7 +84,7 @@ jobs:
 
           version="${TAG#v}"
           sha="$(git rev-parse "${TAG}^{commit}")"
-          notes="$RUNNER_TEMP/notes.md"
+          notes="$RUNNER_TEMP/notes.txt"
 
           run_id="$(gh run list --workflow CI --commit "$sha" --status success \
                       --limit 1 --json databaseId --jq '.[0].databaseId // empty')"

@@ -15,7 +15,7 @@
 #
 #  release_notes.py -- the GitHub release body for one version.
 #
-#      python3 tools/ci/release_notes.py 3.4.2 [RELEASE_NOTES.md] > body.md
+#      python3 tools/ci/release_notes.py 3.4.2 [RELEASE_NOTES.md] > body.txt
 #
 #  Prints the "## X.Y.Z" section of RELEASE_NOTES.md without its heading,
 #  UNWRAPPED: RELEASE_NOTES.md is hard-wrapped at ~95 columns for reading in a
