@@ -555,6 +555,11 @@ release is **`v3.4.2`**. If you have a `Msgcore.dll` and want to know what built
 `FileVersion` and check out the tag of the same number — that correspondence is verified at
 tag time against the DLL's own version resource, not assumed from the header.
 
+Pushing a `v*` tag publishes its GitHub release (`.github/workflows/release.yml`): the
+version's section of `RELEASE_NOTES.md` plus a link to the green `CI` run for the tagged
+commit. With no green run the workflow fails rather than publish; push the commit through CI
+and re-run it for that tag from the Actions tab.
+
 ## Security
 
 Msgcore reads binary images whose headers declare their own extent, which is exactly the

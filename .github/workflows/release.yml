@@ -1,0 +1,117 @@
+# Copyright © 2026 Khrustal & Mann
+#              MELBOURNE, VICTORIA, AUSTRALIA, 3000
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+# implied. See the License for the specific language governing
+# permissions and limitations under the License.
+#
+# release -- a GitHub release for every pushed version tag.
+#
+# NOTES: Releases 3.0.0 to 3.4.0 were made by hand in one batch, and v3.4.1 and
+#        v3.4.2 then sat as bare tags until someone asked where their releases
+#        were. A tag is not a release; this workflow takes that step away.
+#      : The body is the format the hand-made releases set: the "## X.Y.Z"
+#        section of RELEASE_NOTES.md at the tagged commit, unwrapped for
+#        GitHub's renderer by tools/ci/release_notes.py, then a "CI run:" line.
+#        If RELEASE_NOTES.md has no section for the version the annotated tag's
+#        message is used instead, with a warning.
+#      : It REQUIRES a green CI run for the tagged commit and fails without
+#        one. The pre-push hook already keeps master to CI-green SHAs and the
+#        tag goes on master, so this only fires for a tag pushed out of order --
+#        and a release that cannot name its CI run is not one to publish. Push
+#        the commit through CI, then re-run this by hand (workflow_dispatch).
+#      : It never overwrites. If the release exists (made by hand, or a re-run)
+#        it says so and stops; edit one with `gh release edit`.
+#      : It attaches nothing. No release has carried assets, and the built DLL
+#        is not a deliverable the repository publishes.
+#      : Mirrors Targetcore's draft release.yml in shape (trigger, re-run by
+#        hand, no overwrite) so the two can converge.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, e.g. v3.4.2"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: create release
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 1
+
+      # actions/checkout leaves an annotated tag as a lightweight ref (the tag
+      # object is not fetched), so its message would read as the commit's.
+      - name: fetch the tag object
+        run: git fetch --force --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}"
+
+      - name: create the release
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::A release for $TAG already exists; nothing to do."
+            exit 0
+          fi
+
+          version="${TAG#v}"
+          sha="$(git rev-parse "${TAG}^{commit}")"
+          notes="$RUNNER_TEMP/notes.md"
+
+          run_id="$(gh run list --workflow CI --commit "$sha" --status success \
+                      --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -z "$run_id" ]; then
+            echo "::error::No successful CI run for $TAG ($sha). Push that commit through CI, then re-run this workflow for $TAG."
+            exit 1
+          fi
+
+          rc=0
+          python3 tools/ci/release_notes.py "$version" RELEASE_NOTES.md > "$notes" || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "Notes: RELEASE_NOTES.md section $version"
+          elif [ "$rc" -eq 2 ]; then
+            git tag -l --format='%(contents)' "$TAG" | sed '/./,$!d' > "$notes"
+            if [ ! -s "$notes" ]; then
+              echo "::error::RELEASE_NOTES.md has no '## $version' section and $TAG has no message."
+              exit 1
+            fi
+            echo "::warning::RELEASE_NOTES.md has no '## $version' section; using the tag message."
+          else
+            exit "$rc"
+          fi
+
+          printf '\nCI run: %s/%s/actions/runs/%s\n' \
+                 "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$run_id" >> "$notes"
+
+          args=(--title "Msgcore $version" --verify-tag --notes-file "$notes")
+          case "$version" in *-*) args+=(--prerelease) ;; esac
+
+          gh release create "$TAG" "${args[@]}"
