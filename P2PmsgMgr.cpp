@@ -137,8 +137,11 @@ P2PmsgMgr::Attacheap ( LPCWSTR lpszMsgName, const P3PmsgData& oData )
     VBLockField *pField = VBLock_pField ( pVBLock );
     VBLockField_Init ( pField, 0xFF ); //TODO: LJM node to field cutover 0xFF );
     VBLockName  *pName  = VBLockField_pName ( pField );
-    VBLsize      nName_Sizeof = VBLockName_Sizeof ( uVBLaddrnn, P2PmsgObject_pName( oRootItem.r_Object() ) );
-                 nName_Sizeof = max ( nName_Sizeof, VBLockName_Sizeof_Min(uVBLaddrnn) );
+    //  Same rule P2PmsgField_SizeofItem sized the block with above -- the name's
+    //  used length. VBLockName_Sizeof(uVBLock,pName) is a different rule (capacity
+    //  on Addr64, an over-estimate on 16/32), and a name laid out bigger than it
+    //  was sized runs past the end of the root block.
+    VBLsize      nName_Sizeof = P2PmsgName_SizeofLaidOut ( uVBLaddrnn, P2PmsgObject_pName( oRootItem.r_Object(), TRUE ) );
     VBLockName_Init  ( uVBLaddrnn, pName
                      , VBLockAttr_DEFAULT | VBLockAttr_NULL
                      , lpszMsgName, nName_Sizeof );

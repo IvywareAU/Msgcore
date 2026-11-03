@@ -6741,8 +6741,39 @@ P2PmsgObject_pName ( const P3PmsgObject& oObject, bool bIndirect )
 }
 
 //
+//  Sizeof the VBLockName an item block lays out for a name it copies
+//  NOTES: Sized to the name's USED length, not the capacity of the name it was
+//         copied from. It used to be max(VBLockName_Sizenn, Sizeof_Min), and
+//         Sizenn is nBlobSize -- capacity. Every free-standing P3PmsgName is
+//         born with the full sizeof(VBLock::ud.oName) blob (RenderThisSafe), so
+//         every field, list and vect copied into a message carried a 127-byte
+//         name slot whatever its name was: "a" cost the same as a 63-char name.
+//         The root item (P2PmsgMgr) already sized by used length; now the rest
+//         of the tree does too.
+//       : Not a format change for readers. A name is walked by the nBlobSize in
+//         its own header (VBLockName_Sizenn), and VBLockName_Init writes that
+//         from the size it is handed, so images written either way read either
+//         way. Images are smaller, so golden images change size.
+//       : A chained stub's nBlobUsed bytes are part of aChain2Next, not a count,
+//         so a stub keeps the old capacity rule. Callers that lay a name out
+//         pass bChain/TRUE and never reach that branch.
+//       : SizeofItem and InitItem must agree on this number -- the allocation
+//         one sizes is the block the other writes into -- which is why both go
+//         through here and nowhere else.
+VBLsize
+P2PmsgName_SizeofLaidOut ( UCHAR uVBLock, const VBLockName *pName )
+{
+    uVBLock = uVBLock & VBLock_AddrMask;
+    const VBLsize nSizeof_Min = VBLockName_Sizeof_Min ( uVBLock );
+    if ( VBLockName_IsChained(pName) )
+      return max ( VBLockName_Sizenn(uVBLock,pName), nSizeof_Min );
+    const size_t  nUnits = pName->u.vBlob08.nBlobUsed;
+    return max ( VBLockName_Sizeof(uVBLock,nUnits), nSizeof_Min );
+}
+
+//
 //  Utilities to calculate effective size of P2PmsgItem's
-//  NOTES: 
+//  NOTES:
 //
 VBLsize
 P2PmsgField_SizeofItem ( UCHAR uVBLock, const P3PmsgField& oField, BOOL bChain )
@@ -6755,7 +6786,7 @@ P2PmsgField_SizeofItem ( UCHAR uVBLock, const P3PmsgField& oField, BOOL bChain )
     VBLsize      nSizeof = VBLockItem_Sizeof  ( uVBLock );
     nSizeof             += VBLockField_Sizeof ( );
     VBLockName  *pName   = P2PmsgObject_pName ( oObject, bChain );
-    nSizeof             += max ( VBLockName_Sizenn(uVBLock,pName ), VBLockName_Sizeof_Min(uVBLock) );
+    nSizeof             += P2PmsgName_SizeofLaidOut ( uVBLock, pName );
     VBLockData  *pData   = P2PmsgObject_pData ( oObject, bChain );
     nSizeof             += VBLockData_Sizeof  ( uVBLock, pData );
     return nSizeof;
@@ -6773,7 +6804,7 @@ oList.VerifyContainment(); // bug-hunt-delete
     // Following is part lifted from P2PmsgField_SizeofItem
     nSizeof             += VBLockField_Sizeof ( );
     VBLockName  *pName   = P2PmsgObject_pName ( oObject, bChain );
-    nSizeof             += max ( VBLockName_Sizenn(uVBLock,pName ), VBLockName_Sizeof_Min(uVBLock) );
+    nSizeof             += P2PmsgName_SizeofLaidOut ( uVBLock, pName );
     VBLockData  *pData   = P2PmsgObject_pData ( oObject, bChain );
     nSizeof             += VBLockData_Sizeof  ( uVBLock, pData );
     return nSizeof;
@@ -6806,16 +6837,15 @@ P2PmsgVect_SizeofItem ( UCHAR uVBLock, const P3PmsgVect& oVect )
     //  and through the same accessors as their Init counterparts. The vect was the only one
     //  of the three that did not, which is why only the vect paths corrupt.
     //
-    //  NOTE for the golden image: on x64 and Linux both rules already return 127, so this
-    //  returns exactly what it returned before on those and MscsUnitTests/golden_ref.p2p is
-    //  unaffected. Only the short Win32 answer changes.
+    //  The name term is now P2PmsgName_SizeofLaidOut, shared with InitItem: the name's used
+    //  length rather than the 127-byte capacity it was copied from, the same on every
+    //  architecture. The golden image was regenerated for it (the 127 slots are gone).
     const P3PmsgObject& oObject = oVect.r_Object ( );
     VBLsize      nSizeofItem = VBLockItem_Sizeof  ( uVBLock );
                  nSizeofItem += VBLockVect_Sizeof ( uVBLock );
                  nSizeofItem += VBLockField_Sizeof ( );
     VBLockName  *pName   = P2PmsgObject_pName ( oObject, TRUE );
-                 nSizeofItem += max ( VBLockName_Sizenn(uVBLock,pName)
-                                    , VBLockName_Sizeof_Min(uVBLock) );
+                 nSizeofItem += P2PmsgName_SizeofLaidOut ( uVBLock, pName );
     VBLockData  *pData   = P2PmsgObject_pData ( oObject, TRUE );
                  nSizeofItem += VBLockData_Sizeof ( uVBLock, pData );
     return nSizeofItem;
@@ -6834,7 +6864,7 @@ P2PmsgItem_InitField( VBLock *pVBLock, const P3PmsgField& oField )
     VBLockField_Init( VBLock_pField(pVBLock), AttrField_DEFAULT );
     // VBLockName is both delicate and pivitol
     VBLockName  *pName   = P2PmsgObject_pName ( oField.r_Object(), TRUE );
-    VBLaddr      nSizeofName = max ( VBLockName_Sizenn(uVBLock,pName ), VBLockName_Sizeof_Min(uVBLock) );
+    VBLaddr      nSizeofName = P2PmsgName_SizeofLaidOut ( uVBLock, pName );
     VBLockName_Init ( uVBLock,VBLock_pName(pVBLock), VBLockAttr_DEFAULT
                     , oField.c_name(), nSizeofName );
     // VBLockData is effectively the remainder
@@ -6862,7 +6892,7 @@ P2PmsgList_InitItem ( VBLock *pVBLock, const P3PmsgList& oList )
     VBLockField_Init( VBLock_pField(pVBLock), AttrField_DEFAULT );
     // VBLockName is both delicate and pivitol
     VBLockName  *pName   = P2PmsgObject_pName ( oList.r_Object(), TRUE );
-    VBLaddr      nSizeofName = max ( VBLockName_Sizenn(uVBLock,pName ), VBLockName_Sizeof_Min(uVBLock) );
+    VBLaddr      nSizeofName = P2PmsgName_SizeofLaidOut ( uVBLock, pName );
     VBLockName_Init ( uVBLock,VBLock_pName(pVBLock), VBLockAttr_DEFAULT
                     , oList.c_name(), nSizeofName );
     // VBLockData is effectively the remainder
@@ -6883,7 +6913,7 @@ P2PmsgVect_InitItem ( VBLock *pVBLock, const P3PmsgVect& oVect )
     VBLockField_Init( VBLock_pField(pVBLock), AttrField_DEFAULT );
     // VBLockName is both delicate and pivitol
     VBLockName  *pName   = P2PmsgObject_pName ( oVect.r_Object(), TRUE );
-    VBLaddr      nSizeofName = max ( VBLockName_Sizenn(uVBLock,pName ), VBLockName_Sizeof_Min(uVBLock) );
+    VBLaddr      nSizeofName = P2PmsgName_SizeofLaidOut ( uVBLock, pName );
     VBLockName_Init ( uVBLock,VBLock_pName(pVBLock), VBLockAttr_DEFAULT
                     , oVect.c_name(), nSizeofName );
     // VBLockData is effectively the remainder

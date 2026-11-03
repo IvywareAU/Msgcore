@@ -905,6 +905,8 @@ P2PmsgField_Merge ( P3PmsgField& oField, const P3PmsgField& rhs );
 
 
 VBLsize
+P2PmsgName_SizeofLaidOut ( UCHAR uVBLock, const VBLockName *pName );
+VBLsize
 P2PmsgField_SizeofItem ( UCHAR uVBLock, const P3PmsgField& oField, BOOL bChain = TRUE );
 VBLsize
 P2PmsgItem_InitField   ( VBLock *pVBLock, const P3PmsgField& oField );

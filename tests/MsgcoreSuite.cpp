@@ -5304,6 +5304,56 @@ static void Test_HeapWidths()
         TF_CHECK_EQ((int)oMgr.r_Desc().GetCount(), 2);
         TF_CHECK_EQ(oMgr.SelectItem(L"Alpha").c_int(), 1);
     }
+
+    //  A field's name used to be laid out at the capacity of the free-standing
+    //  name it was copied from -- the full 127-byte VBLockName slot -- so "a"
+    //  and a 50-char name cost the same. It is now laid out at its used length
+    //  (P2PmsgName_SizeofLaidOut), so the long name's block is ~49 UTF-16 units
+    //  bigger and the short one's is smaller than the old slot alone was.
+    TF_CASE("a field's name takes the room its name needs, not a fixed slot")
+    {
+        wchar_t szLong[51];
+        for (int i = 0; i < 50; i++) szLong[i] = L'n';
+        szLong[50] = 0;
+        const UCHAR uWidths[] = { VBLock_Addr32, VBLock_Addr64 };
+        for (UCHAR uWidth : uWidths)
+        {
+            P2PmsgMgr mgr(uWidth, 4096, 1u << 20);
+            mgr.r_name() = L"Root";
+            mgr.r_Desc(P3PmsgField::AttrCMD_Create);
+            mgr.r_Desc() += P3PmsgField(L"a",    DataBSTR16(L"v"));
+            mgr.r_Desc() += P3PmsgField(szLong, DataBSTR16(L"v"));
+
+            P3PmsgObject oShort = mgr.r_Desc().SelectObject(L"a");
+            P3PmsgObject oLong  = mgr.r_Desc().SelectObject(szLong);
+            TF_CHECK(!oShort.IsVoid());
+            TF_CHECK(!oLong.IsVoid());
+            if (oShort.IsVoid() || oLong.IsVoid())
+                continue;
+            const VBLsize nShort = oShort.GetVBLockSize();
+            const VBLsize nLong  = oLong.GetVBLockSize();
+            TF_CHECK(nShort < 127);
+            TF_CHECK(nLong >= nShort + 49 * 2 - 16);   // slack for block rounding
+
+            //  A short name's block has no spare room any more, so growing it
+            //  has to go somewhere else -- in place through a cursor, and
+            //  through the refactor path.
+            mgr.r_Desc() += P3PmsgField(L"b", DataBSTR16(L"w"));
+            {
+                P3PmsgCurs oCurs(mgr.r_Desc());
+                TF_CHECK(oCurs.Goto(L"a"));
+                oCurs.r_name() = L"InPlaceRenamedToSomethingFarLongerThanA";
+            }
+            TF_CHECK(mgr.r_Desc().Exists(L"InPlaceRenamedToSomethingFarLongerThanA"));
+            TF_CHECK(!mgr.r_Desc().Exists(L"a"));
+            P3PmsgRefactor_Rename(mgr, L"b", L"RefactorRenamedToSomethingFarLongerThanB");
+            TF_CHECK(mgr.r_Desc().Exists(L"RefactorRenamedToSomethingFarLongerThanB"));
+            TF_CHECK(!mgr.r_Desc().Exists(L"b"));
+            TF_CHECK(mgr.r_Desc().Exists(szLong));
+            TF_CHECK_EQ((int)mgr.r_Desc().GetCount(), 3);
+            mgr.AssertValid();
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -6418,18 +6468,21 @@ static void Test_HeapCloserFit()
             mgr.r_Desc().r_Curs().Delete();
         }
 
+        //  The new names are the same length as the freed ones (NwS0 vs Sml0): a
+        //  name is laid out at its used length, so a longer one would need a bigger
+        //  block than the one it is meant to reuse.
         //  Ask for the smalls first: that is the order that used to shred the
         //  big blocks.
         for (int i = 0; i < 4; i++)
         {
             wchar_t sz[32];
-            swprintf_s(sz, 32, L"NewS%d", i);
+            swprintf_s(sz, 32, L"NwS%d", i);
             mgr.r_Desc() += P3PmsgField(sz, DataBSTR16(L"s"));
         }
         for (int i = 0; i < 4; i++)
         {
             wchar_t sz[32];
-            swprintf_s(sz, 32, L"NewB%d", i);
+            swprintf_s(sz, 32, L"NwB%d", i);
             mgr.r_Desc() += P3PmsgField(sz, DataBSTR16(szBig));
         }
 
@@ -6437,7 +6490,7 @@ static void Test_HeapCloserFit()
         for (int i = 0; i < 8; i++)
         {
             wchar_t sz[32];
-            swprintf_s(sz, 32, i < 4 ? L"NewS%d" : L"NewB%d", i < 4 ? i : i - 4);
+            swprintf_s(sz, 32, i < 4 ? L"NwS%d" : L"NwB%d", i < 4 ? i : i - 4);
             P3PmsgObject oNew = mgr.r_Desc().SelectObject(sz);
             TF_CHECK(!oNew.IsVoid());
             if (oNew.IsVoid())
