@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.4.1 is tag
-//         v3.4.1. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.4.2 is tag
+//         v3.4.2. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,29 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.4.2.0, a PATCH on 3.4.1: tools\ci\exports-flat.manifest and
+//  exports-cxx-x64.manifest match the built Debug|x64 DLL unchanged (285 flat,
+//  771 mangled), Msgcore_c.h is untouched and no class layout moved.
+//
+//  It sizes a NAME by its length. Every free-standing P3PmsgName is born with
+//  the full sizeof(VBLock::ud.oName) blob, and P2PmsgField/List/Vect_SizeofItem
+//  and their InitItem twins laid the copy out at VBLockName_Sizenn -- the
+//  CAPACITY of that blob, not nBlobUsed -- so every item in an image carried a
+//  127-byte name slot, "a" as much as a 63-char name. One rule now does it,
+//  P2PmsgName_SizeofLaidOut (used length, floored at Sizeof_Min; a chained stub
+//  keeps the capacity rule), and SizeofItem, InitItem and the root item in
+//  P2PmsgMgr::Attacheap all go through it -- the root had sized with one rule
+//  and laid out with another, which the smaller names turned into an overrun.
+//
+//  Not a reader-side format change: a name is walked by the nBlobSize in its
+//  own header, so a 3.4.1 image loads, reads and takes new items under 3.4.2
+//  (checked against the old golden_ref.p2p), and a 3.4.2 image is the same
+//  format with smaller blocks. What DOES change is the bytes a writer emits:
+//  MscsUnitTests/golden_ref.p2p was regenerated. New suite case "a field's
+//  name takes the room its name needs, not a fixed slot".
+//
+//  BELOW IS THE 3.4.1 RATIONALE.
 //
 //  3.4.1.0, a PATCH on 3.4.0, and strictly one: tools\ci\exports-flat.manifest,
 //  both exports-cxx-*.manifest files and Msgcore_c.h are byte-identical to v3.4.0,
@@ -247,22 +270,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  4
-#define MSGCORE_VERSION_PATCH  1
+#define MSGCORE_VERSION_PATCH  2
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,4,1,0
+#define MSGCORE_VERSION_COMMAS 3,4,2,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.4.1.0"
+#define MSGCORE_VERSION_STRING "3.4.2.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
 //  0x03040100 is 3.4.1.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03040100
+#define MSGCORE_VERSION_HEX    0x03040200
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

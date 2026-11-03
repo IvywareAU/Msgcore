@@ -3,6 +3,28 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.4.2
+
+A patch release that makes images smaller. The flat C API, the C++ export surface and every
+class layout are unchanged.
+
+### Fixed: every name took a 127-byte slot
+
+Every field, list and vect in a message reserved the full 127-byte name slot, whatever its
+name: a field called `a` cost as much as one with a 63-character name. A name now takes the
+room it needs: a short header plus its UTF-16 units, with a small minimum per addressing
+mode.
+
+- **Images are smaller**, by roughly the unused part of 127 bytes for every named item.
+- **Old images still work.** Each name records its own size, so images written by 3.4.1 and
+  earlier load, read and accept new items under 3.4.2, and 3.4.2 images are the same format.
+- **Bytes on disk change.** The same tree saved by 3.4.2 is not byte-identical to 3.4.1's
+  output. Anything that compares saved images byte-for-byte needs a new reference;
+  MscsUnitTests' `golden_ref.p2p` has been regenerated.
+- **Renaming in place:** an item's name block is now only as big as its name, so renaming it
+  to a longer name moves the name to its own block (the existing chained-name path) instead
+  of reusing spare room in the slot.
+
 ## 3.4.1
 
 A patch release that brings **Android**. The flat C API, the C++ export surface, the image
