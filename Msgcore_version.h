@@ -60,7 +60,7 @@
 //  message path (GetScopeOrDestin). The retry now runs only when a delimiter
 //  is left (*lpszParsedname != 0): same answers, one walk. Measured at 512
 //  siblings on a received heap: a miss 62.5 -> 30.2 us on Windows, 304 -> 155
-//  us on Linux (p2p_performance_progress.md F-P1-3). New suite case "Exists()
+//  us on Linux (MSCS performance log, finding F-P1-3). New suite case "Exists()
 //  finds a stored dotted name; a plain miss stays a miss" pins the retry --
 //  checked by disabling it, which fails two of its checks.
 //

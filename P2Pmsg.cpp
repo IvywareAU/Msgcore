@@ -8011,7 +8011,7 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCWSTR lpszObjectPath
       //  (*lpszParsedname == 0) the retry key IS nsObjectname, and Goto always
       //  walks from the first sibling. A second full walk that could only miss
       //  again doubled the cost of every Exists()/SelectObject() miss: measured
-      //  304 -> 155 us at 512 siblings (p2p_performance_progress.md F-P1-3).
+      //  304 -> 155 us at 512 siblings (MSCS performance log, finding F-P1-3).
       if ( !oField.r_Desc().r_Curs().Goto(nsObjectname) )
       { // Check if renamining name has dot operator "*.pys" example
         if ( *lpszParsedname != 0 &&
