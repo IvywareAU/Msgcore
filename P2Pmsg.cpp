@@ -8004,9 +8004,18 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCWSTR lpszObjectPath
       }
       //if ( oField.r_name().c_wcsicmp(++lpszObjectPath) == 0 )
       //  return *pObject;
+      //  The retry below is for a STORED name that itself contains a delimiter
+      //  ("x.pys"): the first Goto tried only "x". It is only a different
+      //  question when a delimiter is left in the path. ParseObjectPath copies
+      //  the name verbatim up to the first delimiter, so with none left
+      //  (*lpszParsedname == 0) the retry key IS nsObjectname, and Goto always
+      //  walks from the first sibling. A second full walk that could only miss
+      //  again doubled the cost of every Exists()/SelectObject() miss: measured
+      //  304 -> 155 us at 512 siblings (p2p_performance_progress.md F-P1-3).
       if ( !oField.r_Desc().r_Curs().Goto(nsObjectname) )
       { // Check if renamining name has dot operator "*.pys" example
-        if ( oField.r_Desc().r_Curs().Goto(lpszObjectPath) )
+        if ( *lpszParsedname != 0 &&
+             oField.r_Desc().r_Curs().Goto(lpszObjectPath) )
           return oField.r_Desc().r_Curs().r_Object();
         return P3PmsgObject();         // Selection path broken;
       }

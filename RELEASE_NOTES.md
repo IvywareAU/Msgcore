@@ -3,6 +3,25 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.4.3
+
+A patch release that makes a name lookup that misses twice as fast. The flat C API, the C++
+export surface, the image format and every class layout are unchanged.
+
+### Fixed: a lookup that missed walked the siblings twice
+
+`Exists()`, `SelectObject()` and every path lookup that did not find a plain name searched
+the whole sibling list, then searched it again with the same name. (The second search exists
+for stored names that contain a delimiter, such as `Log.pys`; for a plain name it repeated
+the first one.) It now runs only when the path has a delimiter left.
+
+- **Every miss is about twice as fast:** 62.5 → 30.2 µs on Windows and 304 → 155 µs on
+  Linux, for a 512-sibling lookup on a received message.
+- **Answers are unchanged.** A stored dotted name is still found; a new suite case pins
+  that, and a plain miss still misses.
+- Targetcore's message path looks names up with `Exists()`, so it benefits without a
+  rebuild against new headers. Only the DLL / shared library needs replacing.
+
 ## 3.4.2
 
 A patch release that makes images smaller. The flat C API, the C++ export surface and every

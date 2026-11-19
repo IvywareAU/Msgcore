@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.4.2 is tag
-//         v3.4.2. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.4.3 is tag
+//         v3.4.3. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,26 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.4.3.0, a PATCH on 3.4.2, and strictly one: the only source change is
+//  one condition in P3Pmsg_SelectObjectRecurse (P2Pmsg.cpp), so no export,
+//  no Msgcore_c.h line and no class layout moved.
+//
+//  A MISSED NAME WALKED ITS SIBLINGS TWICE. When Goto(name) misses, the field
+//  arm retries Goto with the whole rest of the path, so a stored name that
+//  itself holds a delimiter ("Log.pys") is still found when "Log" is not. For
+//  a plain name the rest of the path IS the name -- ParseObjectPath copies it
+//  verbatim up to the first delimiter -- and Goto always walks from the first
+//  sibling, so the retry was the same full walk again, certain to miss. Every
+//  Exists() / SelectObject() miss paid it, and Targetcore asks Exists() on the
+//  message path (GetScopeOrDestin). The retry now runs only when a delimiter
+//  is left (*lpszParsedname != 0): same answers, one walk. Measured at 512
+//  siblings on a received heap: a miss 62.5 -> 30.2 us on Windows, 304 -> 155
+//  us on Linux (p2p_performance_progress.md F-P1-3). New suite case "Exists()
+//  finds a stored dotted name; a plain miss stays a miss" pins the retry --
+//  checked by disabling it, which fails two of its checks.
+//
+//  BELOW IS THE 3.4.2 RATIONALE.
 //
 //  3.4.2.0, a PATCH on 3.4.1: tools\ci\exports-flat.manifest and
 //  exports-cxx-x64.manifest match the built Debug|x64 DLL unchanged (285 flat,
@@ -270,22 +290,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  4
-#define MSGCORE_VERSION_PATCH  2
+#define MSGCORE_VERSION_PATCH  3
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,4,2,0
+#define MSGCORE_VERSION_COMMAS 3,4,3,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.4.2.0"
+#define MSGCORE_VERSION_STRING "3.4.3.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03040100 is 3.4.1.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03040200
+//  0x03040300 is 3.4.3.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03040300
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"
