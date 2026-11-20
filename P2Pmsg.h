@@ -687,6 +687,11 @@ P2PmsgObject_Sizeof_VBLockData( const P3PmsgObject& oObject, BOOL bChain = TRUE 
 // what VBLockData_Copy may read from it (3.4.7). Not exported.
 VBLsize
 P2PmsgData_SizeofReadable ( const P3PmsgData& oData, VBLsize nSizeofDeclared );
+// Whether nBytes plus the terminator fit the blob value pData both by its
+// declared capacity and by the room its block really holds (3.4.7). pData is
+// P2PmsgObject_pData(oObject). Not exported.
+bool
+P2PmsgData_BlobFits ( const P3PmsgObject& oObject, VBLockData *pData, VBLsize nBytes );
 VBLockData*
 P2PmsgObject_NewVBLockData ( P3PmsgObject& oObject, VBLsize nSizeof );
 VBLockName*

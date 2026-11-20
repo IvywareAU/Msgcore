@@ -1022,7 +1022,7 @@ void*
 P3PmsgData::c_vBlob ( const void *pvBlob, size_t nBlobSize )
 {
     VBLockData *pData = P2PmsgObject_pData(*pOBJ__);
-    if ( VBLockData_BlobSize(pData) < nBlobSize )
+    if ( !P2PmsgData_BlobFits ( *pOBJ__, pData, (VBLsize)nBlobSize ) )   // 3.4.7
     {
       const VBLockDataAttr uDataAttr = pData -> uDataAttr;
       const VBLockDataType uDataType =
@@ -1066,7 +1066,7 @@ void*
 P3PmsgData::c_memcpy ( const void *pvBlob, size_t nBlobSize )
 {
     VBLockData *pData = P2PmsgObject_pData(*pOBJ__);
-    if ( VBLockData_BlobSize(pData) < nBlobSize )
+    if ( !P2PmsgData_BlobFits ( *pOBJ__, pData, (VBLsize)nBlobSize ) )   // 3.4.7
     {
 //SSERT(VerifyContainment());
       VBLockDataType uDataType = pData -> uDataType;
@@ -1105,7 +1105,7 @@ P3PmsgData::c_wcscpy ( LPCWSTR lpszSrc, size_t nCount )
     size_t      nUnits     = p2p_wide_units ( lpszSrc, nCount ); // UTF-16 units (astral -> 2)
     UINT_PTR    nCountBytes = nUnits * sizeof(P2PWCHAR);   // stored 16-bit units (§4.2)
     VBLockData *pData = P2PmsgObject_pData(*pOBJ__);
-    if ( VBLockData_BlobSize(pData) < nCountBytes )
+    if ( !P2PmsgData_BlobFits ( *pOBJ__, pData, (VBLsize)nCountBytes ) )   // 3.4.7
     {
       VBLockDataType uDataType = pData -> uDataType;
       VBLockDataAttr uDataAttr = pData -> uDataAttr;
@@ -1149,6 +1149,14 @@ P3PmsgData::c_memset ( int c, size_t nCount )
       //TODO:LJM deprecated by pData = NewVBLockData ( nCount );
       pData = P2PmsgObject_NewVBLockData ( *pOBJ__, nCount );
     }
+    //  This fills the whole DECLARED capacity, which on a received heap a peer
+    //  wrote; refused unless the block really holds it (3.4.7, refer
+    //  P2PmsgData_BlobFits).
+    if ( !P2PmsgData_BlobFits ( *pOBJ__, pData, VBLockData_BlobSize(pData) ) )
+      EVERR -> Module ( __FUNCTION__ )
+            -> Message("Value declares %i bytes of capacity its block does not hold"
+                      , (int)VBLockData_BlobSize(pData) )
+            -> Throw();
     memset ( VBLockData_pcBlob(pData), c, VBLockData_BlobSize(pData) );
     return VBLockData_pcBlob(pData);
 }
@@ -6690,11 +6698,12 @@ P2PmsgData_pData ( const P3PmsgData& oData, bool bChain )
 //         runs first -- P2PmsgObject_pData bounds every block of the chain
 //         against the image -- and the second walk below re-reads the same
 //         bytes only to learn which block the value ended in.
-VBLsize
-P2PmsgData_SizeofReadable ( const P3PmsgData& oData, VBLsize nSizeofDeclared )
+//  The bytes from pData -- which P2PmsgObject_pData ( oObject ) returned, so
+//  every block of its chain is already bounded -- to the end of the block it
+//  lies in.
+static VBLsize
+P2PmsgObject_RoomFromData ( const P3PmsgObject& oObject, const VBLockData *pData )
 {
-    const P3PmsgObject& oObject = *oData.p_Object();
-    const VBLockData *pData   = P2PmsgObject_pData ( oObject );     // checked
     const VBLock     *pVBLock = (const VBLock *)oObject.GetVBLock();
     const VBLockData *pHop    = VBLock_pData ( (VBLock *)pVBLock );
     while ( pHop != pData && VBLockData_IsChained ( pHop ) )
@@ -6705,8 +6714,40 @@ P2PmsgData_SizeofReadable ( const P3PmsgData& oData, VBLsize nSizeofDeclared )
     }
     const char *pcEnd  = (const char *)pVBLock + VBLock_Hdr_u_SizeNN ( pVBLock );
     const char *pcData = (const char *)pData;
-    const VBLsize nRoom = pcData < pcEnd ? (VBLsize)( pcEnd - pcData ) : 0;
+    return pcData < pcEnd ? (VBLsize)( pcEnd - pcData ) : 0;
+}
+VBLsize
+P2PmsgData_SizeofReadable ( const P3PmsgData& oData, VBLsize nSizeofDeclared )
+{
+    const P3PmsgObject& oObject = *oData.p_Object();
+    const VBLockData   *pData   = P2PmsgObject_pData ( oObject );   // checked
+    const VBLsize       nRoom   = P2PmsgObject_RoomFromData ( oObject, pData );
     return nSizeofDeclared < nRoom ? nSizeofDeclared : nRoom;
+}
+//
+//  Whether nBytes, and the 2-byte terminator VBLockData_BlobCopy writes after
+//  them, fit the blob value pData where it really lies (3.4.7)
+//  NOTES: THE SETTER TWIN OF VBLockData_CopyBound. c_vBlob, c_memcpy,
+//         c_wcscpy and c_memset decided whether to grow a value by the
+//         capacity in its OWN header, and then BlobCopy wrote up to that
+//         capacity. On a received heap a peer wrote that header, so a value
+//         declaring more capacity than its block holds was written past the
+//         block by a receiver that set it -- a reply built on the received
+//         message, say. Now the room left in the block bounds it too, and a
+//         value that does not fit is grown exactly as one with too small a
+//         capacity always was. A value this library laid out always fits:
+//         VBLockData_InitBlob records the room less the header and the
+//         terminator as its capacity.
+//       : pData is what P2PmsgObject_pData ( oObject ) returned.
+bool
+P2PmsgData_BlobFits ( const P3PmsgObject& oObject, VBLockData *pData, VBLsize nBytes )
+{
+    if ( VBLockData_BlobSize ( pData ) < nBytes )
+      return false;
+    const VBLsize nRoom = P2PmsgObject_RoomFromData ( oObject, pData );
+    const VBLsize nOff  = (VBLsize)( (const char *)VBLockData_pcBlob ( pData )
+                                   - (const char *)pData ) + sizeof(P2PWCHAR);
+    return nRoom >= nOff && nRoom - nOff >= nBytes;
 }
 VBLsize
 P2PmsgObject_Sizeof_VBLockData ( const P3PmsgObject& oObject, BOOL bChain )

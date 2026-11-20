@@ -21,7 +21,11 @@ redirecting one) took this path.
 - It refuses to read past the source value's block, or to write past the destination.
 - A declared capacity larger than the destination now becomes the destination's real size,
   instead of being zero-filled past its end.
-- Values this library writes copy exactly as before.
+- **Setting a received value had the same flaw.** `c_vBlob`, `c_memcpy` and `c_wcscpy` trusted
+  the capacity a received value declared, so writing a longer value into it could run past its
+  block. They now check the block's real size and grow the value when it doesn't fit, as they
+  always did for a value that was too small. `c_memset` refuses such a value.
+- Values this library writes copy and set exactly as before.
 
 ### Faster: name lookups in messages built in-process
 

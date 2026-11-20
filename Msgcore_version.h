@@ -67,6 +67,14 @@
 //  the value's own block really holds. Values this library writes copy
 //  unchanged. Found by the independent security review of the change below
 //  (MSCS performance log, finding F-P1-9). Pinned by Test_ValueCopyBounds.
+//  The same review named the setters' side, and it had the same shape:
+//  c_vBlob, c_memcpy and c_wcscpy grew a value only when its DECLARED
+//  capacity was too small, then wrote up to it, so a receiver setting a
+//  received value that overstated its capacity wrote past the block; c_memset
+//  filled the whole declared capacity. P2PmsgData_BlobFits now also asks the
+//  block, a value that does not fit is grown as before, and c_memset refuses.
+//  Pinned by the case "setting a received value that overstates its capacity
+//  grows it" -- checked by restoring the old test, which crashes the suite.
 //
 //  M2's TRUSTED BIT. A heap one of the EMPTY constructors made (CreateIOMAGE /
 //  CreateSYS / CreateBSTRio by size) holds no byte this library did not lay

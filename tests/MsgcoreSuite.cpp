@@ -7368,6 +7368,38 @@ static void Test_ValueCopyBounds()
         TF_CHECK ( untouchedFrom ( nSz ) );
     }
 
+    TF_CASE("setting a received value that overstates its capacity grows it, writes nothing past")
+    {
+        //  The setter twin (P2PmsgData_BlobFits): c_wcscpy decided by the
+        //  capacity in the value's own header. AAA declares the most its width
+        //  allows, in a block holding two characters; BBB follows it.
+        P3PmsgBSTR oSent ( VBLock_Addr32, 2048 );
+        P3PmsgItem& oMsgS = oSent.InitItem ( VBLockBSTR_MSG, P3PmsgData ( (int)7 ) );
+        oMsgS.r_Desc ( P3PmsgField::AttrCMD_Create );
+        oMsgS.r_Desc ( ) += P3PmsgField ( L"AAA", P3PmsgData ( L"hi" ) );
+        oMsgS.r_Desc ( ) += P3PmsgField ( L"BBB", P3PmsgData ( (int)2 ) );
+        oSent.PrepareP2Piomage ( ~(DWORD)0 );
+        const VBLsize nWire = oSent.P2PiomageSize ( );
+        char *pWire = new char [ nWire ];
+        memcpy ( pWire, oSent.P2Piomage ( ), nWire );
+        oSent.ReleaseP2Piomage ( );
+
+        P3PmsgBSTR oRecv ( *(const VBListIOmage *)pWire, nWire );   // duplicates
+        delete [] pWire;
+        P3PmsgItem& oMsg = oRecv.r_item ( VBLockBSTR_MSG );
+        P3PmsgField oAAA = oMsg.r_Desc().SelectItem(L"AAA").r_Object();
+        VBLockData *pData = P2PmsgData_pData ( oAAA.r_data() );
+        const size_t nOff = (size_t)( (char *)VBLockData_pcBlob ( pData ) - (char *)&pData->u );
+        if      ( nOff <= sizeof(UINT08)*2 ) pData->u.vBlob08.nBlobSize = 0xFF;
+        else if ( nOff <= sizeof(UINT16)*2 ) pData->u.vBlob16.nBlobSize = 0xFFFF;
+        else                                 pData->u.vBlob32.nBlobSize = 0xFFFFu;
+
+        const std::wstring strLong ( 120, L'x' );
+        TF_CHECK ( !rejects ( [&]{ oAAA.r_data().c_wcscpy ( strLong.c_str(), strLong.size() ); } ) );
+        TF_CHECK ( std::wstring ( oMsg.r_Desc().SelectItem(L"AAA").c_wstr() ) == strLong );
+        TF_CHECK_EQ ( oMsg.r_Desc().SelectItem(L"BBB").c_int(), 2 );   // the neighbour
+    }
+
     TF_CASE("a well-formed value copies exactly as before")
     {
         VBLockData *pSrc  = fresh ( VBLockData_BLOB16var, 10, 6 );
