@@ -6444,24 +6444,29 @@ VBLockData_Sizeof_Chain2Next ( UCHAR uVBLock ) noexcept
 //       : Skipped where the block is not in an image at all: an object holding
 //         its block inline in m_oVBLock, or anything on a SYSTEM heap.
 static void
-P2PmsgObject_ChkVBLock ( const P3PmsgObject& oObject, VBLock *pVBLock )
+P2PmsgHeap_ChkVBLock ( P2PmsgHANDLE hVBList, VBLock *pVBLock )
 {
     if ( pVBLock == nullptr )
       EVERR->MODULE
            ->Message("Null VBLock: address does not resolve in the image")
            ->Throw();
-    if ( !P2PmsgHeap_IsPhysSpan ( oObject.m_hVBList, pVBLock, 1 ) )
+    if ( !P2PmsgHeap_IsPhysSpan ( hVBList, pVBLock, 1 ) )
       return;
-    const VBLsize nSizeofHdr = P2PmsgHeap_Sizeof_Hdr ( oObject.m_hVBList );
-    if ( !P2PmsgHeap_IsPhysSpan ( oObject.m_hVBList, pVBLock, nSizeofHdr ) )
+    const VBLsize nSizeofHdr = P2PmsgHeap_Sizeof_Hdr ( hVBList );
+    if ( !P2PmsgHeap_IsPhysSpan ( hVBList, pVBLock, nSizeofHdr ) )
       EVERR->MODULE
            ->Message("VBLock header of %u leaves the image", (UINT)nSizeofHdr )
            ->Throw();
     const VBLsize nSizeofBlock = VBLock_Hdr_u_SizeNN ( pVBLock );
-    if ( !P2PmsgHeap_IsPhysSpan ( oObject.m_hVBList, pVBLock, nSizeofBlock ) )
+    if ( !P2PmsgHeap_IsPhysSpan ( hVBList, pVBLock, nSizeofBlock ) )
       EVERR->MODULE
            ->Message("VBLock of %u leaves the image", (UINT)nSizeofBlock )
            ->Throw();
+}
+static void
+P2PmsgObject_ChkVBLock ( const P3PmsgObject& oObject, VBLock *pVBLock )
+{
+    P2PmsgHeap_ChkVBLock ( oObject.m_hVBList, pVBLock );
 }
 
 //
@@ -6559,23 +6564,27 @@ P2PmsgObject_ChkVBLockData ( const P3PmsgObject& oObject, VBLock *pVBLock
 //         the scope and every refusal are unchanged; only the passing path got
 //         cheaper. P2PmsgObject_ChkVBLock above is the same first step, kept
 //         for its other callers.
-static VBLockName*
-P2PmsgObject_pNameChk ( const P3PmsgObject& oObject, VBLock *pVBLock )
+//       : HEAP-LEVEL SINCE M3 (Msgcore 3.4.5). The body takes the heap handle
+//         and addressing mode an object would carry, so P3PmsgCurs::Goto can
+//         bound a sibling's name without connecting a handle to it first.
+//         P2PmsgObject_pNameChk below passes its object's two fields; there is
+//         one copy of the checks.
+VBLockName*
+P2PmsgHeap_pNameChk ( P2PmsgHANDLE hVBList, UCHAR uVBLock, VBLock *pVBLock )
 {
     if ( pVBLock == nullptr )
-      P2PmsgObject_ChkVBLock ( oObject, pVBLock );          // throws
+      P2PmsgHeap_ChkVBLock ( hVBList, pVBLock );            // throws
     P2PmsgHeapExtent oExtent;
-    P2PmsgHeap_GetExtent ( oObject.m_hVBList, &oExtent );
+    P2PmsgHeap_GetExtent ( hVBList, &oExtent );
     //  Not in the image (inline block, SYSTEM heap): no bound applies.
     if ( !P2PmsgHeapExtent_IsSpan ( oExtent, pVBLock, 1 ) )
       return VBLock_pName ( pVBLock );
     if ( !P2PmsgHeapExtent_IsSpan ( oExtent, pVBLock, oExtent.nSizeofHdr ) )
-      P2PmsgObject_ChkVBLock ( oObject, pVBLock );          // throws
+      P2PmsgHeap_ChkVBLock ( hVBList, pVBLock );            // throws
     const VBLsize nSizeofBlock = VBLock_Hdr_u_SizeNN ( pVBLock );
     if ( !P2PmsgHeapExtent_IsSpan ( oExtent, pVBLock, nSizeofBlock ) )
-      P2PmsgObject_ChkVBLock ( oObject, pVBLock );          // throws
+      P2PmsgHeap_ChkVBLock ( hVBList, pVBLock );            // throws
     VBLockName *pName   = VBLock_pName ( pVBLock );
-    const UCHAR uVBLock = oObject.m_uVBLock;
     const VBLsize nSizeofMin = VBLockName_Sizeof_Min ( uVBLock );
     if ( !VBLock_IsContainedIn ( pVBLock, nSizeofBlock, pName, nSizeofMin ) )
       VBLock_ChkContained ( pVBLock, pName, nSizeofMin, __FUNCTION__ );
@@ -6603,6 +6612,11 @@ P2PmsgObject_pNameChk ( const P3PmsgObject& oObject, VBLock *pVBLock )
              ->Throw();
     }
     return pName;
+}
+static VBLockName*
+P2PmsgObject_pNameChk ( const P3PmsgObject& oObject, VBLock *pVBLock )
+{
+    return P2PmsgHeap_pNameChk ( oObject.m_hVBList, oObject.m_uVBLock, pVBLock );
 }
 
 VBLockData*

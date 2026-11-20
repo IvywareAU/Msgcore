@@ -687,6 +687,12 @@ VBLockData*
 P2PmsgObject_NewVBLockData ( P3PmsgObject& oObject, VBLsize nSizeof );
 VBLockName*
 P2PmsgObject_pName  ( const P3PmsgObject& oObject, bool bIndirect = true );
+// A block's own name (not followed down a chain), bounded against the image exactly as
+// P3PmsgName::c_name() bounds it, without a handle connected to the block. For the
+// sibling walk in P3PmsgCurs::Goto. uVBLock is the heap's addressing mode. Throws on
+// a name this library could not have written; not exported.
+VBLockName*
+P2PmsgHeap_pNameChk ( P2PmsgHANDLE hVBList, UCHAR uVBLock, VBLock *pVBLock );
 VBLsize
 P2PmsgObject_VBLockNameSize( const P3PmsgObject& oObject );
 Msgcore_EXT BOOL

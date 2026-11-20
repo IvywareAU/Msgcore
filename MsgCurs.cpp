@@ -24,6 +24,7 @@
 #include "P2PmsgVBLock.h"
 #include "MsgVBHeap.h"
 #include "MsgCurs.h"
+#include <cwctype>                     // std::towlower / towupper (GotoKey_Init)
 
 
 #define  OBJ__         m_oObject
@@ -320,6 +321,90 @@ P3PmsgCurs::Delete ( )
     else { ASSERT(FALSE); }
 }
 
+//
+//  M3: Goto's sibling walk, ruling siblings OUT without a handle
+//  NOTES: Goto compared every sibling by connecting a full handle to it
+//         (P3PmsgField::Connect), widening its name (c_name(): on Linux into a
+//         thread-local std::wstring ring) and calling _wcsicmp (wcscasecmp +
+//         towlower per character on Linux). Profiled, that was ~70% of a
+//         512-sibling lookup on Linux (MSCS performance log, F-P1-1).
+//       : THIS CAN ONLY SAY "DIFFERENT". A sibling it proves different is
+//         skipped without being connected; anything else -- a likely match, or
+//         a name it cannot judge -- goes through the original Connect and
+//         c_wcsicmp, which alone decides a hit. So a hit, and which sibling is
+//         hit (first match wins), is decided exactly as before.
+//       : When it may judge. The key is 0..63 units of 7-bit ASCII without
+//         NUL, the stored name is unchained, and the current locale folds 'I'
+//         and 'i' into each other (a Turkic locale does not, and _wcsicmp
+//         follows the locale). Then, up to the first unit that is NUL or
+//         above 0x7F, both strings are plain ASCII on both platforms -- the
+//         Linux widen maps those units one to one -- and _wcsicmp's verdict on
+//         them is A-Z/a-z folding. The scan stops at the first such unit and
+//         answers "cannot judge", because a non-ASCII unit may fold to ASCII
+//         (U+212A KELVIN SIGN lowers to 'k') and an embedded NUL ends
+//         _wcsicmp's string early. The terminator at nBlobUsed is guaranteed:
+//         P2PmsgHeap_pNameChk refuses an image name without one.
+//       : The name is bounded by P2PmsgHeap_pNameChk, the same checks c_name()
+//         applies, so a malformed sibling is refused exactly as before.
+namespace
+{
+struct GotoKey
+{
+    P2PWCHAR wcFold[64];  // the key, ASCII lower-cased
+    size_t   nUnits = 0;
+    bool     bJudge = false;
+};
+
+inline P2PWCHAR
+GotoKey_FoldAscii ( unsigned c ) noexcept
+{
+    return (P2PWCHAR)( ( c >= 'A' && c <= 'Z' ) ? c + ('a' - 'A') : c );
+}
+
+void
+GotoKey_Init ( GotoKey &oKey, LPCWSTR lpszKey )
+{
+    oKey.bJudge = false;
+    if ( std::towlower ( L'I' ) != L'i' || std::towupper ( L'i' ) != L'I' )
+      return;                          // a locale that folds ASCII its own way
+    size_t n = 0;
+    for ( ; lpszKey[n] != 0; ++n )
+    {
+      if ( n >= 63 || (unsigned)lpszKey[n] > 0x7F )
+        return;
+      oKey.wcFold[n] = GotoKey_FoldAscii ( (unsigned)lpszKey[n] );
+    }
+    oKey.nUnits = n;
+    oKey.bJudge = true;
+}
+
+//  true only when the stored name certainly differs from the key under _wcsicmp
+bool
+GotoKey_Differs ( const GotoKey &oKey, const VBLockName *pName ) noexcept
+{
+    if ( VBLockName_IsChainedInl ( pName ) )
+      return false;                    // the body is in another block
+    const size_t n = pName->u.vBlob08.nBlobUsed;
+    //  Byte-wise: the name sits in a packed struct, so its units need not be
+    //  2-aligned (C4366). memcpy of one unit compiles to a plain load.
+    const unsigned char *pb = reinterpret_cast<const unsigned char*>(pName)
+                            + offsetof ( VBLockName, u.vBlob08.cBlob );
+    for ( size_t i = 0; i < n; ++i )
+    {
+      P2PWCHAR wc;
+      std::memcpy ( &wc, pb + i * sizeof(P2PWCHAR), sizeof(wc) );
+      const unsigned c = wc;
+      if ( c == 0 || c > 0x7F )
+        return false;                  // cannot judge from here on
+      if ( i >= oKey.nUnits )
+        return true;                   // the key has ended, the name has not
+      if ( GotoKey_FoldAscii ( c ) != oKey.wcFold[i] )
+        return true;
+    }
+    return n != oKey.nUnits;           // the name has ended; does the key?
+}
+}
+
 P3PmsgCurs&
 P3PmsgCurs::Seek ( )
 {
@@ -381,6 +466,14 @@ P3PmsgCurs::Goto ( LPCWSTR lpszItemName )
     }
     else { ASSERT(FALSE); return false; }
 
+    //  M3: rule siblings out without connecting them (GotoKey, above). Only
+    //  with a heap: a container with none addresses raw memory, and the
+    //  original path below is all it has ever had.
+    GotoKey oKey;
+    if ( hVBList )
+      GotoKey_Init ( oKey, lpszStackName );
+    const UCHAR uVBLockHeap = oKey.bJudge ? P2PmsgHeap_Addrnn ( hVBList ) : 0;
+
     m_pP3PmsgFoN = 0;
     while ( aItem )
     {
@@ -394,6 +487,24 @@ P3PmsgCurs::Goto ( LPCWSTR lpszItemName )
       //ASSERT(VBLock_IsAlloc(pVBLock));
       //ASSERT(VBLock_IsLinked(pVBLock));
       VBLockItem *pItem   = VBLock_pItem  ( pVBLock );
+      if ( oKey.bJudge &&
+           GotoKey_Differs ( oKey, P2PmsgHeap_pNameChk ( hVBList, uVBLockHeap
+                                                       , pVBLock ) ) )
+      {
+#ifdef _DEBUG
+        //  Every skip, checked against the compare it replaces. A throw, not
+        //  an ASSERT (tools/ci/check_asserts.ps1): a Debug suite then fails
+        //  the case that reached it, by name, instead of printing and going on.
+        P3PmsgField oCheck;
+        oCheck.Connect ( hVBList, aItem, VBLock_Hdr_u_SizeNN ( pVBLock ) );
+        if ( oCheck.r_name().c_wcsicmp(lpszStackName) == 0 )
+          EVERR->MODULE
+               ->Message("Goto skipped a sibling the compare matches (M3 fast path)")
+               ->Throw();
+#endif
+        aItem = VBLockItem_GetNext ( pVBLock->oHdr.uVBLockDefs, pItem, &m_nItem );
+        continue;
+      }
       UINT    nVBLockSize = VBLock_Hdr_u_SizeNN ( pVBLock );
       //UINT    nVBLockuos   = VBLockItem_uos( pVBLock->oHdr.uVBLock, pItem );
       if ( VBLockItem_IsList(pItem) )

@@ -3,6 +3,39 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.4.5
+
+A patch release that makes name lookups about twice as fast on Windows and three to four
+times as fast on Linux, and building a large message three to six times as fast. The flat C
+API, the C++ export surface, the image format and every class layout are unchanged.
+
+### Faster: finding a name among many siblings
+
+A lookup used to set up a cursor on every sibling it stepped over, convert the sibling's name
+to a wide string (on Linux, a copy) and compare it with a locale-aware compare. Now it first
+reads the stored name straight from the image, after the same safety checks as before, and
+compares it as ASCII ignoring case. Most siblings are ruled out there.
+
+- **Lookups are faster:** `Exists()`, `SelectObject()` and `FieldRef` reads at 512 siblings
+  take 12.1 → 6.4 µs on Windows (−47%) and 70.6 → 19.5 µs on Linux (−72%). Misses gain the
+  same share.
+- **The answers are the same.** The fast check can only say "this one is different". Any
+  sibling that might match goes through the original compare, and so does every name with a
+  non-ASCII character, so the first match still wins and case rules are unchanged, including
+  for characters such as the Kelvin sign and `ß`.
+
+### Faster: adding a new field
+
+Adding a field by name searched the siblings to prove the name was new, and then searched
+them again to find the field it had just added. It now goes straight to the new field, which
+is always the last one.
+
+- **Building a 512-field message:** 13.25 → 4.38 ms on Windows (−67%) and 74.3 → 12.9 ms on
+  Linux (−83%). Allocations are unchanged.
+- Building still takes longer than linear time, because each new name must be checked against
+  every sibling already there.
+- Only the DLL / shared library needs replacing; nothing rebuilds against new headers.
+
 ## 3.4.4
 
 A patch release that makes every name lookup on a received message faster. The flat C API,

@@ -376,10 +376,26 @@ P3PmsgDesc::DeclareItem ( LPCWSTR lpszItemName, const P3PmsgData& oData, BOOL bU
       Create ( );
     if ( m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
-    if ( !m_pCurs->Goto(lpszItemName) )
-    { // This sequence needs optimising
-      (*this) += P3PmsgField ( lpszItemName, oData );
-      m_pCurs->Goto(lpszItemName);
+    //  One snapshot for all three uses below. The append calls c_name() on its
+    //  way, and on Linux every call spends a slot of the widening ring a
+    //  caller's key may itself be in (see P3PmsgCurs::Goto); re-reading the
+    //  caller's pointer after the append, as this did, could read another name.
+    const p2p_wkey oKey ( lpszItemName ? lpszItemName : L"" );
+    LPCWSTR lpszKey = oKey;
+    if ( !m_pCurs->Goto(lpszKey) )
+    {
+      (*this) += P3PmsgField ( lpszKey, oData );
+      //  M3 (3.4.5): the append is the LAST item, and the miss just above
+      //  proved no earlier sibling carries this name -- so it is also the
+      //  FIRST match, the one a second Goto(name) walked the whole list to
+      //  find. That walk made every new name cost two full walks, and a build
+      //  of n names O(n^2). Go to it by index (Goto(int) walks from the nearer
+      //  end: one step) and confirm the name; anything unexpected takes the
+      //  walk exactly as before.
+      const int nLast = (int)GetCount() - 1;
+      if ( nLast < 0 || !m_pCurs->Goto ( nLast ) ||
+           m_pCurs->r_name().c_wcsicmp ( lpszKey ) != 0 )
+        m_pCurs->Goto ( lpszKey );     // PushBack appends; not expected
       return m_pCurs->r_item();
     }
     if ( bUpdate || 

@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.4.4 is tag
-//         v3.4.4. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.4.5 is tag
+//         v3.4.5. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,40 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.4.5.0, a PATCH on 3.4.4, and strictly one: tools\ci\exports-flat.manifest
+//  and exports-cxx-x64.manifest both match unchanged (285 flat, 771 mangled),
+//  no Msgcore_c.h line and no class layout moved. P2PmsgHeap_pNameChk, now
+//  declared in P2Pmsg.h, is an internal free function and is not exported.
+//
+//  A LOOKUP JUDGED EVERY SIBLING THE EXPENSIVE WAY. Goto(name) connected a
+//  cursor to each sibling, widened its name (on Linux into a ring of wide
+//  strings) and ran a locale-aware compare. Now a pre-filter reads the stored
+//  name straight from the image, after the same P2PmsgHeap_pNameChk bounds,
+//  and compares ASCII case-folded. It can only answer "different": any sibling
+//  it cannot rule out -- a possible match, a chained name, any unit above 0x7F
+//  or NUL, a key of 64 units or more, a locale where I and i do not fold to each
+//  other -- goes through the original connect-and-compare, which decides every
+//  hit. So the first match still wins and the case rules are those of
+//  _wcsicmp / wcscasecmp exactly (the Kelvin sign and sharp s included). A
+//  Debug build re-checks every skip against the original compare and throws on
+//  a disagreement.
+//
+//  DeclareItem walked the siblings twice on an insert: once to prove the name
+//  new, once more to find what it had just appended. PushBack appends last,
+//  so it now goes to the last item and confirms the name, falling back to the
+//  full walk if that ever fails. Same for P3PmsgAttr::DeclareItem.
+//
+//  Measured at 512 siblings on a received heap, against 3.4.4: a lookup 12.1
+//  -> 6.4 us on Windows (-47%), 70.6 -> 19.5 us on Linux (-72%); a miss and
+//  FieldRef reads the same share; building a 512-field message 13.25 -> 4.38
+//  ms on Windows (-67%), 74.3 -> 12.9 ms on Linux (-83%). Allocations are
+//  unchanged (MSCS performance log, findings F-P1-5 and F-P1-6). New suite
+//  case "name lookup: first match wins, ASCII and non-ASCII, SYS and IOMAGE
+//  heaps" pins it -- checked by making the pre-filter case-sensitive, which
+//  fails it in Debug and Release.
+//
+//  BELOW IS THE 3.4.4 RATIONALE.
 //
 //  3.4.4.0, a PATCH on 3.4.3, and strictly one: tools\ci\exports-flat.manifest
 //  and exports-cxx-x64.manifest both match unchanged (285 flat, 771 mangled),
@@ -314,22 +348,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  4
-#define MSGCORE_VERSION_PATCH  4
+#define MSGCORE_VERSION_PATCH  5
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,4,4,0
+#define MSGCORE_VERSION_COMMAS 3,4,5,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.4.4.0"
+#define MSGCORE_VERSION_STRING "3.4.5.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03040400 is 3.4.4.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03040400
+//  0x03040500 is 3.4.5.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03040500
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

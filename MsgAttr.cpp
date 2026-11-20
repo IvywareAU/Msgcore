@@ -378,10 +378,17 @@ P3PmsgAttr::DeclareItem ( LPCWSTR lpszItemName, const P3PmsgData& oData, bool bU
       Create ( );
     if ( m_pCurs == nullptr )
       m_pCurs = new P3PmsgCurs ( *this );
-    if ( !m_pCurs->Goto(lpszItemName) )
-    { // This sequence needs optimising
-      (*this) += P3PmsgField ( lpszItemName, oData );
-      m_pCurs->Goto(lpszItemName);
+    //  The same shape as P3PmsgDesc::DeclareItem (MsgDesc.cpp), and the same
+    //  M3 change: one key snapshot, and the appended item reached by index.
+    const p2p_wkey oKey ( lpszItemName ? lpszItemName : L"" );
+    LPCWSTR lpszKey = oKey;
+    if ( !m_pCurs->Goto(lpszKey) )
+    {
+      (*this) += P3PmsgField ( lpszKey, oData );
+      const int nLast = (int)GetCount() - 1;
+      if ( nLast < 0 || !m_pCurs->Goto ( nLast ) ||
+           m_pCurs->r_name().c_wcsicmp ( lpszKey ) != 0 )
+        m_pCurs->Goto ( lpszKey );     // PushBack appends; not expected
       return m_pCurs->r_item();
     }
     if ( bUpdate )
