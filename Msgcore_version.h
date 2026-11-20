@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.4.6 is tag
-//         v3.4.6. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.4.7 is tag
+//         v3.4.7. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,43 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.4.7.0, a PATCH on 3.4.6, and strictly one: tools\ci\exports-flat.manifest
+//  and exports-cxx-x64.manifest both match unchanged (285 flat, 771 mangled),
+//  no Msgcore_c.h line and no exported class layout moved. The heap handle that
+//  gained a field is private to MsgVBHeap.cpp; P2PmsgHeapExtent, which gained
+//  one too, is internal and not exported, as are the new free functions.
+//
+//  A SECURITY FIX FIRST. VBLockData_Copy believed the lengths in the SOURCE
+//  value's header. A *var BLOB is sized by its capacity and was copied by its
+//  used length, so a received value declaring used > capacity wrote past the
+//  destination, with the bytes after it in the received image -- the peer's --
+//  as the payload; a BSTR/WSTR *var was zero-filled to its capacity past a
+//  destination sized by its used length; and nothing bounded the read, since
+//  P2PmsgObject_pData bounds a value's header and not the blob behind it.
+//  Reachable on the relay path: copying a received message (P3PmsgBSTR's copy
+//  constructor, as Targetcore's redirect does) copies every value through it.
+//  Now VBLockData_CopyBound refuses used > capacity, a read past the source and
+//  a write past the destination, and records an oversized capacity as the
+//  room; P2PmsgData_SizeofReadable caps every caller's source size by the room
+//  the value's own block really holds. Values this library writes copy
+//  unchanged. Found by the independent security review of the change below
+//  (MSCS performance log, finding F-P1-9). Pinned by Test_ValueCopyBounds.
+//
+//  M2's TRUSTED BIT. A heap one of the EMPTY constructors made (CreateIOMAGE /
+//  CreateSYS / CreateBSTRio by size) holds no byte this library did not lay
+//  out, so in Release P2PmsgHeap_pNameChkIn skips the per-access name bounds
+//  on it -- they guard against a stranger's bytes. The bit is bBuiltHere in the
+//  handle, never in the image; it is never set on a heap adopted from bytes
+//  and never set after creation, and a creation path that forgets it leaves
+//  the heap checked. Received messages are checked exactly as before. Debug
+//  still checks everywhere. Measured at 512 siblings, against 3.4.6, on a
+//  message built in-process: a lookup -25..-29% on Windows, -15..-16% on
+//  Linux; building a 512-field message -22% / -13%; a received message
+//  unchanged. Pinned by Test_TrustedBitScope; Test_NameReadBounds now corrupts
+//  a received heap, where the checks still run in every build.
+//
+//  BELOW IS THE 3.4.6 RATIONALE.
 //
 //  3.4.6.0, a PATCH on 3.4.5, and strictly one: tools\ci\exports-flat.manifest
 //  and exports-cxx-x64.manifest both match unchanged (285 flat, 771 mangled),
@@ -367,22 +404,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  4
-#define MSGCORE_VERSION_PATCH  6
+#define MSGCORE_VERSION_PATCH  7
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,4,6,0
+#define MSGCORE_VERSION_COMMAS 3,4,7,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.4.6.0"
+#define MSGCORE_VERSION_STRING "3.4.7.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03040600 is 3.4.6.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03040600
+//  0x03040700 is 3.4.7.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03040700
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

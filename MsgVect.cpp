@@ -223,7 +223,8 @@ P3PmsgVect::AddListHead ( const P3PmsgData& oData )
 
     // Copy
     VBLockData_Copy ( VBLock_pData(pVBLock), oData.P3PmsgData::Sizeof()
-                    , oData.GetVBLockData(), oData.P3PmsgData::Sizeof() );
+                    , oData.GetVBLockData()
+                    , P2PmsgData_SizeofReadable ( oData, oData.P3PmsgData::Sizeof() ) );
 
     // Prepend P3PmsgData item
     VBLockList *pList   = GetVBLockList();
@@ -272,7 +273,8 @@ P3PmsgVect::AddListTail ( const P3PmsgData& oData )
 
     // Copy
     VBLockData_Copy ( VBLock_pData(pVBLock), oData.P3PmsgData::Sizeof()
-                    , oData.GetVBLockData(), oData.P3PmsgData::Sizeof() );
+                    , oData.GetVBLockData()
+                    , P2PmsgData_SizeofReadable ( oData, oData.P3PmsgData::Sizeof() ) );
 
     // Prepend P3PmsgData item
     VBLockList *pList   = GetVBLockList();

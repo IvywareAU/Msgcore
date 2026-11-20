@@ -228,9 +228,17 @@ struct P2PmsgHeapExtent
     VBLaddr aImage;
     VBLsize nSizeofAlloc;
     VBLsize nSizeofHdr;
+    bool    bBuiltHere;     // P2PmsgHeap_IsBuiltHere, from the same handle.
+                            // Not a bound: IsSpan ignores it.
 };
 void
 P2PmsgHeap_GetExtent ( P2PmsgHANDLE hVBHeap, P2PmsgHeapExtent *pExtent ) noexcept;
+// True only for a heap one of the EMPTY constructors made (CreateIOMAGE1,
+// CreateIOMAGE(uAddrType,..), CreateSYS, CreateBSTRio(uAddrType,..)); false for
+// one adopted from bytes, and for a null handle. Runtime-only, in the handle
+// and never in the image, and never set after creation. Not exported.
+bool
+P2PmsgHeap_IsBuiltHere ( P2PmsgHANDLE hVBHeap ) noexcept;
 inline BOOL
 P2PmsgHeapExtent_IsSpan ( const P2PmsgHeapExtent &oExtent
                         , const void *pv, VBLsize nSpan ) noexcept

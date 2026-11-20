@@ -5931,7 +5931,31 @@ static void Test_ContainerNameBounds()
 // two returned normally, reading past the name.
 //
 // STATIC LINK ONLY: VBLock_pName and VBLockName_SetChain2Next are not exported.
+//
+// ON A RECEIVED HEAP SINCE 3.4.7. These cases corrupted a field on a P2PmsgMgr
+// the suite built itself. Since M2's trusted bit, a heap one of the empty
+// constructors made skips these bounds in Release (P2PmsgHeap_pNameChkIn) --
+// they guard against a stranger's bytes and such a heap holds none -- so the
+// corruption now arrives the way the cases always said it did: in an image,
+// adopted through the length-checked constructor a receiver uses. That runs
+// the checks in every build, which is the property worth pinning.
 #ifdef Msgcore_STATIC
+//  A wire image of a message whose MSG item holds one field, AAA = 1: built
+//  here, serialised, and handed back as bytes the caller owns.
+static char* MakeWireWithAAA ( VBLsize& nWire )
+{
+    P3PmsgBSTR oSent ( VBLock_Addr32, 2048 );
+    P3PmsgItem& oMsg = oSent.InitItem ( VBLockBSTR_MSG, P3PmsgData ( (int)7 ) );
+    oMsg.r_Desc ( P3PmsgField::AttrCMD_Create );
+    oMsg.r_Desc ( ) += P3PmsgField ( L"AAA", P3PmsgData ( (int)1 ) );
+    oSent.PrepareP2Piomage ( ~(DWORD)0 );
+    nWire = oSent.P2PiomageSize ( );
+    char *pWire = new char [ nWire ];
+    memcpy ( pWire, oSent.P2Piomage ( ), nWire );
+    oSent.ReleaseP2Piomage ( );
+    return pWire;
+}
+
 static void Test_NameReadBounds()
 {
     auto rejects = []( auto fn ) -> bool {
@@ -5939,10 +5963,11 @@ static void Test_NameReadBounds()
         catch ( P2Pevent* pEVT ) { if ( pEVT ) pEVT->Cancel(false); return true; }
     };
 
-    P2PmsgMgr mgr(VBLock_Addr32, 2048, 1u << 20);
-    mgr.r_Desc(P3PmsgField::AttrCMD_Create);
-    mgr.r_Desc() += P3PmsgField(L"AAA", P3PmsgData((int)1));
-    P3PmsgField oHnd = mgr.r_Desc().SelectItem(L"AAA").r_Object();
+    VBLsize nWire = 0;
+    char   *pWire = MakeWireWithAAA ( nWire );
+    P3PmsgBSTR oRecv ( *(const VBListIOmage *)pWire, nWire );   // duplicates
+    delete [] pWire;
+    P3PmsgField oHnd = oRecv.r_item ( VBLockBSTR_MSG ).r_Desc().SelectItem(L"AAA").r_Object();
 
     VBLockName *pName = VBLock_pName ( (VBLock *)oHnd.r_Object().GetVBLock() );
     unsigned char aSaved[16];
@@ -5951,6 +5976,8 @@ static void Test_NameReadBounds()
 
     TF_CASE("a heap field's name reads before anything is corrupted")
     {
+        //  And the heap is one the trusted bit never covers.
+        TF_CHECK(!P2PmsgHeap_IsBuiltHere ( oHnd.r_Object().m_hVBList ));
         TF_CHECK(!rejects([&]{ oHnd.r_name().c_size(); }));
         TF_CHECK(oHnd.r_name().c_wcsicmp(L"AAA") == 0);
     }
@@ -7172,7 +7199,196 @@ static void Test_ReceivedImageReserialises()
     delete [] pWire;
 }
 
+// ---------------------------------------------------------------------------
+//  M2's trusted bit (3.4.7): which heaps carry it. A heap one of the EMPTY
+//  constructors made skips the per-access name bounds in Release; every heap
+//  adopted from bytes keeps them. The bit is the whole of the security
+//  argument, so what is pinned is its scope, in both directions: set where
+//  this process laid out every byte, and on no heap that began as bytes --
+//  whichever constructor adopted them, and whether the bytes came from this
+//  process or not. Test_NameReadBounds pins that the checks still refuse on
+//  an adopted heap.
+static void Test_TrustedBitScope()
+{
+    const UCHAR uAddr = ( sizeof(void *) == 8 ) ? VBLock_Addr64 : VBLock_Addr32;
+
+    TF_CASE("the trusted bit: set by the empty constructors and nothing else")
+    {
+        P2PmsgHANDLE hIO  = P2PmsgHeap_CreateIOMAGE ( uAddr, 2048, 1u << 20 );
+        P2PmsgHANDLE hSYS = P2PmsgHeap_CreateSYS    ( uAddr, 0 );
+        P2PmsgHANDLE hBS  = P2PmsgHeap_CreateBSTRio ( uAddr, 2048, 1u << 20 );
+        TF_CHECK ( P2PmsgHeap_IsBuiltHere ( hIO ) );
+        TF_CHECK ( P2PmsgHeap_IsBuiltHere ( hSYS ) );
+        TF_CHECK ( P2PmsgHeap_IsBuiltHere ( hBS ) );
+
+        //  And GetExtent, which is how the lookup reads it, agrees.
+        P2PmsgHeapExtent oExtent {};
+        P2PmsgHeap_GetExtent ( hIO, &oExtent );
+        TF_CHECK ( oExtent.bBuiltHere );
+
+        //  A BSTRio image of a heap built here, adopted back: bytes, so no.
+        const VBLsize nBS = P2PmsgHeap_Sizeof ( hBS );
+        char *pBS = new char [ nBS ];
+        memcpy ( pBS, P2PmsgHeap_pImage ( hBS ), nBS );
+        P2PmsgHANDLE hBSin = nullptr;
+        try { hBSin = P2PmsgHeap_CreateBSTRio ( (VBListBSTRio *)pBS, nBS ); }
+        catch ( P2Pevent* pEVT ) { if ( pEVT ) pEVT->Cancel(false); delete [] pBS; }
+        TF_CHECK ( hBSin != nullptr );
+        if ( hBSin )
+        {
+          TF_CHECK ( !P2PmsgHeap_IsBuiltHere ( hBSin ) );
+          P2PmsgHeap_Close ( hBSin );
+        }
+
+        P2PmsgHeap_Close ( hBS );
+        P2PmsgHeap_Close ( hSYS );
+        P2PmsgHeap_Close ( hIO );
+
+        TF_CHECK ( !P2PmsgHeap_IsBuiltHere ( nullptr ) );
+        P2PmsgHeap_GetExtent ( nullptr, &oExtent );
+        TF_CHECK ( !oExtent.bBuiltHere );
+    }
+
+    TF_CASE("the trusted bit: never on an IOMAGE adopted from bytes, by any constructor")
+    {
+        VBLsize nWire = 0;
+        char   *pWire = MakeWireWithAAA ( nWire );
+
+        //  Both heap-level adopters. Ownership passes on success.
+        char *p1 = new char [ nWire ];
+        memcpy ( p1, pWire, nWire );
+        P2PmsgHANDLE h1 = P2PmsgHeap_CreateIOMAGE ( (VBListIOmage *)p1, nWire );
+        TF_CHECK ( !P2PmsgHeap_IsBuiltHere ( h1 ) );
+        P2PmsgHeap_Close ( h1 );
+
+        char *p2 = new char [ nWire ];
+        memcpy ( p2, pWire, nWire );
+        P2PmsgHANDLE h2 = P2PmsgHeap_CreateIOMAGE ( (VBListIOmage *)p2 );
+        TF_CHECK ( !P2PmsgHeap_IsBuiltHere ( h2 ) );
+        P2PmsgHeap_Close ( h2 );
+
+        //  And the object-level ones a receiver uses -- the item a lookup
+        //  walks is on the adopted heap, not on one built here.
+        P3PmsgBSTR oByRef ( *(const VBListIOmage *)pWire, nWire );
+        P3PmsgItem& oMsg = oByRef.r_item ( VBLockBSTR_MSG );
+        TF_CHECK ( !P2PmsgHeap_IsBuiltHere ( oMsg.r_Object().m_hVBList ) );
+        TF_CHECK ( oMsg.Exists ( L"AAA" ) );     // and lookups still answer
+        TF_CHECK ( oMsg.Exists ( L"aaa" ) );
+        TF_CHECK ( !oMsg.Exists ( L"AAB" ) );
+
+        P3PmsgBSTR oByRef1 ( *(const VBListIOmage *)pWire );
+        TF_CHECK ( !P2PmsgHeap_IsBuiltHere (
+                       oByRef1.r_item ( VBLockBSTR_MSG ).r_Object().m_hVBList ) );
+
+        delete [] pWire;
+    }
+
+    TF_CASE("the trusted bit: a message built here carries it, and answers the same")
+    {
+        //  The case the bit exists for. The same lookups as on the received
+        //  copy above, so a skip that changed an answer would show.
+        P3PmsgBSTR oSent ( VBLock_Addr32, 2048 );
+        P3PmsgItem& oMsg = oSent.InitItem ( VBLockBSTR_MSG, P3PmsgData ( (int)7 ) );
+        oMsg.r_Desc ( P3PmsgField::AttrCMD_Create );
+        oMsg.r_Desc ( ) += P3PmsgField ( L"AAA", P3PmsgData ( (int)1 ) );
+        TF_CHECK ( P2PmsgHeap_IsBuiltHere ( oMsg.r_Object().m_hVBList ) );
+        TF_CHECK ( oMsg.Exists ( L"AAA" ) );
+        TF_CHECK ( oMsg.Exists ( L"aaa" ) );
+        TF_CHECK ( !oMsg.Exists ( L"AAB" ) );
+
+        P2PmsgMgr mgr ( VBLock_Addr64, 4096, 1u << 20 );
+        TF_CHECK ( P2PmsgHeap_IsBuiltHere ( mgr.r_Object().m_hVBList ) );
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  A VALUE COPY IS BOUNDED BY BOTH ENDS (3.4.7). Found by the security review
+//  of M2's trusted bit: VBLockData_Copy believed the source header's nBlobUsed
+//  and nBlobSize. A *var BLOB is sized by its capacity and was copied by its
+//  used length, so used > capacity wrote past the destination with the bytes
+//  after the source blob as payload -- reachable by relaying a received
+//  message into a heap built here. A BSTR *var is sized by its used length
+//  and was zero-filled to its capacity, past the destination. And the read
+//  was bounded by nothing. Called directly, on buffers far larger than the
+//  value, with a guard pattern after the destination so an overrun shows as
+//  changed bytes rather than as luck.
+static void Test_ValueCopyBounds()
+{
+    auto rejects = []( auto fn ) -> bool {
+        try { fn(); return false; }
+        catch ( P2Pevent* pEVT ) { if ( pEVT ) pEVT->Cancel(false); return true; }
+    };
+    const UCHAR uAddr = VBLock_Addr32;
+    alignas(8) unsigned char aSrc[256];
+    alignas(8) unsigned char aDst[256];
+    auto fresh = [&]( UCHAR uType, UINT16 nSize, UINT16 nUsed ) -> VBLockData* {
+        std::memset ( aSrc, 'x', sizeof(aSrc) );
+        std::memset ( aDst, 0xCD, sizeof(aDst) );
+        VBLockData *pSrc = (VBLockData *)aSrc;
+        pSrc->uDataType = uType;
+        pSrc->uDataAttr = 0;
+        pSrc->u.vBlob16.nBlobSize = nSize;
+        pSrc->u.vBlob16.nBlobUsed = nUsed;
+        return pSrc;
+    };
+    auto untouchedFrom = [&]( VBLsize nFrom ) -> bool {
+        for ( size_t i = (size_t)nFrom; i < sizeof(aDst); ++i )
+          if ( aDst[i] != 0xCD ) return false;
+        return true;
+    };
+
+    TF_CASE("a value copy refuses a used length beyond its capacity, and writes nothing past")
+    {
+        //  The relay overrun: BLOB16var sized by capacity 2, copied by used 40.
+        VBLockData *pSrc  = fresh ( VBLockData_BLOB16var, 2, 40 );
+        const VBLsize nSz = VBLockData_Sizeof ( uAddr, pSrc );
+        TF_CHECK ( rejects ( [&]{ VBLockData_Copy ( (VBLockData *)aDst, nSz, pSrc, nSz ); } ) );
+        TF_CHECK ( untouchedFrom ( nSz ) );
+    }
+
+    TF_CASE("a value copy refuses to read past the source it was given")
+    {
+        //  BLOB16 declaring 40 bytes, from a block holding 16: what
+        //  P2PmsgData_SizeofReadable hands the copy for such a value.
+        VBLockData *pSrc = fresh ( VBLockData_BLOB16, 40, 40 );
+        TF_CHECK ( rejects ( [&]{ VBLockData_Copy ( (VBLockData *)aDst, 200, pSrc, 16 ); } ) );
+    }
+
+    TF_CASE("a capacity larger than the destination is recorded as the room, not zero-filled past it")
+    {
+        //  A BSTR16var as this library can write it: 4 bytes used of 30. It is
+        //  sized by the used length, so the destination has no room for 30.
+        VBLockData *pSrc  = fresh ( VBLockData_BSTR16var, 30, 4 );
+        const VBLsize nSz = VBLockData_Sizeof ( uAddr, pSrc );
+        TF_CHECK ( !rejects ( [&]{ VBLockData_Copy ( (VBLockData *)aDst, nSz, pSrc, nSz ); } ) );
+        const VBLockData *pDst = (const VBLockData *)aDst;
+        TF_CHECK_EQ ( (int)pDst->u.vBlob16.nBlobUsed, 4 );
+        TF_CHECK ( pDst->u.vBlob16.nBlobSize >= 4 );
+        TF_CHECK ( std::memcmp ( &pDst->u.vBlob16.cBlob, &pSrc->u.vBlob16.cBlob, 4 ) == 0 );
+        TF_CHECK ( untouchedFrom ( nSz ) );
+    }
+
+    TF_CASE("a well-formed value copies exactly as before")
+    {
+        VBLockData *pSrc  = fresh ( VBLockData_BLOB16var, 10, 6 );
+        const VBLsize nSz = VBLockData_Sizeof ( uAddr, pSrc );
+        TF_CHECK ( !rejects ( [&]{ VBLockData_Copy ( (VBLockData *)aDst, nSz, pSrc, nSz ); } ) );
+        const VBLockData *pDst = (const VBLockData *)aDst;
+        TF_CHECK_EQ ( (int)pDst->u.vBlob16.nBlobSize, 10 );
+        TF_CHECK_EQ ( (int)pDst->u.vBlob16.nBlobUsed, 6 );
+        TF_CHECK ( untouchedFrom ( nSz ) );
+    }
+}
+
 #else   // !Msgcore_STATIC -- announce the skip rather than vanish
+
+static void Test_ValueCopyBounds()
+{
+    TF_CASE("value copy bounds -- static link only, VBLockData_Copy is not exported")
+    {
+        TF_CHECK(true);
+    }
+}
 
 static void Test_Blob16CapacityNeverExceedsRoom()
 {
@@ -7193,6 +7409,14 @@ static void Test_HeapGrowthMovesTheBase()
 static void Test_ReceivedImageReserialises()
 {
     TF_CASE("received image re-serialisation -- static link only, heap API is not exported")
+    {
+        TF_CHECK(true);
+    }
+}
+
+static void Test_TrustedBitScope()
+{
+    TF_CASE("trusted bit scope -- static link only, heap API is not exported")
     {
         TF_CHECK(true);
     }
@@ -7256,4 +7480,6 @@ void RunMsgcoreSuite()
     Test_Blob16CapacityNeverExceedsRoom();
     Test_HeapGrowthMovesTheBase();
     Test_ReceivedImageReserialises();
+    Test_TrustedBitScope();
+    Test_ValueCopyBounds();
 }

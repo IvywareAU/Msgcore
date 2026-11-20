@@ -426,8 +426,11 @@ P3PmsgData::operator = ( const P3PmsgData& rhs )
     VBLockData *pData_rhs  = P2PmsgObject_pData(*rhs.pOBJ__); //TODO:LJM deprecated rhs.GetVBLockData();
     ASSERT(VBLock_IsContainedVBLump(GetContainerVBLock(),pData_lhs,0));
     //ASSERT(m_pObject->IsContainedVBLump(pData_rhs,nSizeof_rhs));
+    //  What the copy may READ is bounded by the room the source block really
+    //  has, not by the size its header declares: on a received heap the two
+    //  differ exactly when a peer lied (refer VBLockData_CopyBound, 3.4.7).
     VBLockData_Copy ( pData_lhs, P2PmsgObject_Sizeof_VBLockData(*pOBJ__)
-                    , pData_rhs, nSizeof_rhs );
+                    , pData_rhs, P2PmsgData_SizeofReadable ( rhs, nSizeof_rhs ) );
     if( P3PmsgData::Sizeof()>nSizeof_rhs) { //TODO:Delete debugging
     ASSERT(P3PmsgData::Sizeof()<=nSizeof_rhs); }
     SET_DIRTY;
@@ -6593,6 +6596,17 @@ P2PmsgHeap_pNameChkIn ( P2PmsgHANDLE hVBList, UCHAR uVBLock
 {
     if ( pVBLock == nullptr )
       P2PmsgHeap_ChkVBLock ( hVBList, pVBLock );            // throws
+#ifndef _DEBUG
+    //  M2's TRUSTED BIT (3.4.7). A heap one of the empty constructors made holds
+    //  no byte this library did not lay out, so these bounds -- which guard
+    //  against a stranger's bytes -- have nothing to find there. The bit lives
+    //  in the handle, is never set on an adopted heap and never set later
+    //  (refer bBuiltHere in VBListHANDLE, MsgVBHeap.cpp, for the invariant and
+    //  its audit). A RECEIVED heap is checked exactly as before. Debug builds
+    //  still check: there the bounds test this library's own writer.
+    if ( oExtent.bBuiltHere )
+      return VBLock_pName ( pVBLock );
+#endif
     //  Not in the image (inline block, SYSTEM heap): no bound applies.
     if ( !P2PmsgHeapExtent_IsSpan ( oExtent, pVBLock, 1 ) )
       return VBLock_pName ( pVBLock );
@@ -6662,6 +6676,37 @@ VBLockData*
 P2PmsgData_pData ( const P3PmsgData& oData, bool bChain )
 {
     return P2PmsgObject_pData ( *oData.p_Object(), bChain );
+}
+//
+//  The source size to hand VBLockData_Copy: what the value declares, capped
+//  by the room its block really holds (3.4.7). A value this library wrote
+//  always fits its block, so the cap changes nothing for it; one off the wire
+//  that declares more is then refused by VBLockData_CopyBound instead of
+//  being read past its block.
+//       : MEASURED FROM THE VALUE TO THE END OF ITS OWN BLOCK, not asked of
+//         P2PmsgObject_Sizeof_VBLockData: that answers by block kind and has no
+//         answer for an Item wrapping Data (VBLockData_Sizeof_Alloc asserts and
+//         returns 0 there), which is what a list element is. The checked walk
+//         runs first -- P2PmsgObject_pData bounds every block of the chain
+//         against the image -- and the second walk below re-reads the same
+//         bytes only to learn which block the value ended in.
+VBLsize
+P2PmsgData_SizeofReadable ( const P3PmsgData& oData, VBLsize nSizeofDeclared )
+{
+    const P3PmsgObject& oObject = *oData.p_Object();
+    const VBLockData *pData   = P2PmsgObject_pData ( oObject );     // checked
+    const VBLock     *pVBLock = (const VBLock *)oObject.GetVBLock();
+    const VBLockData *pHop    = VBLock_pData ( (VBLock *)pVBLock );
+    while ( pHop != pData && VBLockData_IsChained ( pHop ) )
+    {
+      pVBLock = (const VBLock *)oObject.Msg2Phys (
+                    VBLockData_GetChain2Next ( oObject.m_uVBLock, (VBLockData *)pHop ) );
+      pHop    = VBLock_pData ( (VBLock *)pVBLock );
+    }
+    const char *pcEnd  = (const char *)pVBLock + VBLock_Hdr_u_SizeNN ( pVBLock );
+    const char *pcData = (const char *)pData;
+    const VBLsize nRoom = pcData < pcEnd ? (VBLsize)( pcEnd - pcData ) : 0;
+    return nSizeofDeclared < nRoom ? nSizeofDeclared : nRoom;
 }
 VBLsize
 P2PmsgObject_Sizeof_VBLockData ( const P3PmsgObject& oObject, BOOL bChain )

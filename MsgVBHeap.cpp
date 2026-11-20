@@ -816,6 +816,41 @@ typedef struct
     VBLelem    nFreeEntries;
     BOOL       bEoD;
     BOOL       bDirty;
+    // BUILT HERE (M2's trusted bit, 3.4.7). True only on a heap one of the four
+    // EMPTY constructors made -- CreateIOMAGE1, CreateIOMAGE(uAddrType,..),
+    // CreateSYS, CreateBSTRio(uAddrType,..) -- so every byte of its structure
+    // was laid out by this library. Never set on a heap adopted from bytes
+    // (CreateIOMAGE(pIOmage[,len]), CreateBSTRio(pBSTRio[,len])), never set
+    // after creation, and runtime-only: it lives in the handle, not the image,
+    // so nothing a peer sends can reach it. Zero-initialised by the ZeroMemory in
+    // every handle allocation below, so a creation path that forgets it fails
+    // SAFE: the heap is checked as though it were received.
+    //
+    // What it buys: P2PmsgHeap_pNameChkIn (P2Pmsg.cpp) skips the per-access
+    // name bounds on such a heap in Release -- they guard against a stranger's
+    // bytes, and there are none. Every other check is unchanged, and a Debug
+    // build still runs these too.
+    //
+    // A SYSTEM heap gets it too, and there it is a real change: a SYS heap's
+    // extent is Open, so IsSpan answered TRUE and its names WERE checked before
+    // 3.4.7. They are skipped in Release now, on the same argument.
+    //
+    // THE INVARIANT IT RESTS ON: no byte from another heap's image, a file or a
+    // peer lands in such a heap except as the PAYLOAD of a value, at a length
+    // bounded at both ends. Audited 2026-11-20 (MSCS performance log, F-P1-9),
+    // and the independent review of that audit found the one copy it missed:
+    //   - Raw copies stay within one heap (ResizeIOMAGE/BSTRio, RehomeInline-
+    //     Item, CopyHeapVBLock, inline-block copies that keep the source heap).
+    //   - An item copied between heaps has its name re-laid out by
+    //     VBLockName_Init (P2PmsgItem_InitField and twins).
+    //   - A VALUE copied between heaps (VBLockData_Copy, reached by a relay's
+    //     copy constructor) believed the source header's lengths and could
+    //     write past its destination -- peer bytes over a neighbouring block's
+    //     header and name. Bounded since 3.4.7 by VBLockData_CopyBound and
+    //     P2PmsgData_SizeofReadable; that fix is what makes this bit sound.
+    // A new cross-heap copy must either bound itself the same way or clear this
+    // bit on its destination.
+    bool       bBuiltHere;
     // Headless trigger sink (runtime-only; NOT part of the persisted image, which
     // is *pBSTRio/*pIOMAGE). Zero-initialised by the ZeroMemory in every handle
     // allocation below, so a manager with no sink installed leaves this nullptr.
@@ -3050,6 +3085,7 @@ ASSERT(nSizeInitial);nSizeInitial+=8;//Delete testing only
     pHandle -> nRefCount      = 1;
     pHandle -> bEoD           = true;
     pHandle -> bDirty         = true;
+    pHandle -> bBuiltHere     = true;      // empty: refer VBListHANDLE
 
     // Initialisation - IOMAGE
     VBLsize nSizeIOmage = nSizeInitial + sizeof(VBListIOmage);
@@ -3129,6 +3165,7 @@ ASSERT(nSizeInitial);nSizeInitial+=8;//Delete testing only
     pHandle -> nRefCount        = 1;
     pHandle -> bEoD             = TRUE;
     pHandle -> bDirty           = TRUE;
+    pHandle -> bBuiltHere       = true;    // empty: refer VBListHANDLE
 
     // Initialisation - IOMAGE
     // NOTES: Size rounded up to multiple of sizeof(VBLsize) bytes
@@ -3450,6 +3487,7 @@ ASSERT(uAddrType==VBLock_Addr64);
     pHandle -> nRefCount    = 1;
     pHandle -> bEoD         = true;
     pHandle -> bDirty       = true;
+    pHandle -> bBuiltHere   = true;        // empty: refer VBListHANDLE
 
     // Tidy up, and
     return pHandle;
@@ -3491,6 +3529,7 @@ ASSERT(nSizeInitial);nSizeInitial+=8;//Delete testing only
     pHandle -> nRefCount        = 1;
     pHandle -> bEoD             = true;
     pHandle -> bDirty           = true;
+    pHandle -> bBuiltHere       = true;    // empty: refer VBListHANDLE
 
     // Initialisation - BSTRio
     // NOTES: Size rounded up to multiple of sizeof(VBLsize) bytes
@@ -4418,6 +4457,16 @@ P2PmsgHeap_IsPhysSpan ( P2PmsgHANDLE hVBList, const void *pv, VBLsize nSpan ) no
 }
 
 //
+//  Whether one of the empty constructors made this heap. Refer bBuiltHere in
+//  VBListHANDLE for what that does and does not mean.
+bool
+P2PmsgHeap_IsBuiltHere ( P2PmsgHANDLE hVBList ) noexcept
+{
+    return hVBList != nullptr &&
+           static_cast<const VBListHANDLE *>(hVBList)->bBuiltHere;
+}
+
+//
 //  Reads the extent IsPhysSpan bounds against, for a caller testing several
 //  spans of one block. See P2PmsgHeapExtent in MsgVBHeap.h.
 void
@@ -4427,9 +4476,11 @@ P2PmsgHeap_GetExtent ( P2PmsgHANDLE hVBList, P2PmsgHeapExtent *pExtent ) noexcep
     pExtent->aImage       = 0;
     pExtent->nSizeofAlloc = 0;
     pExtent->nSizeofHdr   = 0;
+    pExtent->bBuiltHere   = false;
     if ( hVBList == nullptr )
       return;
     const VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    pExtent->bBuiltHere = pHandle->bBuiltHere;
     pExtent->nSizeofHdr = P2PmsgHeap_Sizeof_Hdr ( hVBList );
     VBLaddr aImage = 0;
     if ( pHandle->uVBListType == P2PmsgHeap_IOMAGE )

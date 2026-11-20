@@ -2151,6 +2151,62 @@ B32:pcBlob = (char *)&pData->u.vBlob32.cBlob;
     return pcBlob;
 }
 
+//
+//  Bounds one blob copy in VBLockData_Copy, before a byte moves
+//  NOTES: RECEIVE-PATH BOUND, 3.4.7 -- found by the security review of M2's
+//         trusted bit (MSCS performance log, F-P1-9). nBlobUsed and nBlobSize
+//         come out of the SOURCE header, which on a received heap a peer wrote,
+//         and the copy believed both:
+//           - a *var BLOB is sized by nBlobSize (VBLockData_Sizeof_uv) and
+//             copied by nBlobUsed, so nBlobUsed > nBlobSize wrote past the
+//             destination -- with the bytes after the source blob, the peer's,
+//             as the payload. A relay copies a received message into a heap it
+//             built (P3PmsgBSTR's copy constructor), so the overrun landed on
+//             whatever block followed: a sibling's header and name included.
+//           - a BSTR/WSTR *var is sized by nBlobUsed and was zero-filled up to
+//             nBlobSize, past the destination by the difference.
+//           - and nothing bounded the READ: P2PmsgObject_pData bounds a value's
+//             header, not the blob behind it, so a declared length past the
+//             source block copied the bytes beyond it into the destination --
+//             out of the received image and onward in a relayed message.
+//       : Now: used beyond capacity is refused (this library never writes it --
+//         every writer above asserts nBlobSize >= nBlobUsed); the bytes read
+//         must lie inside nSizeSrc, which callers bound by the source block's
+//         own room; the bytes written plus the 2-byte terminator must lie
+//         inside nSizeDst, the destination's room; and a capacity larger than
+//         that room is RECORDED as the room instead of zero-filled past it.
+//         Every value this library writes passes unchanged: cBlob is a
+//         P2PWCHAR, so a value's laid-out size already holds its terminator.
+//
+//  Returns:     VBLsize
+//               The capacity to record in the destination
+static VBLsize
+VBLockData_CopyBound ( const VBLockData *pDataDst, VBLsize nSizeDst, const void *pcDstBlob
+                     , const VBLockData *pDataSrc, VBLsize nSizeSrc, const void *pcSrcBlob
+                     , VBLsize nBlobUsed, VBLsize nBlobSize )
+{
+    if ( nBlobUsed > nBlobSize )
+      EVERR->Module ( __FUNCTION__ )
+           ->Message ( "value uses %I64u of a %I64u capacity"
+                     , (UINT64)nBlobUsed, (UINT64)nBlobSize )
+           ->Throw();
+    const VBLsize nOffSrc = (VBLsize)( (const char *)pcSrcBlob - (const char *)pDataSrc );
+    if ( nSizeSrc < nOffSrc || nSizeSrc - nOffSrc < nBlobUsed )
+      EVERR->Module ( __FUNCTION__ )
+           ->Message ( "value of %I64u runs past its %I64u byte source"
+                     , (UINT64)nBlobUsed, (UINT64)nSizeSrc )
+           ->Throw();
+    const VBLsize nOffDst = (VBLsize)( (const char *)pcDstBlob - (const char *)pDataDst )
+                          + sizeof(P2PWCHAR);                 // the terminator
+    if ( nSizeDst < nOffDst || nSizeDst - nOffDst < nBlobUsed )
+      EVERR->Module ( __FUNCTION__ )
+           ->Message ( "value of %I64u does not fit a %I64u byte destination"
+                     , (UINT64)nBlobUsed, (UINT64)nSizeDst )
+           ->Throw();
+    const VBLsize nRoom = nSizeDst - nOffDst;
+    return nBlobSize < nRoom ? nBlobSize : nRoom;
+}
+
 VBLockData*
 VBLockData_Copy (       VBLockData *pDataDst, VBLsize nSizeDst
                 , const VBLockData *pDataSrc, VBLsize nSizeSrc )
@@ -2334,6 +2390,9 @@ VBLockData_Copy (       VBLockData *pDataDst, VBLsize nSizeDst
 
     // BLOB08 copy
 B08:nBlobUsed = pDataSrc->u.vBlob08.nBlobUsed;
+    nBlobSize = VBLockData_CopyBound ( pDataDst, nSizeDst, &pDataDst->u.vBlob08.cBlob
+                                     , pDataSrc, nSizeSrc, &pDataSrc->u.vBlob08.cBlob
+                                     , nBlobUsed, nBlobSize );
     {
       memcpy ( &pDataDst->u.vBlob08.cBlob,&pDataSrc->u.vBlob08.cBlob, nBlobUsed );
       if ( nBlobUsed < nBlobSize )
@@ -2349,6 +2408,9 @@ ASSERT(nBlobUsed<=nBlobSize);
 
     // BLOB16 copy
 B16:nBlobUsed = pDataSrc->u.vBlob16.nBlobUsed;
+    nBlobSize = VBLockData_CopyBound ( pDataDst, nSizeDst, &pDataDst->u.vBlob16.cBlob
+                                     , pDataSrc, nSizeSrc, &pDataSrc->u.vBlob16.cBlob
+                                     , nBlobUsed, nBlobSize );
     {
       memcpy ( &pDataDst->u.vBlob16.cBlob,&pDataSrc->u.vBlob16.cBlob, nBlobUsed );
       if ( nBlobUsed < nBlobSize )
@@ -2364,6 +2426,9 @@ ASSERT(nBlobUsed<=nBlobSize);
 
     // BLOB32 copy
 B32:nBlobUsed = pDataSrc->u.vBlob32.nBlobUsed;
+    nBlobSize = VBLockData_CopyBound ( pDataDst, nSizeDst, &pDataDst->u.vBlob32.cBlob
+                                     , pDataSrc, nSizeSrc, &pDataSrc->u.vBlob32.cBlob
+                                     , nBlobUsed, nBlobSize );
     {
       memcpy ( &pDataDst->u.vBlob32.cBlob,&pDataSrc->u.vBlob32.cBlob, nBlobUsed );
       if ( nBlobUsed < nBlobSize )

@@ -3,6 +3,40 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.4.7
+
+A patch release with a **security fix** on the receive path, and faster name lookups in
+messages built in-process. The flat C API, the C++ export surface, the image format and every
+exported class layout are unchanged. **Upgrade if you relay or copy received messages.**
+
+### Security: copying a received value could write past its destination
+
+Copying a value trusted the lengths in the value's own header. A received binary value could
+claim to use more bytes than its capacity. Copying it then wrote past the end of the
+destination, and the bytes written were ones the sender chose. Copying could also read past the
+end of the received value. A relay that copies a received message (for example, Targetcore
+redirecting one) took this path.
+
+- The copy now refuses a value whose used length is larger than its capacity.
+- It refuses to read past the source value's block, or to write past the destination.
+- A declared capacity larger than the destination now becomes the destination's real size,
+  instead of being zero-filled past its end.
+- Values this library writes copy exactly as before.
+
+### Faster: name lookups in messages built in-process
+
+Every name is checked against its message's bounds before it is read, because a received
+message's bytes come from someone else. A message this process built from empty holds no such
+bytes, so a Release build now skips those checks on it.
+
+- **Received messages are checked exactly as before.** Only a message that this process
+  created empty skips the checks. One built from received or loaded bytes never does.
+- **Lookups at 512 siblings, message built in-process:** −25…−29% on Windows, −15…−16% on
+  Linux.
+- **Building a 512-field message:** −22% on Windows and −13% on Linux.
+- Debug builds still run every check.
+- Only the DLL / shared library needs replacing; nothing rebuilds against new headers.
+
 ## 3.4.6
 
 A patch release that makes name lookups a little faster again. The flat C API, the C++ export

@@ -206,7 +206,8 @@ P3PmsgList::AddListHead ( const P3PmsgData& oData )
 
     // Copy
     VBLockData_Copy ( VBLock_pData(pVBLock), oData.P3PmsgData::Sizeof()
-                    , P2PmsgData_pData(oData), oData.P3PmsgData::Sizeof() );
+                    , P2PmsgData_pData(oData)
+                    , P2PmsgData_SizeofReadable ( oData, oData.P3PmsgData::Sizeof() ) );
                     //, oData.GetVBLockData(), oData.P3PmsgData::Sizeof() ); //TODO:LJM deprecated
 
     // Prepend P3PmsgData item
@@ -278,7 +279,8 @@ P3PmsgList::AddListTail ( const P3PmsgData& oData )
 
     // Copy
     VBLockData_Copy ( VBLock_pData(pVBLock), oData.P3PmsgData::Sizeof()
-                    , P2PmsgData_pData(oData), oData.P3PmsgData::Sizeof() );
+                    , P2PmsgData_pData(oData)
+                    , P2PmsgData_SizeofReadable ( oData, oData.P3PmsgData::Sizeof() ) );
                     //, oData.GetVBLockData(), oData.P3PmsgData::Sizeof() ); //TODO:LJM deprecated
 
     // Prepend P3PmsgData item

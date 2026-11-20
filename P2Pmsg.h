@@ -683,6 +683,10 @@ VBLockData*
 P2PmsgData_pData    ( const P3PmsgData& oData, bool bIndirect = true );
 VBLsize
 P2PmsgObject_Sizeof_VBLockData( const P3PmsgObject& oObject, BOOL bChain = TRUE );
+// nSizeofDeclared capped by the room oData's block really holds: the bound on
+// what VBLockData_Copy may read from it (3.4.7). Not exported.
+VBLsize
+P2PmsgData_SizeofReadable ( const P3PmsgData& oData, VBLsize nSizeofDeclared );
 VBLockData*
 P2PmsgObject_NewVBLockData ( P3PmsgObject& oObject, VBLsize nSizeof );
 VBLockName*
