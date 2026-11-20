@@ -214,6 +214,43 @@ P2PmsgHeap_Addr2PhysChk ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLaddr, VBLsize nSpan 
 // P3PmsgObject::m_oVBLock is legitimately outside one. TRUE for SYSTEM heaps.
 BOOL
 P2PmsgHeap_IsPhysSpan ( P2PmsgHANDLE hVBHeap, const void *pv, VBLsize nSpan ) noexcept;
+// What IsPhysSpan bounds against, fetched once. A caller about to test several
+// spans of one block (P2PmsgObject_pNameChk, once per sibling of every name
+// lookup) reads the extent once and tests each span inline, instead of paying an
+// out-of-line call per span. IsPhysSpan is itself these two steps, so the two
+// cannot disagree. nSizeofHdr is P2PmsgHeap_Sizeof_Hdr, from the same handle.
+struct P2PmsgHeapExtent
+{
+    enum : UCHAR { None = 0     // null handle or no image: every span is OUT
+                 , Image = 1    // IOMAGE / BSTRio: bounded by aImage, nSizeofAlloc
+                 , Open = 2 };  // SYSTEM heap: every span is IN
+    UCHAR   uKind;
+    VBLaddr aImage;
+    VBLsize nSizeofAlloc;
+    VBLsize nSizeofHdr;
+};
+void
+P2PmsgHeap_GetExtent ( P2PmsgHANDLE hVBHeap, P2PmsgHeapExtent *pExtent ) noexcept;
+inline BOOL
+P2PmsgHeapExtent_IsSpan ( const P2PmsgHeapExtent &oExtent
+                        , const void *pv, VBLsize nSpan ) noexcept
+{
+    if ( pv == nullptr || oExtent.uKind == P2PmsgHeapExtent::None )
+      return FALSE;
+    if ( oExtent.uKind == P2PmsgHeapExtent::Open )
+      return TRUE;
+    // Addresses run 1..nSizeofAlloc, so aImage itself is not a legal target --
+    // the same convention Addr2Phys enforces, kept here so the two agree.
+    const VBLaddr aLump = reinterpret_cast<VBLaddr>(pv);
+    if ( aLump <= oExtent.aImage )
+      return FALSE;
+    const VBLaddr dOffset = aLump - oExtent.aImage;
+    if ( dOffset > oExtent.nSizeofAlloc )
+      return FALSE;
+    if ( nSpan > oExtent.nSizeofAlloc - dOffset )
+      return FALSE;
+    return TRUE;
+}
 VBLock*
 P2PmsgHeap_Block2Phys( P2PmsgHANDLE hVBHeap, VBLaddr aVBLaddrBlock );
 VBLsize

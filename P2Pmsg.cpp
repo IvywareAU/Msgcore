@@ -6546,22 +6546,46 @@ P2PmsgObject_ChkVBLockData ( const P3PmsgObject& oObject, VBLock *pVBLock
 //         draft of this applied it everywhere and the suite's own 63-unit
 //         case was refused. Inline and SYSTEM-heap blocks are built by this
 //         process; nothing in them came off a socket.
+//       : THE SAME CHECKS, PAID FOR ONCE (M2a, 2026-11-20). This runs for every
+//         sibling a name lookup steps over, and as first written it spent
+//         ~20 out-of-line calls across three translation units on arithmetic:
+//         four IsPhysSpan, three Hdr_u_SizeNN, the predicates inside
+//         ChkContained and ChkWellFormed. Profiled at 39-42% of a 512-sibling
+//         lookup on Windows (MSCS performance log, finding F-P1-1). Now the
+//         image extent and the block's size are read once and every predicate
+//         is tested inline (P2PmsgHeapExtent_IsSpan, VBLock_IsContainedIn,
+//         VBLockName_IsWellFormedInl). Each failing test calls the original
+//         throwing check, which refuses with its own message -- so the order,
+//         the scope and every refusal are unchanged; only the passing path got
+//         cheaper. P2PmsgObject_ChkVBLock above is the same first step, kept
+//         for its other callers.
 static VBLockName*
 P2PmsgObject_pNameChk ( const P3PmsgObject& oObject, VBLock *pVBLock )
 {
-    P2PmsgObject_ChkVBLock ( oObject, pVBLock );
+    if ( pVBLock == nullptr )
+      P2PmsgObject_ChkVBLock ( oObject, pVBLock );          // throws
+    P2PmsgHeapExtent oExtent;
+    P2PmsgHeap_GetExtent ( oObject.m_hVBList, &oExtent );
+    //  Not in the image (inline block, SYSTEM heap): no bound applies.
+    if ( !P2PmsgHeapExtent_IsSpan ( oExtent, pVBLock, 1 ) )
+      return VBLock_pName ( pVBLock );
+    if ( !P2PmsgHeapExtent_IsSpan ( oExtent, pVBLock, oExtent.nSizeofHdr ) )
+      P2PmsgObject_ChkVBLock ( oObject, pVBLock );          // throws
+    const VBLsize nSizeofBlock = VBLock_Hdr_u_SizeNN ( pVBLock );
+    if ( !P2PmsgHeapExtent_IsSpan ( oExtent, pVBLock, nSizeofBlock ) )
+      P2PmsgObject_ChkVBLock ( oObject, pVBLock );          // throws
     VBLockName *pName   = VBLock_pName ( pVBLock );
-    if ( !P2PmsgHeap_IsPhysSpan ( oObject.m_hVBList, pVBLock, 1 ) )
-      return pName;
     const UCHAR uVBLock = oObject.m_uVBLock;
-    VBLock_ChkContained ( pVBLock, pName, VBLockName_Sizeof_Min(uVBLock)
-                        , __FUNCTION__ );
-    VBLockName_ChkWellFormed ( uVBLock, pName, __FUNCTION__ );
-    if ( !VBLockName_IsChained ( pName ) )
+    const VBLsize nSizeofMin = VBLockName_Sizeof_Min ( uVBLock );
+    if ( !VBLock_IsContainedIn ( pVBLock, nSizeofBlock, pName, nSizeofMin ) )
+      VBLock_ChkContained ( pVBLock, pName, nSizeofMin, __FUNCTION__ );
+    if ( !VBLockName_IsWellFormedInl ( pName, nSizeofMin ) )
+      VBLockName_ChkWellFormed ( uVBLock, pName, __FUNCTION__ );
+    if ( !VBLockName_IsChainedInl ( pName ) )
     {
-      VBLock_ChkContained ( pVBLock, pName
-                          , VBLockName_Sizeof_Alloc(uVBLock,pName)
-                          , __FUNCTION__ );
+      const VBLsize nSizeofAlloc = VBLockName_Sizeof_AllocInl ( pName );
+      if ( !VBLock_IsContainedIn ( pVBLock, nSizeofBlock, pName, nSizeofAlloc ) )
+        VBLock_ChkContained ( pVBLock, pName, nSizeofAlloc, __FUNCTION__ );
       //  And TERMINATED where it says it ends. On Windows c_name() hands back a
       //  pointer into the store itself, and c_wcscmp / c_wcsicmp -- name
       //  lookup -- read it to a NUL, not to nBlobUsed. The write path always

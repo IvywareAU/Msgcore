@@ -3,6 +3,27 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.4.4
+
+A patch release that makes every name lookup on a received message faster. The flat C API,
+the C++ export surface, the image format and every class layout are unchanged.
+
+### Faster: name checks on a received message
+
+When a lookup steps over the siblings of a received message, it checks each sibling's name
+against the image. Each check is a few compares, but they were made through about 20 function
+calls per sibling, and the same image bounds were read four times. Now the bounds are read
+once and the checks run inline.
+
+- **Lookups are faster:** `Exists()`, `SelectObject()` and `FieldRef` reads at 512 siblings
+  take 15.4 → 12.1 µs on Windows (−21%) and 80.1 → 70.7 µs on Linux (−12%). Misses gain the
+  same share.
+- **The same checks still run.** None was dropped or loosened, and a malformed name is
+  refused exactly as before, with the same message. The suite's refusal cases pass
+  unchanged: a name outside its block, no terminator, a capacity larger than the block, and
+  a name chained to address 0.
+- Only the DLL / shared library needs replacing; nothing rebuilds against new headers.
+
 ## 3.4.3
 
 A patch release that makes a name lookup that misses twice as fast. The flat C API, the C++

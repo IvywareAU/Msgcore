@@ -704,6 +704,39 @@ VBLockName_BlobSize ( const VBLockName *pName );
 VBLsize
 VBLockName_BlobUsed ( const VBLockName *pName );
 
+// Inline twins of the checks above, for the one caller that runs them per
+// sibling of every name lookup (P2PmsgObject_pNameChk, M2a in the MSCS
+// performance plan). Each answers exactly what its out-of-line original
+// answers; on FALSE the caller calls the original, which throws with its own
+// message. The originals stay authoritative and keep their symbols.
+inline BOOL
+VBLockName_IsChainedInl ( const VBLockName *pName ) noexcept
+{   // == VBLockName_IsChained: legacy (0xFF) and revised (0x7F) chaining flags
+    return ( pName->uVBLockAttr == 0xFF || pName->uVBLockAttr == 0x7F )
+         ? TRUE : FALSE;
+}
+inline VBLsize
+VBLockName_Sizeof_AllocInl ( const VBLockName *pName ) noexcept
+{   // == VBLockName_Sizeof_Alloc
+    return (VBLsize)( sizeof(VBLockName) - sizeof(VBLockName::u)
+                    + sizeof(pName->u.vBlob08) )
+         + (VBLsize)( pName->u.vBlob08.nBlobSize * sizeof(P2PWCHAR) );
+}
+// == "VBLockName_ChkWellFormed would not throw", given the header is bounded and
+// nSizeofMin is VBLockName_Sizeof_Min(uVBLock).
+inline bool
+VBLockName_IsWellFormedInl ( const VBLockName *pName, VBLsize nSizeofMin ) noexcept
+{
+    if ( pName == nullptr || pName->u.vBlob08.nBlobSize == 0 )
+      return false;
+    if ( VBLockName_Sizeof_AllocInl ( pName ) < nSizeofMin )
+      return false;
+    if ( !VBLockName_IsChainedInl ( pName ) &&
+         pName->u.vBlob08.nBlobUsed > pName->u.vBlob08.nBlobSize )
+      return false;
+    return true;
+}
+
 ///////////////////////////////////////////////////////////////////////
 //  VBLockField containers and definitions
 //  NOTES: VBLock'ed container for VBLock(Name, Data, etc)
@@ -1006,6 +1039,19 @@ VBLock_IsContainedVBLump ( VBLock *pVBLock, const void *pVBLaddr, VBLaddr nSizeo
 void
 VBLock_ChkContained ( const VBLock *pOwner, const void *pv, VBLsize nSpan
                     , LPCSTR lpszWhere );
+// == "VBLock_ChkContained would not throw" for a non-null pOwner whose
+// VBLock_Hdr_u_SizeNN the caller already holds in nSizeofOwner. Inline, for the
+// per-sibling caller; on false call VBLock_ChkContained for the refusal.
+inline bool
+VBLock_IsContainedIn ( const VBLock *pOwner, VBLsize nSizeofOwner
+                     , const void *pv, VBLsize nSpan ) noexcept
+{
+    const VBLaddr aBlock    = (VBLaddr)pOwner;
+    const VBLaddr aBlockEnd = aBlock + nSizeofOwner;
+    const VBLaddr aLump     = (VBLaddr)pv;
+    return pv != nullptr && aLump >= aBlock && aLump <= aBlockEnd &&
+           nSpan <= aBlockEnd - aLump;
+}
 
 bool
 VBLock_IsItem ( const VBLock *pVBLock );

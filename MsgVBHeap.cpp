@@ -4412,30 +4412,40 @@ P2PmsgHeap_Addr2PhysChk ( P2PmsgHANDLE hVBList, VBLaddr aVBLaddr, VBLsize nSpan 
 BOOL
 P2PmsgHeap_IsPhysSpan ( P2PmsgHANDLE hVBList, const void *pv, VBLsize nSpan ) noexcept
 {
-    if ( hVBList == nullptr || pv == nullptr )
-      return FALSE;
+    P2PmsgHeapExtent oExtent;
+    P2PmsgHeap_GetExtent ( hVBList, &oExtent );
+    return P2PmsgHeapExtent_IsSpan ( oExtent, pv, nSpan );
+}
+
+//
+//  Reads the extent IsPhysSpan bounds against, for a caller testing several
+//  spans of one block. See P2PmsgHeapExtent in MsgVBHeap.h.
+void
+P2PmsgHeap_GetExtent ( P2PmsgHANDLE hVBList, P2PmsgHeapExtent *pExtent ) noexcept
+{
+    pExtent->uKind        = P2PmsgHeapExtent::None;
+    pExtent->aImage       = 0;
+    pExtent->nSizeofAlloc = 0;
+    pExtent->nSizeofHdr   = 0;
+    if ( hVBList == nullptr )
+      return;
     const VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    pExtent->nSizeofHdr = P2PmsgHeap_Sizeof_Hdr ( hVBList );
     VBLaddr aImage = 0;
     if ( pHandle->uVBListType == P2PmsgHeap_IOMAGE )
       aImage = pHandle->u.IOMAGE.aIOmage;
     else if ( pHandle->uVBListType == P2PmsgHeap_BSTRio )
       aImage = pHandle->u.BSTRio.aBSTRio;
     else
-      return TRUE;
+    {
+      pExtent->uKind = P2PmsgHeapExtent::Open;
+      return;
+    }
     if ( aImage == 0 )
-      return FALSE;
-
-    // Addresses run 1..nSizeofAlloc, so aImage itself is not a legal target --
-    // the same convention Addr2Phys enforces, kept here so the two agree.
-    const VBLaddr aLump = reinterpret_cast<VBLaddr>(pv);
-    if ( aLump <= aImage )
-      return FALSE;
-    const VBLaddr dOffset = aLump - aImage;
-    if ( dOffset > pHandle->nSizeofAlloc )
-      return FALSE;
-    if ( nSpan > pHandle->nSizeofAlloc - dOffset )
-      return FALSE;
-    return TRUE;
+      return;
+    pExtent->uKind        = P2PmsgHeapExtent::Image;
+    pExtent->aImage       = aImage;
+    pExtent->nSizeofAlloc = pHandle->nSizeofAlloc;
 }
 
 //

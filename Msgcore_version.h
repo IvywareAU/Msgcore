@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.4.3 is tag
-//         v3.4.3. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.4.4 is tag
+//         v3.4.4. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,30 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.4.4.0, a PATCH on 3.4.3, and strictly one: tools\ci\exports-flat.manifest
+//  and exports-cxx-x64.manifest both match unchanged (285 flat, 771 mangled),
+//  no Msgcore_c.h line and no class layout moved. The new helpers are internal
+//  free functions and header inlines, none of them exported.
+//
+//  THE NAME CHECKS COST MORE CALLS THAN COMPARES. P2PmsgObject_pNameChk runs
+//  for every sibling a name lookup steps over, and it spent ~20 out-of-line
+//  calls doing a few compares each: four IsPhysSpan re-reading the heap handle
+//  for the same image bounds, three Hdr_u_SizeNN, and the predicates inside
+//  ChkContained and ChkWellFormed, across three translation units with no LTO.
+//  Now the image extent (new P2PmsgHeap_GetExtent, which IsPhysSpan is rebuilt
+//  on) and the block size are read once per sibling, and every predicate is
+//  tested inline (P2PmsgHeapExtent_IsSpan, VBLock_IsContainedIn,
+//  VBLockName_IsWellFormedInl and two twins). A failing test calls the original
+//  throwing check, which refuses with its own message: no check is dropped or
+//  loosened, the order and the image-only scope are unchanged, and the suite's
+//  refusal cases (name outside its block for all four block kinds, no
+//  terminator, capacity past the block, chain to 0) pass unchanged. Measured at
+//  512 siblings on a received heap: a lookup 15.4 -> 12.1 us on Windows (-21%),
+//  80.1 -> 70.7 us on Linux (-12%); a miss and FieldRef reads the same
+//  (MSCS performance log, finding F-P1-4).
+//
+//  BELOW IS THE 3.4.3 RATIONALE.
 //
 //  3.4.3.0, a PATCH on 3.4.2, and strictly one: the only source change is
 //  one condition in P3Pmsg_SelectObjectRecurse (P2Pmsg.cpp), so no export,
@@ -290,22 +314,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  4
-#define MSGCORE_VERSION_PATCH  3
+#define MSGCORE_VERSION_PATCH  4
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,4,3,0
+#define MSGCORE_VERSION_COMMAS 3,4,4,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.4.3.0"
+#define MSGCORE_VERSION_STRING "3.4.4.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03040300 is 3.4.3.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03040300
+//  0x03040400 is 3.4.4.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03040400
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"
