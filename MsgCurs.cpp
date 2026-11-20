@@ -473,6 +473,16 @@ P3PmsgCurs::Goto ( LPCWSTR lpszItemName )
     if ( hVBList )
       GotoKey_Init ( oKey, lpszStackName );
     const UCHAR uVBLockHeap = oKey.bJudge ? P2PmsgHeap_Addrnn ( hVBList ) : 0;
+    //  M2b: the bounds every sibling's name is checked against, read once for
+    //  the walk. Nothing below writes to the heap -- the loop only connects
+    //  cursors and compares names -- so the extent cannot go stale under it.
+    P2PmsgHeapExtent oExtent {};
+    VBLsize nSizeofNameMin = 0;
+    if ( oKey.bJudge )
+    {
+      P2PmsgHeap_GetExtent ( hVBList, &oExtent );
+      nSizeofNameMin = VBLockName_Sizeof_Min ( uVBLockHeap );
+    }
 
     m_pP3PmsgFoN = 0;
     while ( aItem )
@@ -488,8 +498,9 @@ P3PmsgCurs::Goto ( LPCWSTR lpszItemName )
       //ASSERT(VBLock_IsLinked(pVBLock));
       VBLockItem *pItem   = VBLock_pItem  ( pVBLock );
       if ( oKey.bJudge &&
-           GotoKey_Differs ( oKey, P2PmsgHeap_pNameChk ( hVBList, uVBLockHeap
-                                                       , pVBLock ) ) )
+           GotoKey_Differs ( oKey, P2PmsgHeap_pNameChkIn ( hVBList, uVBLockHeap
+                                                         , oExtent, nSizeofNameMin
+                                                         , pVBLock ) ) )
       {
 #ifdef _DEBUG
         //  Every skip, checked against the compare it replaces. A throw, not

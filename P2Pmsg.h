@@ -693,6 +693,15 @@ P2PmsgObject_pName  ( const P3PmsgObject& oObject, bool bIndirect = true );
 // a name this library could not have written; not exported.
 VBLockName*
 P2PmsgHeap_pNameChk ( P2PmsgHANDLE hVBList, UCHAR uVBLock, VBLock *pVBLock );
+// The same checks against bounds the caller read once for a whole walk:
+// oExtent from P2PmsgHeap_GetExtent(hVBList), nSizeofMin from
+// VBLockName_Sizeof_Min(uVBLock). Valid only while nothing writes to the heap,
+// since a write can move or grow the image. Not exported.
+struct P2PmsgHeapExtent;
+VBLockName*
+P2PmsgHeap_pNameChkIn ( P2PmsgHANDLE hVBList, UCHAR uVBLock
+                      , const P2PmsgHeapExtent& oExtent, VBLsize nSizeofMin
+                      , VBLock *pVBLock );
 VBLsize
 P2PmsgObject_VBLockNameSize( const P3PmsgObject& oObject );
 Msgcore_EXT BOOL

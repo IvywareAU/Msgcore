@@ -29,8 +29,8 @@
 //         C++ compiler, and rc.exe understands #define and nothing else - no
 //         types, no enums, no inline functions, no const. Anything that is
 //         not a macro belongs in another header.
-//       : Keep the release tag and this file in step: version 3.4.5 is tag
-//         v3.4.5. A build whose DLL reports a version no tag matches cannot
+//       : Keep the release tag and this file in step: version 3.4.6 is tag
+//         v3.4.6. A build whose DLL reports a version no tag matches cannot
 //         be traced back to a source state, which defeats the point.
 //       : What that rule is about is a PUBLISHED binary. The number moves here
 //         in the same commit that moves the supported surface, so the header
@@ -45,6 +45,25 @@
 
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
+//
+//  3.4.6.0, a PATCH on 3.4.5, and strictly one: tools\ci\exports-flat.manifest
+//  and exports-cxx-x64.manifest both match unchanged (285 flat, 771 mangled),
+//  no Msgcore_c.h line and no class layout moved. P2PmsgHeap_pNameChkIn is an
+//  internal free function and is not exported.
+//
+//  THE BOUNDS READ ONCE PER WALK. P2PmsgHeap_pNameChk re-read the heap's image
+//  extent (P2PmsgHeap_GetExtent, out of line) and the addressing mode's minimum
+//  name size for every sibling a lookup stepped over, though both are the same
+//  for the whole walk. P2PmsgHeap_pNameChkIn takes them from its caller;
+//  P3PmsgCurs::Goto reads them once before its loop, which only connects
+//  cursors and compares names, so nothing can move or grow the image under
+//  them. pNameChk is GetExtent + Sizeof_Min + pNameChkIn: one copy of the
+//  checks, none dropped, loosened or reordered. Measured at 512 siblings on a
+//  received heap, against 3.4.5: a lookup -3% on Windows, -7% on Linux; a miss
+//  -9% on both; building a 512-field message -2% / -7% (MSCS performance log,
+//  finding F-P1-8).
+//
+//  BELOW IS THE 3.4.5 RATIONALE.
 //
 //  3.4.5.0, a PATCH on 3.4.4, and strictly one: tools\ci\exports-flat.manifest
 //  and exports-cxx-x64.manifest both match unchanged (285 flat, 771 mangled),
@@ -348,22 +367,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  4
-#define MSGCORE_VERSION_PATCH  5
+#define MSGCORE_VERSION_PATCH  6
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,4,5,0
+#define MSGCORE_VERSION_COMMAS 3,4,6,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.4.5.0"
+#define MSGCORE_VERSION_STRING "3.4.6.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03040500 is 3.4.5.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03040500
+//  0x03040600 is 3.4.6.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03040600
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

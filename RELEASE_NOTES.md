@@ -3,6 +3,21 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.4.6
+
+A patch release that makes name lookups a little faster again. The flat C API, the C++ export
+surface, the image format and every class layout are unchanged.
+
+### Faster: the safety bounds are read once per lookup
+
+Each sibling a lookup steps over has its name checked against the received message's image.
+The image's bounds are the same for the whole lookup, but they were read again for every
+sibling. They are now read once per lookup. Every check still runs, in the same order.
+
+- **Lookups:** −3% on Windows and −7% on Linux at 512 siblings. Misses are −9% on both.
+- **Building a 512-field message:** −2% on Windows and −7% on Linux.
+- Only the DLL / shared library needs replacing; nothing rebuilds against new headers.
+
 ## 3.4.5
 
 A patch release that makes name lookups about twice as fast on Windows and three to four

@@ -6569,13 +6569,30 @@ P2PmsgObject_ChkVBLockData ( const P3PmsgObject& oObject, VBLock *pVBLock
 //         bound a sibling's name without connecting a handle to it first.
 //         P2PmsgObject_pNameChk below passes its object's two fields; there is
 //         one copy of the checks.
+//       : THE BOUNDS READ ONCE PER WALK (M2b). The image extent and the
+//         addressing mode's minimum name size are the same for every sibling
+//         of one walk, yet each call re-read them out of line. pNameChkIn takes
+//         them from its caller -- P3PmsgCurs::Goto reads them before its loop --
+//         and does every check against them; pNameChk is GetExtent +
+//         Sizeof_Min + pNameChkIn, so there is still one copy of the checks.
+//         The caller's promise: the extent was read from hVBList and nothing
+//         wrote to the heap since. A write can move or grow the image
+//         (ResizeIOMAGE), and a stale extent would bound against the old one.
 VBLockName*
 P2PmsgHeap_pNameChk ( P2PmsgHANDLE hVBList, UCHAR uVBLock, VBLock *pVBLock )
 {
-    if ( pVBLock == nullptr )
-      P2PmsgHeap_ChkVBLock ( hVBList, pVBLock );            // throws
     P2PmsgHeapExtent oExtent;
     P2PmsgHeap_GetExtent ( hVBList, &oExtent );
+    return P2PmsgHeap_pNameChkIn ( hVBList, uVBLock, oExtent
+                                 , VBLockName_Sizeof_Min ( uVBLock ), pVBLock );
+}
+VBLockName*
+P2PmsgHeap_pNameChkIn ( P2PmsgHANDLE hVBList, UCHAR uVBLock
+                      , const P2PmsgHeapExtent& oExtent, VBLsize nSizeofMin
+                      , VBLock *pVBLock )
+{
+    if ( pVBLock == nullptr )
+      P2PmsgHeap_ChkVBLock ( hVBList, pVBLock );            // throws
     //  Not in the image (inline block, SYSTEM heap): no bound applies.
     if ( !P2PmsgHeapExtent_IsSpan ( oExtent, pVBLock, 1 ) )
       return VBLock_pName ( pVBLock );
@@ -6585,7 +6602,6 @@ P2PmsgHeap_pNameChk ( P2PmsgHANDLE hVBList, UCHAR uVBLock, VBLock *pVBLock )
     if ( !P2PmsgHeapExtent_IsSpan ( oExtent, pVBLock, nSizeofBlock ) )
       P2PmsgHeap_ChkVBLock ( hVBList, pVBLock );            // throws
     VBLockName *pName   = VBLock_pName ( pVBLock );
-    const VBLsize nSizeofMin = VBLockName_Sizeof_Min ( uVBLock );
     if ( !VBLock_IsContainedIn ( pVBLock, nSizeofBlock, pName, nSizeofMin ) )
       VBLock_ChkContained ( pVBLock, pName, nSizeofMin, __FUNCTION__ );
     if ( !VBLockName_IsWellFormedInl ( pName, nSizeofMin ) )
