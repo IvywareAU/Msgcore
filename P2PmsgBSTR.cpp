@@ -284,6 +284,16 @@ P3PmsgBSTR::PrepareP2Piomage ( DWORD uBSTRmask )
     return P2PmsgHeap_pIOmage ( m_pP2PmsgBSTRiomage->m_hBSTR );
 }
 
+//  Refer P2PmsgHeap_TrimIOMAGE. NOT while an image is prepared: the prepared
+//  image IS this heap on the full-replica path, its length already stamped
+UINT
+P3PmsgBSTR::TrimP2Piomage ( )
+{
+    if ( m_pP2PmsgBSTRiomage != NULL || m_hBSTR == 0 )
+      return 0;
+    return (UINT)P2PmsgHeap_TrimIOMAGE ( m_hBSTR );
+}
+
 P2Piomage*
 P3PmsgBSTR::P2Piomage ( )
 {

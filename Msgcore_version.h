@@ -46,6 +46,46 @@
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
 //
+//  3.5.0.0, a MINOR on 3.4.7 (the MSCS performance plan's M1: live bytes on the wire).
+//  The flat C ABI is unchanged (exports-flat.manifest matches, 285); the
+//  mangled C++ half GAINS ONE EXPORT, P3PmsgBSTR::TrimP2Piomage (772). That
+//  half is called internal, but Targetcore 3.7.0 calls this one and will not
+//  load against a 3.4.x DLL, and a PATCH number would hide exactly that.
+//
+//  WHAT IT DOES. The frame of an unsealed message is its whole heap image, and
+//  the image's length is uHiWM - the arena size, not a used mark - so a 64-byte
+//  message went out as 2,032 bytes, ~1.4 KB of it one free block at the end.
+//  P2PmsgHeap_TrimIOMAGE takes that block (two after a grow) off the free list
+//  through IsolateIOMAGE and pulls the heap's end back to where it began. It
+//  finds the block from the END through its boundary tag (PrevFree, which
+//  believes the block's own header over the tag), so it costs a constant, a
+//  stale tag cannot trim a live block, and a tail with no tag is left alone.
+//
+//  NO RECEIVER CHANGES. The image carries no capacity, only its length in
+//  oSync; the adopter checks that the free list and a linear walk fit inside
+//  that length and agree with the root's counts, which the unlink keeps exact.
+//  That is the shape CompactSealed has sent since 3.4.4 and the shape the C++23
+//  bridge's writer sends old peers. Save does not trim: saved images and
+//  golden_ref.p2p are byte-identical (plan §10.1 decision 3).
+//
+//  ONE CHANGE OUTSIDE THE NEW FUNCTION, found by measuring it. CreateIOMAGE
+//  rounds the arena (uHiWM, and the free block it lays down) up to a multiple
+//  of 8, but kept the size it was asked for in nSizeofAlloc. A heap created at
+//  any other size - every CompactSealed copy - therefore had a free tail
+//  ending up to 7 bytes past its own extent, StampFoot would not tag it, and
+//  the trim could not find it: sealed frames stayed at 1,344 bytes. The heap's
+//  extent is now the rounded arena. The image bytes do not change, and every
+//  receiver of the image already used the rounded length as its extent.
+//
+//  Gated by MscsUnitTests Test_WireTrim and its twin in tests/MsgcoreSuite.cpp:
+//  the trimmed image is adopted inside P2PmsgHeap_UntrustedGate (the wire's
+//  checks, root never repaired), both ends allocate past the trimmed end, a
+//  heap of an odd size trims, and a grown heap trims to a valid image. One
+//  int: 2,056 -> 307 bytes. Through Targetcore 3.7.0 (perf_fanout, 64 B):
+//  unsealed frames 2,032 -> 629, sealed 1,344 -> 1,058, both platforms.
+//
+//  BELOW IS THE 3.4.7 RATIONALE.
+//
 //  3.4.7.0, a PATCH on 3.4.6, and strictly one: tools\ci\exports-flat.manifest
 //  and exports-cxx-x64.manifest both match unchanged (285 flat, 771 mangled),
 //  no Msgcore_c.h line and no exported class layout moved. The heap handle that
@@ -411,23 +451,23 @@
 //  promises - but a C++ consumer pinned to 3.0.0 has to recompile, and that is
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
-#define MSGCORE_VERSION_MINOR  4
-#define MSGCORE_VERSION_PATCH  7
+#define MSGCORE_VERSION_MINOR  5
+#define MSGCORE_VERSION_PATCH  0
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,4,7,0
+#define MSGCORE_VERSION_COMMAS 3,5,0,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.4.7.0"
+#define MSGCORE_VERSION_STRING "3.5.0.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03040700 is 3.4.7.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03040700
+//  0x03050000 is 3.5.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03050000
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

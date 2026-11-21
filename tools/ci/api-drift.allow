@@ -906,6 +906,7 @@ cxx-to-c  P3PmsgBSTR::PrepareP2Piomage    # hands out the packed VBListIOmage; e
 cxx-to-c  P3PmsgBSTR::P2Piomage    # as PrepareP2Piomage; the flat serialisation is file-based (msgcore_mgr_save / _load)
 cxx-to-c  P3PmsgBSTR::P2PiomageSize    # as P2Piomage; the size of a struct the ABI does not publish
 cxx-to-c  P3PmsgBSTR::ReleaseP2Piomage    # as P2Piomage, releasing
+cxx-to-c  P3PmsgBSTR::TrimP2Piomage    # 3.5.0: shortens the packed VBListIOmage before PrepareP2Piomage hands it to a transport; only the wire side (Targetcore's send funnels) calls it, and the flat serialisation is file-based, which Save does not trim
 cxx-to-c  P3PmsgBSTR::Exists    # keyed on a VBLockBSTR_* section code (P2PmsgBSTR.h:36-44), a vocabulary the C header does not publish
 cxx-to-c  P3PmsgBSTR::r_item    # keyed on the same section code, and returns P3PmsgItem&
 cxx-to-c  P3PmsgBSTR::r_datn    # SelectItem(TBSTR_Msg) on the image (P2PmsgBSTR.cpp:430-433); same vocabulary

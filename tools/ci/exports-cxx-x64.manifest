@@ -764,6 +764,7 @@
 ?TriggerINSERT@P2PmsgMgr@@QEAAIAEAVP3PmsgObject@@@Z
 ?TriggerINSERT@P2PmsgMgr@@QEAAIAEBVP3PmsgField@@@Z
 ?TriggerUPDATE@P2PmsgMgr@@QEAAIAEAVP3PmsgField@@@Z
+?TrimP2Piomage@P3PmsgBSTR@@QEAAIXZ
 ?Truncate@P3PmsgAttr@@QEAAXXZ
 ?Truncate@P3PmsgDesc@@QEAAXXZ
 ?Truncate@P3PmsgField@@UEAAXXZ

@@ -3,6 +3,34 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.5.0
+
+A minor release: a message can now be sent without its unused space. The flat C API, the image
+format, saved files and every exported class layout are unchanged. The C++ export surface
+gains one member, so **Targetcore 3.7.0 needs this release**.
+
+### New: `P3PmsgBSTR::TrimP2Piomage()`
+
+A message's wire image used to be its whole heap, including the free space at the end. A message
+with one small field went out as about 2 KB. `TrimP2Piomage()` removes that free space, so the
+next image ends at the message's last block.
+
+- **One `int` field: 2,056 → 307 bytes.**
+- Any receiver accepts a trimmed image, including older releases. An image says only how long it
+  is, not how big its heap was, and a trimmed image passes every check a receiver makes.
+- The message stays usable. If you add to it after trimming, its heap grows as it would from any
+  full heap.
+- It answers the bytes removed, and 0 while an image is prepared (the length is already stamped).
+- Saving is unchanged: saved images are byte-identical to 3.4.7.
+
+### Fixed: a heap created at a size that is not a multiple of 8
+
+Such a heap rounds its storage up to a multiple of 8 but recorded the size it was asked for, so
+its last free block ran past its own recorded end. Nothing read it wrongly, but the trim above
+could not see that block, and sealed messages (whose copies are created at such sizes) did not
+shrink. The heap now records the rounded size. Its image bytes are unchanged, and receivers
+already used the rounded size.
+
 ## 3.4.7
 
 A patch release with a **security fix** on the receive path, and faster name lookups in

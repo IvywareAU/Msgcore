@@ -2592,6 +2592,72 @@ ASSERT(VBHeap_IsAlloc(pVBLock));
 ASSERT(VBHeap_IsAddr(pVBLock,pHandle->uAddrType));
 }
 
+///////////////////////////////////////////////////////////////////////
+//  Drops the free tail of an IOMAGE heap, so its image ends at its last block
+//  (the MSCS performance plan's item M1, Msgcore 3.5.0)
+//  NOTES: THE FRAME IS THE WHOLE IMAGE. uHiWM is stamped into oSync as the
+//         frame length (P2PmsgHeap_pIOmage), and uHiWM is the arena size, not
+//         a used mark - so a 64-byte message went out as 2,032 bytes, ~1.4 KB
+//         of it one free block at the end. This is the inverse of
+//         ResizeIOMAGE: it takes that block (two, after a grow, which appends
+//         without merging) off the free list and pulls the end of the heap back
+//         to where it starts
+//       : WHAT AN OLD RECEIVER ACCEPTS. The image holds no capacity: the only
+//         size in it is oSync. The adopter checks that the free list and a
+//         linear walk both fit inside that size and agree with the root's
+//         counts. Unlinking the tail through IsolateIOMAGE keeps aFree,
+//         aFreeLast, aFreeSize and nFreeItems exact, so the trimmed image is
+//         the shape the C++23 bridge already sends old peers (its writer emits
+//         no free tail at all; tools/legacy/legacy_write.cpp), and the shape
+//         CompactSealed has sent since 3.4.4. No receiver changes
+//       : FOUND FROM THE END, NOT BY A WALK. The trailing free block is the
+//         one PrevFree finds from the end of the image through its boundary
+//         tag, and PrevFree believes the block's own header over the tag. So
+//         the cost is constant, a stale tag cannot trim a live block, and a
+//         tail with no tag (a remainder too small to carry one, or a heap that
+//         never split) is simply left alone - the frame is as long as before,
+//         never wrong
+//       : THE BUFFER IS KEPT; only the heap's extent shrinks. The next Alloc
+//         that does not fit grows it through ResizeIOMAGE as from any full
+//         heap, and that copies nSizeofAlloc bytes, which is the new end
+//       : THE EXTENT AND THE IMAGE AGREE. Left alone if uHiWM (the image's
+//         length) and nSizeofAlloc (the heap's extent) differ, because the
+//         tail block then ends at neither. Since 3.5.0 CreateIOMAGE sets both
+//         to the rounded arena; before, a heap created at a size that was not
+//         a multiple of 8 - every CompactSealed copy - kept the unrounded one
+//         in nSizeofAlloc, its tail went untagged, and sealed frames did not
+//         trim at all (measured: 1,344 bytes before and after)
+//       : Answers the frame bytes removed, 0 for none. Not for an image on disk:
+//         Save does not call it, so saved images and golden_ref.p2p are
+//         unchanged (plan §10.1 decision 3)
+VBLsize
+P2PmsgHeap_TrimIOMAGE ( P2PmsgHANDLE hVBList )
+{
+    VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    if ( pHandle == nullptr                       ||
+         pHandle->uVBListType != P2PmsgHeap_IOMAGE ||
+         pHandle->u.IOMAGE.pRoot == nullptr          )
+      return 0;
+    const VBLsize nBefore = (VBLsize)pHandle->u.IOMAGE.uHiWM;
+    if ( nBefore != pHandle->nSizeofAlloc )
+      return 0;                                 // see THE EXTENT AND THE IMAGE AGREE
+
+    //  Bounded: one block normally, two after a grow. A third would mean two
+    //  adjacent free blocks a merge has not reached yet, which is still sound
+    //  to take; the bound only stops a pathological heap costing a walk
+    for ( int nTaken = 0; nTaken < 8; nTaken++ )
+    {
+      const VBLaddr aTail = P2PmsgHeap_PrevFree ( hVBList, pHandle->nSizeofAlloc );
+      if ( aTail == 0 )
+        break;
+      P2PmsgHeap_IsolateIOMAGE ( hVBList, aTail );
+      pHandle -> nSizeofAlloc    = aTail;
+      pHandle -> u.IOMAGE.uHiWM  = aTail;
+      pHandle -> bDirty          = true;
+    }
+    return nBefore - (VBLsize)pHandle->u.IOMAGE.uHiWM;
+}
+
 //
 //  Collates adjacent free entries
 //  NOTES: Effective garbage collection requires entries to be collated
@@ -3171,6 +3237,17 @@ ASSERT(nSizeInitial);nSizeInitial+=8;//Delete testing only
     // NOTES: Size rounded up to multiple of sizeof(VBLsize) bytes
     VBLsize nSizeofIOMAGE       =  nSizeInitial
                                 + (sizeof(VBLsize) - (nSizeInitial % sizeof(VBLsize))) % sizeof(VBLsize);
+    // The heap's extent IS the rounded arena (Msgcore 3.5.0). uHiWM - the
+    // image's length, and so the frame's - and the free block laid down below
+    // were rounded; nSizeofAlloc was left at the size asked for, so a heap
+    // created at a size that is not a multiple of 8 (every CompactSealed copy)
+    // had its free tail run up to 7 bytes past its own extent. StampFoot will
+    // not tag a block that does that, so the tail carried no boundary tag and
+    // P2PmsgHeap_TrimIOMAGE could not find it: sealed frames did not trim at
+    // all (measured, 1,344 bytes before and after). Every RECEIVER of this
+    // image already takes the rounded length as its extent, from oSync; this
+    // makes the sender agree with it. The image bytes do not change
+    pHandle -> nSizeofAlloc     = nSizeofIOMAGE;
     // Value-initialise (zero) the whole arena so serialised heap SLACK — the bytes
     // past the high-water mark that no field ever writes — is deterministically 0 on
     // every platform/config, instead of the allocator's fill (0x00 on Linux, the MSVC

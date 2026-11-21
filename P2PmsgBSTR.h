@@ -172,6 +172,13 @@ class Msgcore_EXT P3PmsgBSTR
         P2PiomageSize ( );
       void
         ReleaseP2Piomage( );
+      //  Drops the heap's free tail so the next full-replica image ends at its
+      //  last block: the frame carries live bytes, not the arena (M1, 3.5.0).
+      //  Answers the bytes removed; 0 while an image is prepared. The message
+      //  stays usable - the next Alloc that does not fit grows it as usual.
+      //  For the wire only: Save does not trim
+      UINT
+        TrimP2Piomage   ( );
 
     // Troubleshooting
     public:

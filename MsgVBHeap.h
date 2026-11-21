@@ -172,6 +172,11 @@ P2PmsgHeap_Sizeof ( P2PmsgHANDLE hVBHeap );
 //  note on P2PmsgHeap_ScrubFoots in MsgVBHeap.cpp.
 void
 P2PmsgHeap_ScrubFoots ( P2PmsgHANDLE hVBHeap, bool bRestore ) noexcept;
+//  Drops an IOMAGE heap's free tail so the image (and the frame) ends at its
+//  last block; answers the bytes removed. For the wire, not for Save. Refer
+//  the note in MsgVBHeap.cpp (M1, 3.5.0).
+VBLsize
+P2PmsgHeap_TrimIOMAGE ( P2PmsgHANDLE hVBHeap );
 VBLsize
 P2PmsgHeap_Sizeof ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock );
 // NO POINTER RETURNED BELOW SURVIVES A MUTATION, and that is a LIFETIME rule,

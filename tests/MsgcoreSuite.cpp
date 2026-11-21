@@ -7456,6 +7456,130 @@ static void Test_TrustedBitScope()
 
 #endif  // Msgcore_STATIC
 
+// ---------------------------------------------------------------------------
+//  M1 (the MSCS performance plan, Msgcore 3.5.0): TrimP2Piomage drops the heap's free
+//  tail so the frame carries live bytes, not the arena. Both link models: it
+//  uses only exported classes. The twin of MscsUnitTests' Test_WireTrim.
+//  What has to hold: the short image is adopted by a receiver running the
+//  WIRE checks (inside P2PmsgHeap_UntrustedGate, where the root is checked and
+//  never repaired), both ends keep allocating after it, and it is a no-op
+//  where it has nothing to take.
+static char*
+WireTrim_Copy ( P3PmsgBSTR& oMsg, VBLsize& nSize )
+{
+    oMsg.PrepareP2Piomage ( ~(DWORD)0 );
+    nSize = oMsg.P2PiomageSize ( );
+    char *p = new char [ nSize ];
+    memcpy ( p, oMsg.P2Piomage ( ), nSize );
+    oMsg.ReleaseP2Piomage ( );
+    return p;
+}
+static bool
+WireTrim_Adopts ( const char *p, VBLsize n, UCHAR uMust1, UCHAR uMust2 = 0 )
+{
+    try
+    {
+        P2PmsgHeap_UntrustedGate oGate;
+        P3PmsgBSTR oRecv ( *(const VBListIOmage *)p, n );
+        if ( !oRecv.Exists ( uMust1 ) )            return false;
+        if ( uMust2 && !oRecv.Exists ( uMust2 ) )  return false;
+        return true;
+    }
+    catch ( P2Pevent *pEVT ) { if ( pEVT ) pEVT->Cancel(false); return false; }
+    catch ( ... )            { return false; }
+}
+
+static void Test_WireTrim()
+{
+    TF_CASE("M1: a trimmed image is shorter by exactly what Trim reports, and a receiver running the wire checks adopts it")
+    {
+        P3PmsgBSTR oSent ( VBLock_Addr32, 2048 );
+        oSent.InitItem ( VBLockBSTR_MSG, P3PmsgData ( (int)7 ) );
+        VBLsize nFull = 0;
+        delete [] WireTrim_Copy ( oSent, nFull );
+
+        const UINT nTrim = oSent.TrimP2Piomage ( );
+        TF_CHECK ( nTrim > 0 );
+        VBLsize nShort = 0;
+        char *pShort = WireTrim_Copy ( oSent, nShort );
+        TF_CHECK_EQ ( (UINT)nShort, (UINT)(nFull - nTrim) );
+        TF_CHECK ( nShort * 2 < nFull );
+        TF_CHECK ( WireTrim_Adopts ( pShort, nShort, VBLockBSTR_MSG ) );
+        TF_CHECK_EQ ( oSent.TrimP2Piomage ( ), 0u );     // nothing left to take
+
+        {
+            P3PmsgBSTR *pRecv = nullptr;
+            {
+                P2PmsgHeap_UntrustedGate oGate;
+                pRecv = new P3PmsgBSTR ( *(const VBListIOmage *)pShort, nShort );
+            }
+            pRecv->InitItem ( VBLockBSTR_EVT, P3PmsgData ( (int)9 ) );   // must grow
+            VBLsize nAgain = 0;
+            char *pAgain = WireTrim_Copy ( *pRecv, nAgain );
+            TF_CHECK ( WireTrim_Adopts ( pAgain, nAgain, VBLockBSTR_MSG, VBLockBSTR_EVT ) );
+            delete [] pAgain;
+            delete pRecv;
+        }
+
+        oSent.InitItem ( VBLockBSTR_EVT, P3PmsgData ( (int)11 ) );      // sender too
+        VBLsize nGrown = 0;
+        char *pGrown = WireTrim_Copy ( oSent, nGrown );
+        TF_CHECK ( WireTrim_Adopts ( pGrown, nGrown, VBLockBSTR_MSG, VBLockBSTR_EVT ) );
+        delete [] pGrown;
+        delete [] pShort;
+    }
+
+    TF_CASE("M1: Trim refuses while an image is prepared - its length is already stamped")
+    {
+        P3PmsgBSTR oSent ( VBLock_Addr32, 2048 );
+        oSent.InitItem ( VBLockBSTR_MSG, P3PmsgData ( (int)7 ) );
+        oSent.PrepareP2Piomage ( ~(DWORD)0 );
+        const UINT nBefore = oSent.P2PiomageSize ( );
+        TF_CHECK_EQ ( oSent.TrimP2Piomage ( ), 0u );
+        TF_CHECK_EQ ( oSent.P2PiomageSize ( ), nBefore );
+        oSent.ReleaseP2Piomage ( );
+        TF_CHECK ( oSent.TrimP2Piomage ( ) > 0 );
+    }
+
+    TF_CASE("M1: a heap created at a size that is not a multiple of 8 trims too (every CompactSealed copy is one)")
+    {
+        P3PmsgBSTR oSent ( VBLock_Addr32, 2045 );
+        oSent.InitItem ( VBLockBSTR_MSG, P3PmsgData ( (int)5 ) );
+        VBLsize nFull = 0;
+        delete [] WireTrim_Copy ( oSent, nFull );
+        const UINT nTrim = oSent.TrimP2Piomage ( );
+        TF_CHECK ( nTrim > 0 );
+        VBLsize nShort = 0;
+        char *pShort = WireTrim_Copy ( oSent, nShort );
+        TF_CHECK_EQ ( (UINT)nShort, (UINT)(nFull - nTrim) );
+        TF_CHECK ( WireTrim_Adopts ( pShort, nShort, VBLockBSTR_MSG ) );
+        oSent.InitItem ( VBLockBSTR_EVT, P3PmsgData ( (int)6 ) );
+        VBLsize nGrown = 0;
+        char *pGrown = WireTrim_Copy ( oSent, nGrown );
+        TF_CHECK ( WireTrim_Adopts ( pGrown, nGrown, VBLockBSTR_MSG, VBLockBSTR_EVT ) );
+        delete [] pGrown;
+        delete [] pShort;
+    }
+
+    TF_CASE("M1: a heap that grew (two free blocks at the tail) trims to a valid image")
+    {
+        P3PmsgBSTR oSent ( VBLock_Addr32, 2048 );
+        static char aBlob [ 3000 ];
+        for ( int i = 0; i < (int)sizeof(aBlob); i++ ) aBlob[i] = (char)i;
+        oSent.InitItem ( VBLockBSTR_MSG, P3PmsgData ( (void *)aBlob, sizeof(aBlob), VBLockData_BLOB16 ) );
+        oSent.InitItem ( VBLockBSTR_EVT, P3PmsgData ( (int)3 ) );
+        VBLsize nFull = 0;
+        delete [] WireTrim_Copy ( oSent, nFull );
+        TF_CHECK ( nFull > 3000 );
+        const UINT nTrim = oSent.TrimP2Piomage ( );
+        VBLsize nShort = 0;
+        char *pShort = WireTrim_Copy ( oSent, nShort );
+        TF_CHECK_EQ ( (UINT)nShort, (UINT)(nFull - nTrim) );
+        TF_CHECK ( WireTrim_Adopts ( pShort, nShort, VBLockBSTR_MSG, VBLockBSTR_EVT ) );
+        delete [] pShort;
+    }
+}
+
 void RunMsgcoreSuite()
 {
     Test_Data_TypedValues();
@@ -7514,4 +7638,5 @@ void RunMsgcoreSuite()
     Test_ReceivedImageReserialises();
     Test_TrustedBitScope();
     Test_ValueCopyBounds();
+    Test_WireTrim();
 }
