@@ -7580,6 +7580,59 @@ static void Test_WireTrim()
     }
 }
 
+//  M6 (the MSCS performance plan, Msgcore 3.5.1): a message heap that must grow
+//  doubles, where it added a fifth. The twin of MscsUnitTests' Test_ArenaGrowth.
+//  The arena is read through the full-replica image, which is the heap itself.
+static VBLsize
+ArenaGrowth_Arena ( P3PmsgBSTR& oMsg )
+{
+    oMsg.PrepareP2Piomage ( ~(DWORD)0 );
+    const VBLsize n = oMsg.P2PiomageSize ( );
+    oMsg.ReleaseP2Piomage ( );
+    return n;
+}
+
+static void Test_ArenaGrowth()
+{
+    TF_CASE("M6: a message heap that runs out of room for a small field doubles")
+    {
+        P3PmsgBSTR oMsg ( VBLock_Addr32, 2048 );
+        P3PmsgItem& oRoot = oMsg.InitItem ( VBLockBSTR_MSG, P3PmsgData ( ) );
+        const VBLsize nBefore = ArenaGrowth_Arena ( oMsg );
+        VBLsize nAfter = nBefore;
+        for ( int i = 0; i < 1000 && nAfter == nBefore; ++i )
+        {
+            wchar_t sz[16];
+            swprintf ( sz, 16, L"f%04d", i );
+            oRoot.DeclareItem ( sz, P3PmsgData ( i ) );
+            nAfter = ArenaGrowth_Arena ( oMsg );
+        }
+        TF_CHECK ( nAfter >= 2 * nBefore );
+        TF_CHECK ( nAfter <= 2 * nBefore + 64 );
+        TF_CHECK_EQ ( oRoot.SelectItem ( L"f0000" ).c_int ( ), 0 );
+    }
+
+    TF_CASE("M6: a grown message still trims to an image the wire checks adopt")
+    {
+        P3PmsgBSTR oMsg ( VBLock_Addr32, 2048 );
+        P3PmsgItem& oRoot = oMsg.InitItem ( VBLockBSTR_MSG, P3PmsgData ( ) );
+        const std::wstring sBig ( 4096, L'x' );
+        for ( int i = 0; i < 16; ++i )
+        {
+            wchar_t sz[16];
+            swprintf ( sz, 16, L"f%04d", i );
+            oRoot.DeclareItem ( sz, P3PmsgData ( sBig.c_str ( ) ) );
+        }
+        const VBLsize nFull = ArenaGrowth_Arena ( oMsg );
+        TF_CHECK ( oMsg.TrimP2Piomage ( ) > 0 );
+        VBLsize nShort = 0;
+        char *pShort = WireTrim_Copy ( oMsg, nShort );
+        TF_CHECK ( nShort < nFull );
+        TF_CHECK ( WireTrim_Adopts ( pShort, nShort, VBLockBSTR_MSG ) );
+        delete [] pShort;
+    }
+}
+
 void RunMsgcoreSuite()
 {
     Test_Data_TypedValues();
@@ -7639,4 +7692,5 @@ void RunMsgcoreSuite()
     Test_TrustedBitScope();
     Test_ValueCopyBounds();
     Test_WireTrim();
+    Test_ArenaGrowth();
 }

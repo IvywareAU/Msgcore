@@ -46,6 +46,33 @@
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
 //
+//  3.5.1.0, a PATCH on 3.5.0 (the MSCS performance plan's M6: arena growth).
+//  tools\ci\exports-flat.manifest and both exports-cxx manifests match
+//  unchanged (285 flat, 772 mangled); no header line a consumer compiles
+//  against moved.
+//
+//  WHAT IT DOES. A MESSAGE heap (IOMAGE) that must grow now doubles instead of
+//  adding a fifth: P2PmsgHeap_GrowStepIOMAGE, used by P2PmsgHeap_ResizeIOMAGE's
+//  oversize bump; the allocation's own need still wins when it is bigger, and
+//  P2PmsgHeap_CapGrowth still clamps the step to the addressing ceiling.
+//  Measured by MscsUnitTests msgcore_bench's new growth case (8 KB fields,
+//  Windows Release, p50 of three interleaved rounds against 1.2x and 1.5x
+//  builds of the same source): to 64 KB, 8 -> 4 regrows, 3.8x -> 1.1x the live
+//  size copied, 106 -> 95 us; to 1 MB, 23 -> 8, 5.3x -> 1.2x, 1,978 -> 1,312 us
+//  (1.5x: 12 regrows, 1,373 us). build_flat at 512 fields does not move: there
+//  the cost is the sibling insert (M3).
+//
+//  WHY IT IS FREE ON THE WIRE. Since 3.5.0 the send path trims the free tail
+//  (TrimP2Piomage), so the extra slack lives only while a message is built.
+//  Targetcore 3.7.1 also trims before a wrap factory embeds a message, which
+//  was the one other place a message's whole arena left the process.
+//
+//  STORES ARE NOT TOUCHED. P2PmsgHeap_ResizeBSTRio keeps a fifth: Save writes
+//  a store's whole arena, slack included, and golden_ref.p2p is that file byte
+//  for byte (plan §10.1 decision 3). Store growth is the plan's M8.
+//
+//  BELOW IS THE 3.5.0 RATIONALE.
+//
 //  3.5.0.0, a MINOR on 3.4.7 (the MSCS performance plan's M1: live bytes on the wire).
 //  The flat C ABI is unchanged (exports-flat.manifest matches, 285); the
 //  mangled C++ half GAINS ONE EXPORT, P3PmsgBSTR::TrimP2Piomage (772). That
@@ -452,22 +479,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  5
-#define MSGCORE_VERSION_PATCH  0
+#define MSGCORE_VERSION_PATCH  1
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,5,0,0
+#define MSGCORE_VERSION_COMMAS 3,5,1,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.5.0.0"
+#define MSGCORE_VERSION_STRING "3.5.1.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03050000 is 3.5.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03050000
+//  0x03050100 is 3.5.1.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03050100
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

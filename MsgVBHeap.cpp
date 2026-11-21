@@ -1496,6 +1496,24 @@ P2PmsgHeap_IsValidAllocSYS ( P2PmsgHANDLE hP2PmsgHeap, VBLaddr aVBLock )
 // writing down the same dead intent. Not exported, so the export manifests do
 // not move.
 
+//
+//  How much a message arena grows by when an allocation does not fit
+//  NOTES: The step is the larger of what the allocation needs and this. It
+//         was a fifth of the arena, so a message built to S bytes regrew
+//         ~log(S/2K)/log(1.2) times and memcpy'd ~5 S doing it (measured,
+//         msgcore_bench growth: 23 regrows and 5.3x the live size at 1 MB; 8
+//         at 64 KB, one per 8 KB field). Since 3.5.0 the slack is no longer
+//         on the wire (P2PmsgHeap_TrimIOMAGE), so a bigger step costs memory
+//         while the message is built and nothing once it is sent
+//       : MESSAGES ONLY. A store (BSTRio, P2PmsgMgr) keeps a fifth: its Save
+//         writes the whole arena, slack included, and golden_ref.p2p is that
+//         file byte for byte (decision 3). Store growth is M8's
+static VBLsize
+P2PmsgHeap_GrowStepIOMAGE ( VBLsize nSizeofAlloc )
+{
+    return nSizeofAlloc;                            // double
+}
+
 VBLaddr
 P2PmsgHeap_ResizeIOMAGE ( P2PmsgHANDLE hVBList, VBLsize nSizeofExtra, bool bOversize )
 {
@@ -1505,8 +1523,8 @@ P2PmsgHeap_AssertValidIOMAGE(hVBList);
     VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
     const VBLsize nSizeofNeeded = nSizeofExtra;     // before the oversize bump
     if (  bOversize                                  &&
-         (pHandle->nSizeofAlloc*2)/10 > nSizeofExtra    )
-      nSizeofExtra = (pHandle->nSizeofAlloc * 2) / 10;
+         P2PmsgHeap_GrowStepIOMAGE(pHandle->nSizeofAlloc) > nSizeofExtra )
+      nSizeofExtra = P2PmsgHeap_GrowStepIOMAGE ( pHandle->nSizeofAlloc );
 
     // Ceiling (M6). Throws when nSizeofNeeded will not fit; clamps the oversize
     // bump when only it will not.

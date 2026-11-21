@@ -3,6 +3,29 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.5.1
+
+A patch release: building a large message copies far less. The flat C API, the C++ export
+surface, the image format, saved files and every exported class layout are unchanged.
+
+### Changed: a message's heap doubles when it grows
+
+When an allocation did not fit, a message's heap grew by a fifth of its size. So a message
+built up to 1 MB grew 23 times and copied 5.3 times its own size doing it. It now doubles:
+
+| built to (8 KB fields) | grows | bytes copied | build time (p50, Windows Release) |
+|---|---|---|---|
+| 64 KB | 8 → 4 | 3.8× → 1.1× its size | 106 → 95 µs |
+| 1 MB | 23 → 8 | 5.3× → 1.2× its size | 1,978 → 1,312 µs |
+
+- A message being built holds up to twice its live bytes in memory. It sends none of that
+  slack: Targetcore 3.7.0 and later trim a message before sending it (`TrimP2Piomage`, 3.5.0).
+- If you send a message's image yourself, call `TrimP2Piomage()` first, as you would on 3.5.0.
+- **Stores are unchanged.** A `P2PmsgMgr` still grows by a fifth, because `Save` writes its whole
+  heap and saved files stay byte-identical.
+- Messages with many small fields build no faster. Their cost is the sibling insert, not the
+  growth.
+
 ## 3.5.0
 
 A minor release: a message can now be sent without its unused space. The flat C API, the image

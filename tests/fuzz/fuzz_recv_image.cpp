@@ -219,7 +219,8 @@ void WalkHeap ( P2PmsgHANDLE hHeap, const uint8_t *data, size_t size )
     //     and spends the run on rejection instead of on the free-list paths.
     //     GROWTH IS CAPPED, and the cap is load-bearing rather than tidiness.
     //     An image declaring Addr32 gets an nSizeofMax near 4 GB, and the
-    //     allocator grows an arena by 20% of itself when it needs room -- so a
+    //     allocator grows an arena by 20% of itself when it needs room (a
+    //     message arena doubles since 3.5.1; a store's still takes a fifth) -- so a
     //     handful of allocations against a large declared arena walk the RSS up
     //     in hundreds of megabytes a step. Uncapped, this harness hit
     //     libFuzzer's 4 GB rss_limit and exited 71 with no artifact, which
