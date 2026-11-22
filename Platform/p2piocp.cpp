@@ -269,7 +269,11 @@ bool submit_now(IoRing* r, const QItem& it) {
 //  forever. Ops with no OVERLAPPED (cancels) can only be logged.
 bool drain_queue(IoRing* r, QItem* out) {
     bool have_post = false, submitted = false;
-    std::deque<QItem> failed;
+    //  A vector, not a deque: libstdc++'s deque allocates its map and a first node when
+    //  it is CONSTRUCTED, and this runs on every GetQueuedCompletionStatus call -- ~7
+    //  allocations per delivered message for a list that is almost always empty
+    //  (p2p_performance T7). An empty vector allocates nothing.
+    std::vector<QItem> failed;
     std::lock_guard<std::mutex> lk(r->qmx);
     for (auto it = r->q.begin(); it != r->q.end();) {
         if (it->kind == QKind::Post) {
@@ -294,8 +298,9 @@ bool drain_queue(IoRing* r, QItem* out) {
     //  for this call: the thread that queued the op is blocked waiting for its packet, and
     //  making it wait for the NEXT GetQueuedCompletionStatus would be a needless stall --
     //  the wake it would rely on may itself be what failed.
-    if (!failed.empty() && !have_post) { *out = failed.front(); failed.pop_front(); have_post = true; }
-    for (auto& f : failed) r->q.push_back(f);   // any remainder: next drain, one loop away
+    std::size_t first = 0;
+    if (!failed.empty() && !have_post) { *out = failed.front(); first = 1; have_post = true; }
+    for (std::size_t i = first; i < failed.size(); ++i) r->q.push_back(failed[i]);   // any remainder: next drain, one loop away
     return have_post;
 }
 

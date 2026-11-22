@@ -8152,16 +8152,26 @@ P3Pmsg_SelectObjectRecurse ( const P3PmsgObject *pObject, LPCWSTR lpszObjectPath
       //  walks from the first sibling. A second full walk that could only miss
       //  again doubled the cost of every Exists()/SelectObject() miss: measured
       //  304 -> 155 us at 512 siblings (MSCS performance log, finding F-P1-3).
-      if ( !oField.r_Desc().r_Curs().Goto(nsObjectname) )
+      //  THE DESCRIPTOR AND CURSOR LIVE ON THE STACK. oField is a temporary copy,
+      //  so r_Desc().r_Curs() on it heap-allocated both and freed both at the
+      //  end of this scope: two allocations per path step, and every Exists()
+      //  is one. On the message path that was ~40 of ~80 allocations per
+      //  delivered message (p2p_performance T7, F-P4-7). P3PmsgCurs(Desc&) does
+      //  not allocate, and both die before oField (reverse declaration order),
+      //  exactly as the heap pair did in ~P3PmsgField. Every return copies the
+      //  object out by value before they go.
+      P3PmsgDesc oDesc ( &oField );
+      P3PmsgCurs oCurs ( oDesc );
+      if ( !oCurs.Goto(nsObjectname) )
       { // Check if renamining name has dot operator "*.pys" example
         if ( *lpszParsedname != 0 &&
-             oField.r_Desc().r_Curs().Goto(lpszObjectPath) )
-          return oField.r_Desc().r_Curs().r_Object();
+             oCurs.Goto(lpszObjectPath) )
+          return oCurs.r_Object();
         return P3PmsgObject();         // Selection path broken;
       }
       if ( *lpszParsedname == 0 )
-        return oField.r_Desc().r_Curs().r_Object();
-      return P3Pmsg_SelectObjectRecurse ( &oField.r_Desc().r_Curs().r_Object(), lpszParsedname );
+        return oCurs.r_Object();
+      return P3Pmsg_SelectObjectRecurse ( &oCurs.r_Object(), lpszParsedname );
     }
 
     // Attributes

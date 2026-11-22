@@ -3,6 +3,27 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.6.1
+
+A patch release: fewer heap allocations on every name lookup. The flat C API, the C++ export
+surface, class layouts, the image format and saved files are unchanged; a 3.6.0 consumer runs
+on it as is.
+
+### Changed: a name lookup no longer allocates
+
+`Exists(name)` and a one-level `SelectObject(name)` allocated a descriptor and a cursor on the
+heap for every step of the path and freed them at once. They are now on the stack. The answers
+are the same.
+
+On Linux, the completion-port shim also stopped allocating on every wait.
+
+| Targetcore message path, 64 B, 5 rounds (base 3.6.0 built in the same tree) | 3.6.0 | 3.6.1 |
+|---|---|---|
+| allocations per message, Linux, one-way / pipelined | 86 / 79 | 34 / 34 |
+| throughput, Windows | 26.4k msg/s | 27.9k msg/s (+5.7%) |
+| one-way latency p50, Windows | 92.7 µs | 89.0 µs (−4.0%) |
+| throughput, Linux VM | 17.5k msg/s | 18.1k msg/s (+3.2%) |
+
 ## 3.6.0
 
 A minor release: a fix for lookups after a child was deleted through another object, and

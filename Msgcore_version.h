@@ -46,6 +46,32 @@
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
 //
+//  3.6.1.0, a PATCH on 3.6.0 (the MSCS performance plan's T7, step 1). Two
+//  function bodies; the flat ABI, the mangled C++ exports, every class layout,
+//  the image format and saved files are unchanged.
+//
+//  THE LOOKUP'S DESCRIPTOR AND CURSOR ARE ON THE STACK. The field arm of
+//  P3Pmsg_SelectObjectRecurse copies the field into a temporary and looked the
+//  name up through r_Desc().r_Curs() on the copy: a heap P3PmsgDesc and a heap
+//  P3PmsgCurs per path step, freed at the end of the scope. Every Exists() and
+//  one-level SelectObject() paid both. They are locals now; the Goto, the
+//  retry for a stored name containing a delimiter, and the answers are the
+//  same. On the Targetcore message path (P2PeerMsg's address accessors) that
+//  was ~40 of ~86 allocations per delivered message (heaptrack, finding
+//  F-P4-7).
+//
+//  LINUX: drain_queue (Platform/p2piocp.cpp) built a std::deque per
+//  GetQueuedCompletionStatus for a list that is almost always empty, and
+//  libstdc++'s deque allocates when constructed. A vector now.
+//
+//  RESULT (5 rounds alternated, same binaries, base = 3.6.0 built in the same
+//  tree): allocations per message, Linux perf_ab 86 -> 34 one-way, 79 -> 34
+//  pipelined; B5 fan 147 -> 51. Windows perf_ab throughput +5.7% (CPU/msg
+//  98 -> 93 us), one-way latency -4.0%; fan C=64 thr_last +4.9%. Linux VM
+//  perf_ab throughput +3.2%, latency flat.
+//
+//  BELOW IS THE 3.6.0 RATIONALE.
+//
 //  3.6.0.0, a MINOR on 3.5.3 (the MSCS performance plan's M5, and the defect
 //  its review found). The flat ABI is unchanged (285). The mangled C++ half
 //  gains ONE export, P3PmsgCurs::IsAt (773 on x64 and Win32, the export tables
@@ -605,22 +631,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  6
-#define MSGCORE_VERSION_PATCH  0
+#define MSGCORE_VERSION_PATCH  1
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,6,0,0
+#define MSGCORE_VERSION_COMMAS 3,6,1,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.6.0.0"
+#define MSGCORE_VERSION_STRING "3.6.1.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03060000 is 3.6.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03060000
+//  0x03060100 is 3.6.1.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03060100
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"
