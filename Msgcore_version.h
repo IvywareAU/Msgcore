@@ -46,6 +46,29 @@
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
 //
+//  3.5.3.0, a PATCH on 3.5.2 (the MSCS performance plan's M11: the layer
+//  tax). One function body in Msgcore_c.cpp; the flat ABI and the mangled C++
+//  exports are unchanged (285 / 772, the export tables compared whole).
+//
+//  msgcore_field_child WALKED TWICE. It was Exists() and then SelectItem():
+//  the path resolver's walk to ask, then the descendant cursor's Goto to
+//  fetch. B9 (msgfacade_bench) measured 1.5 us at 8 siblings and 15.2 us at
+//  512 - ten times the C++ lookup. It is now r_Desc().SelectObject(name):
+//  the same cursor and the same Goto, a void object on a miss instead of a
+//  throw. The answer was "Exists AND Goto found it", and for any name the
+//  core accepts (its validator refuses the path grammar's '.' and '@') the
+//  resolver's walk is that same Goto, so the second alone decides. A list or
+//  vect child still answers null: SelectItem returned the cursor as a
+//  P3PmsgField&, and that conversion refuses one.
+//
+//  RESULT (B9 capi column, 3.5.2 and 3.5.3 interleaved, 7 rounds, p50,
+//  Windows Release): field_child 1.58 us -> 468 ns at 8 siblings, 3.17 us ->
+//  466 ns at 64, 15.2 us -> 484 ns at 512; a root-to-leaf walk through it at
+//  depth 16 32.7 -> 17.1 us. MscsUnitTests' "field_child: hit, miss, case,
+//  list/vect child, 512 siblings, repeats" passes on both versions.
+//
+//  BELOW IS THE 3.5.2 RATIONALE.
+//
 //  3.5.2.0, a PATCH on 3.5.1 (the MSCS performance plan's M7: the empty
 //  message). The flat ABI and the mangled C++ exports are unchanged (285 / 772):
 //  the new function is not exported, and P3PmsgDesc gains a friend
@@ -529,22 +552,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  5
-#define MSGCORE_VERSION_PATCH  2
+#define MSGCORE_VERSION_PATCH  3
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,5,2,0
+#define MSGCORE_VERSION_COMMAS 3,5,3,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.5.2.0"
+#define MSGCORE_VERSION_STRING "3.5.3.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03050200 is 3.5.2.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03050200
+//  0x03050300 is 3.5.3.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03050300
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

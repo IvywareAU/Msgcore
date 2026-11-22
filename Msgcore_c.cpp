@@ -1198,9 +1198,23 @@ msgcore_field_child(MsgFieldHandle hField, const wchar_t* lpszName)
 {
     if (!toField(hField) || !lpszName) return nullptr;
     try {
-        if (!toField(hField)->Exists(lpszName)) return nullptr;
-        // .r_Object() yields the live heap address; wrapping it aliases the node.
-        return MsgcoreHandleAdd(new P3PmsgField(toField(hField)->SelectItem(lpszName).r_Object()), MsgcoreHandle_Field);
+        // ONE walk (p2p_performance M11). This was Exists() and then
+        // SelectItem(): the path resolver's walk to ask, then the descendant
+        // cursor's Goto to fetch -- two sibling walks, 1.5 us at 8 siblings and
+        // 14.7 us at 512. The answer was "Exists AND Goto found it", and for any
+        // name the core accepts (its validator refuses the path grammar's '.'
+        // and '@') the resolver's walk IS that same Goto, so the second alone
+        // decides. SelectObject is SelectItem's non-throwing twin: the same
+        // cursor on the same collection, a void object on a miss.
+        P3PmsgField* pField = toField(hField);
+        if (pField->IsVoid()) return nullptr;
+        P3PmsgObject oChild = pField->r_Desc().SelectObject(lpszName);
+        if (oChild.IsVoid()) return nullptr;
+        // A list or vect child answers null, as before: SelectItem returned the
+        // cursor as a P3PmsgField&, and that conversion throws for one.
+        if (!oChild.IsField()) return nullptr;
+        // The P3PmsgObject is the live heap address; wrapping it aliases the node.
+        return MsgcoreHandleAdd(new P3PmsgField(oChild), MsgcoreHandle_Field);
     } catch (...) { return nullptr; }
 }
 
