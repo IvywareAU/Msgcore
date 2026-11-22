@@ -405,6 +405,126 @@ GotoKey_Differs ( const GotoKey &oKey, const VBLockName *pName ) noexcept
 }
 }
 
+//
+//  Whether the item a cursor last landed on is still one of ITS collection's
+//  children, as the cursor left it. The quick tests in Goto(name) and
+//  Goto(int) believe the cursor's current item without looking at the heap;
+//  this is what they now ask first.
+//  NOTES: THE DEFECT. A cursor belongs to one P3PmsgDesc/P3PmsgAttr object,
+//         and two P3PmsgField objects over the same node have two of them. A
+//         child deleted through the OTHER one is freed under this cursor,
+//         which still stands on it: a free clears the block's type bits and
+//         puts it at the head of the free list, and nothing tells the cursor.
+//         The quick test then read the freed block's name, the name checks
+//         threw, and the walk that would have re-positioned the cursor never
+//         ran -- so EVERY lookup through that object threw, for any name, until
+//         the block happened to be reused by a well-formed item. The C API
+//         turned the throw into a null: msgcore_field_child answered "no such
+//         child" for one that exists (3.5.2 and 3.5.3 alike). Found by the
+//         p2p_performance M5 review, 2026-11-22; MsgcoreCApiSuite
+//         "field_child: a child deleted through another handle answers null".
+//       : THE CHECK, all of it read from the block, none of it trusted from the
+//         cursor: the block lies inside the heap, is allocated, is an item, has
+//         the size the cursor connected, is the kind (field, list, vect) the
+//         cursor connected, and names THIS collection as its parent (aParent is
+//         the owner's aDescn or aExtra: P2PmsgDesc_LinkinItem,
+//         P2PmsgAttr_LinkinItem). A freed block fails "allocated"; one reused
+//         by an item under another parent fails "parent". Any failure only
+//         sends Goto on to its walk, which is the answer it gave before the
+//         quick test existed -- so a false "not here" costs a walk, never a
+//         wrong answer.
+//       : NOT A GENERATION. A block freed and taken again, at once, by an item
+//         of the same size under the SAME parent passes, and then the name
+//         compare decides: the same name means it IS that collection's child
+//         of that name now. What the cursor's connected objects below it still
+//         cache (an old item's descendant cursor) is not re-read here, as it
+//         never was.
+//       : SYSTEM heaps address raw memory and carry no bound (P2PmsgHeapExtent
+//         Open), so a block there cannot be read safely once freed. They keep
+//         the quick test as it was: no worse than before, and no better.
+//
+namespace
+{
+bool
+GotoQuick_StillHere ( const P3PmsgObject &oColl, const P3PmsgField *pFoN, int nKind
+                    , bool bVouch ) noexcept
+{
+    const P3PmsgObject &oItem = pFoN->r_Object ( );
+    const P2PmsgHANDLE  hVBList = oItem.m_hVBList;
+    if ( hVBList == 0 || hVBList != oColl.m_hVBList ||
+         oItem.m_aVBLock == 0 || oColl.m_aVBLock == 0 || oItem.m_nVBLockSize == 0 )
+      return false;
+    P2PmsgHeapExtent oExtent;
+    P2PmsgHeap_GetExtent ( hVBList, &oExtent );
+    if ( oExtent.uKind == P2PmsgHeapExtent::Open )
+      return !bVouch;                  // SYSTEM heap: as before (see NOTES)
+    if ( oExtent.uKind != P2PmsgHeapExtent::Image )
+      return false;
+    const VBLock *pVBLock = reinterpret_cast<const VBLock *>( oExtent.aImage + oItem.m_aVBLock );
+    if ( !P2PmsgHeapExtent_IsSpan ( oExtent, pVBLock, oItem.m_nVBLockSize ) )
+      return false;
+    //  The bit tests VBLock_IsAlloc, VBLock_IsItem and VBLockItem_IsField/List/
+    //  Vect make, inline: this runs on every quick-test hit (measured +15 ns
+    //  per hit with them out of line). VBLock_Hdr_u_SizeNN and
+    //  VBLockItem_GetParent throw only for an addressing field outside
+    //  Addr08..Addr64, and VBLock_AddrMask is two bits, all four of them valid,
+    //  so whatever byte a stale address lands on they answer and noexcept holds.
+    const UCHAR uDefs = pVBLock->oHdr.uVBLockDefs;
+    if ( ( uDefs & VBLock_Alloc ) != VBLock_Alloc ||
+         ( uDefs & VBLock_TypeMask ) != VBLock_Item ||
+         VBLock_Hdr_u_SizeNN ( pVBLock ) != oItem.m_nVBLockSize )
+      return false;
+    VBLockItem *pItem = VBLock_pItem ( pVBLock );
+    const UCHAR uKind = nKind == 1 ? VBLock_List : nKind == 2 ? VBLock_Vect : VBLock_Field;
+    return ( pItem->uItemType & VBLock_TypeMask ) == uKind &&
+           VBLockItem_GetParent ( uDefs, pItem ) == oColl.m_aVBLock;
+}
+
+//  The cursor's side of the question: which collection, which item, which kind.
+bool
+GotoQuick_Curs ( const P3PmsgObject *pColl, const P3PmsgField *pFoN, int nKind
+               , bool bVouch ) noexcept
+{
+    return pColl != nullptr && pFoN != nullptr &&
+           GotoQuick_StillHere ( *pColl, pFoN, nKind, bVouch );
+}
+}
+
+//  Asked from inside a P3PmsgCurs member, where the protected members are in
+//  reach. A macro and not a member function, because every member of this
+//  class is exported (whole-class Msgcore_EXT) and the mangled C++ surface is
+//  frozen: tools/ci/check_exports.ps1. 3.6.0 adds IsAt to it and nothing else.
+#define CURS_STILLHERE(bVouch)                                                  \
+    GotoQuick_Curs ( m_pP3PmsgDesc ? &m_pP3PmsgDesc->m_oObject                  \
+                   : m_pP3PmsgAttr ? &m_pP3PmsgAttr->m_oObject : nullptr        \
+                   , m_pP3PmsgFoN                                               \
+                   , m_pP3PmsgFoN == &m_oP3PmsgList ? 1                         \
+                   : m_pP3PmsgFoN == &m_oP3PmsgVect ? 2 : 0                     \
+                   , bVouch )
+
+//
+//  True when the cursor ALREADY stands on a live item of this name. Never
+//  walks and never moves the cursor, so a false answer means only "not here",
+//  not "absent": ask Goto, or the owner's Exists, for that.
+//  NOTES: For a caller that would otherwise ask a fresh walk first (Exists),
+//         then this cursor (SelectItem) -- MsgFieldRef's read, p2p_performance
+//         M5. When this answers true, Goto(name) answers true from its quick
+//         test with the cursor where it is. Throws only where that compare
+//         would: a name the checks refuse in a block GotoQuick_StillHere accepts.
+//       : FALSE ON A SYSTEM HEAP. GotoQuick_StillHere answers true there because it
+//         cannot look (raw memory, no bound), which keeps Goto's quick test as
+//         it was. IsAt is asked INSTEAD of a fresh walk, so it may not answer
+//         for what it cannot see: there it says "not here" and the caller
+//         walks, as before.
+bool
+P3PmsgCurs::IsAt ( LPCWSTR lpszItemName )
+{
+    if ( !CURS_STILLHERE ( true ) )
+      return false;
+    const p2p_wkey oItemName ( lpszItemName ? lpszItemName : L"" );
+    return m_pP3PmsgFoN->r_name().c_wcsicmp ( oItemName ) == 0;
+}
+
 P3PmsgCurs&
 P3PmsgCurs::Seek ( )
 {
@@ -436,7 +556,10 @@ P3PmsgCurs::Goto ( LPCWSTR lpszItemName )
     //        P3PmsgName route tolerated a null key by yielding L""; keep that.
     const p2p_wkey oItemName ( lpszItemName ? lpszItemName : L"" );
     LPCWSTR lpszStackName = oItemName;
+    //  GotoQuick_StillHere first: the cursor's item may have been freed under it through
+    //  another object (refer GotoQuick_StillHere).
     if ( m_pP3PmsgFoN                                         &&
+         CURS_STILLHERE ( false )                             &&
          m_pP3PmsgFoN->r_name().c_wcsicmp(lpszStackName) == 0    )
       return true;
     P2PmsgHANDLE hVBList = 0;
@@ -560,7 +683,8 @@ P3PmsgCurs::Goto ( int nItem )
 {
     // To be sure, to be sure
     if ( m_nItem      == nItem   &&
-         m_pP3PmsgFoN != nullptr    )
+         m_pP3PmsgFoN != nullptr &&
+         CURS_STILLHERE ( false )   )  // refer GotoQuick_StillHere
       return true;
     m_pP3PmsgFoN  = 0;
     VBLaddr aItem = 0;

@@ -482,6 +482,7 @@
 ?InitItem@P3PmsgBSTR@@QAEAAVP3PmsgField@@EABVP3PmsgData@@@Z
 ?InsertAt@P3PmsgVect@@QAEAAVP3PmsgField@@HABV2@@Z
 ?IOmage_Sizeof@@YAIPBUVBListIOmage@@@Z
+?IsAt@P3PmsgCurs@@QAE_NPB_W@Z
 ?IsAttr@P3PmsgObject@@QBE_NXZ
 ?IsAttributed@P2PmsgMgr@@QAEHEK@Z
 ?IsAttributed@P3PmsgField@@UBE_NXZ

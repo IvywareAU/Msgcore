@@ -89,6 +89,7 @@
 #pragma once
 
 #include "P2Pmsg.h"
+#include "MsgDesc.h"        // P3PmsgDesc::r_Curs, P3PmsgCurs::IsAt (Has, M5)
 #include "Msgexception.h"
 
 #include <cstring>
@@ -692,9 +693,47 @@ class MsgFieldRef
     // whatever it names now. Its operator bool does not: once the cursor has
     // moved it reports the set of the item it was first asked about, so
     // nothing here asks it.
+    //
+    // M5 (3.6.0): THE PARENT'S OWN CURSOR FIRST. A read is Has() then
+    // SelectItem(). p->Exists() asks the path resolver, which walks the
+    // siblings with a FRESH cursor every time (P3Pmsg_SelectObjectRecurse);
+    // SelectItem() then asks p's own cursor, whose quick test answers at once
+    // when it already stands on the name. So a repeated read of one field paid
+    // a full sibling walk to learn what the cursor already knew: 33.6 us at 512
+    // siblings against 437 ns for the write, which goes straight to the cursor
+    // (p2p_performance F-P0-9). IsAt asks the cursor without walking and
+    // without moving it, so a "not here" changes nothing and falls through to
+    // the question as it was.
+    //  - SAME ANSWER. For a plain name -- 1..31 characters, none of the path
+    //    grammar's '.', '@', '^', ':' (ParseObjectPath) -- the resolver's walk
+    //    is a Goto by that name on p's descendants, so "the cursor stands on a
+    //    live child of that name" implies it answers true. 31 so that the name
+    //    is under the 63-unit component cap on Linux too, where an astral
+    //    character is two units. Anything else asks the resolver, as before.
+    //  - SAFE ON A STALE CURSOR, which is what 3.6.0 fixed first: IsAt checks
+    //    the cursor's block is still p's allocated child (GotoQuick_StillHere,
+    //    MsgCurs.cpp), so a child freed through another object is "not here".
+    //  - Attributes need none of this: P3PmsgAttr::Exists already asks the
+    //    attribute set's own cursor.
     static bool Has ( P3PmsgItem *p, LPCWSTR lpszName, bool bAttr )
     {
-        return bAttr ? p->r_Attr().Exists ( lpszName ) : p->Exists ( lpszName );
+        if ( bAttr )
+          return p->r_Attr().Exists ( lpszName );
+        if ( IsPlainName ( lpszName ) && !p->IsVoid() && p->IsDescendant() &&
+             p->r_Desc().r_Curs().IsAt ( lpszName ) )
+          return true;
+        return p->Exists ( lpszName );
+    }
+    static bool IsPlainName ( LPCWSTR lpsz )
+    {
+        if ( lpsz == nullptr )
+          return false;
+        size_t n = 0;
+        for ( ; lpsz[n] != 0; ++n )
+          if ( n >= 31 || lpsz[n] == L'.' || lpsz[n] == L'@' ||
+               lpsz[n] == L'^' || lpsz[n] == L':' )
+            return false;
+        return n > 0;
     }
 
     // P2Pevent::Throw throws; the loop is for the compiler, which cannot know.

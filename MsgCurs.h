@@ -141,6 +141,10 @@ class Msgcore_EXT P3PmsgCurs
         Goto ( LPCWSTR lpszItemName );
       bool
         Goto ( int nElem );
+      //  True when the cursor already stands on a live item of this name;
+      //  never walks, never moves. Refer MsgCurs.cpp (3.6.0, p2p_performance M5).
+      bool
+        IsAt ( LPCWSTR lpszItemName );
 
     // Exposure
     public:

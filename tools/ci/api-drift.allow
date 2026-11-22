@@ -60,6 +60,7 @@ cxx-to-c  P3PmsgField::HeapHolders    # the working of IsSole, and takes a P2Pms
 cxx-to-c  P3PmsgDesc::HeapHolders    # as P3PmsgField::HeapHolders, one level in
 cxx-to-c  P3PmsgAttr::HeapHolders    # as P3PmsgField::HeapHolders, one level in
 cxx-to-c  P3PmsgCurs::HeapHolders    # as P3PmsgField::HeapHolders; P3PmsgCurs has no flat surface at all
+cxx-to-c  P3PmsgCurs::IsAt    # 3.6.0, for MsgFieldRef.hpp (C++ header-only); the flat surface needs none -- msgcore_field_child, msgcore_curs_goto_name and msgcore_curs_goto_index reach the same cursor through Goto, whose quick test makes the same check (GotoQuick_StillHere)
 cxx-to-c  MsgStck::HeapHolders    # as P3PmsgField::HeapHolders, one level in
 cxx-to-c  P3PmsgList::HeapHolders    # as P3PmsgField::HeapHolders, plus the data cursors the list caches
 cxx-to-c  P3PmsgVect::HeapHolders    # as P3PmsgField::HeapHolders, plus the element cursor the vect caches

@@ -3,6 +3,49 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.6.0
+
+A minor release: a fix for lookups after a child was deleted through another object, and
+faster `MsgFieldRef` reads. The flat C API, the image format, saved files and every exported
+class layout are unchanged. The C++ export surface gains one member, `P3PmsgCurs::IsAt`, which
+`MsgFieldRef.hpp` now calls: code built against 3.6.0 headers needs a 3.6.0 DLL.
+
+### Fixed: lookups through one object after a child was deleted through another
+
+Two `P3PmsgField` objects over the same node each keep their own cursor. When a child was
+deleted through one of them, the other's cursor was left on the freed block:
+
+- every name lookup through that object then threw, whatever the name, until the space was
+  reused;
+- through the C API this showed as `msgcore_field_child` answering null for a child that
+  exists;
+- a lookup by index could return the freed block.
+
+The cursor now checks that the block it stands on is still a live child of its collection
+before trusting it, and walks the siblings again when it is not. SYSTEM heaps (standalone
+fields) behave as before. 3.5.2 and 3.5.3 both have the defect.
+
+### Changed: `MsgFieldRef` reads a field without walking its siblings again
+
+A read asked a fresh walk whether the field existed and then fetched it through the parent's
+cursor. It now asks the cursor first, and walks only when the cursor is somewhere else. The
+answers are the same, and an `Exists()` still moves no cursor.
+
+| `Field(parent, name).AsInt()`, last of N siblings (7 rounds, p50, Windows Release) | 3.5.3 | 3.6.0 |
+|---|---|---|
+| N = 1 | 729 ns | 286 ns |
+| N = 8 | 1.05 µs | 286 ns |
+| N = 64 | 2.55 µs | 286 ns |
+| N = 512 | 13.46 µs | 285 ns |
+
+The check costs about 14 ns on a lookup the cursor answers at once (112 → 126 ns); other
+lookups and writes move by 5% or less.
+
+### Added: `P3PmsgCurs::IsAt`
+
+`IsAt(name)` answers whether the cursor already stands on a live item of that name. It never
+walks and never moves the cursor, and answers false on a SYSTEM heap.
+
 ## 3.5.3
 
 A patch release: one C API call is faster. The flat C API, the C++ export surface, the image

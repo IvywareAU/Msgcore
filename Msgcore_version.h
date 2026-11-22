@@ -46,6 +46,59 @@
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
 //
+//  3.6.0.0, a MINOR on 3.5.3 (the MSCS performance plan's M5, and the defect
+//  its review found). The flat ABI is unchanged (285). The mangled C++ half
+//  gains ONE export, P3PmsgCurs::IsAt (773 on x64 and Win32, the export tables
+//  compared whole); no class layout moves. MINOR, not PATCH, because
+//  MsgFieldRef.hpp -- header-only, compiled into the consumer -- now calls
+//  IsAt, so a consumer built against 3.6.0 headers cannot load a 3.5.x DLL.
+//
+//  THE DEFECT, older than the 3.x line. A cursor belongs to one P3PmsgDesc or
+//  P3PmsgAttr object, and two P3PmsgField objects over one node have two of
+//  them. A child deleted through the OTHER object was freed under this one's
+//  cursor, which still stood on it -- a free clears the type bits and puts the
+//  block at the head of the free list, and nothing tells other cursors. The
+//  quick tests in P3PmsgCurs::Goto believed the cursor without looking:
+//    - Goto(name) read the freed block's name, the name checks threw, and the
+//      walk never ran. EVERY lookup through that object threw, for any name,
+//      until the block happened to be reused by a well-formed item. The C API
+//      turned the throw into a null, so msgcore_field_child answered "no such
+//      child" for one that exists -- 3.5.2 and 3.5.3 alike.
+//    - Goto(int) returned the freed block; the unit suite failed fast
+//      (0xC0000409) when a test read it.
+//  Both quick tests now ask GotoQuick_StillHere first (MsgCurs.cpp): the
+//  block is inside the heap, allocated, an item of the kind and size the
+//  cursor connected, and names THIS collection as its parent. Any failure
+//  sends Goto on to its walk, so a false "not here" costs a walk and never a
+//  wrong answer. A SYSTEM heap (raw memory, no bound to read against) keeps
+//  the old quick test. Not a generation: a block taken again at once by an
+//  item of the same size under the same parent passes, and the name compare
+//  then decides, as it did.
+//
+//  M5. MsgFieldRef's read was Exists() then SelectItem(): the path
+//  resolver's fresh-cursor walk of every sibling, then the parent's own
+//  cursor -- which already stood there on a repeated read. Has() now asks
+//  P3PmsgCurs::IsAt first: the parent's cursor on a live child of that name,
+//  no walk, no move. Only for a plain name (1..31 characters, none of the
+//  path grammar's . @ ^ :), where the walk's answer is the same; any other
+//  name, and any SYSTEM heap, asks the walk as before. An Exists() that
+//  misses still moves no cursor.
+//
+//  RESULT (msgcore_bench, 3.5.3 and 3.6.0 interleaved, 7 rounds, p50, Windows
+//  Release): fieldref_read of the last of N siblings 729 ns -> 286 ns at 1,
+//  1.05 us -> 286 ns at 8, 2.55 us -> 286 ns at 64, 13.46 us -> 285 ns at 512
+//  (47x, flat in N). The check's cost, on every quick-test hit: lookup_repeat
+//  112 -> 126 ns; lookup_alt and lookup_miss +4-5% at 8 siblings, within 3%
+//  from 64; writes +3-4%. Linux VM (3.5.2 base, 5 rounds): fieldref_read
+//  38.0 -> 1.07 us at 512, lookup_repeat 455 -> 486 ns.
+//  MscsUnitTests: "cursor: a child freed through another object is not
+//  believed", "cursor: IsAt answers from where the cursor stands, and never
+//  moves it", "MsgFieldRef: reads ask the cursor first, with the walk's
+//  answers", "field_child: a child deleted through another handle answers
+//  null" (the last fails on 3.5.2 and 3.5.3).
+//
+//  BELOW IS THE 3.5.3 RATIONALE.
+//
 //  3.5.3.0, a PATCH on 3.5.2 (the MSCS performance plan's M11: the layer
 //  tax). One function body in Msgcore_c.cpp; the flat ABI and the mangled C++
 //  exports are unchanged (285 / 772, the export tables compared whole).
@@ -551,23 +604,23 @@
 //  promises - but a C++ consumer pinned to 3.0.0 has to recompile, and that is
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
-#define MSGCORE_VERSION_MINOR  5
-#define MSGCORE_VERSION_PATCH  3
+#define MSGCORE_VERSION_MINOR  6
+#define MSGCORE_VERSION_PATCH  0
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,5,3,0
+#define MSGCORE_VERSION_COMMAS 3,6,0,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.5.3.0"
+#define MSGCORE_VERSION_STRING "3.6.0.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03050300 is 3.5.3.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03050300
+//  0x03060000 is 3.6.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03060000
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"
