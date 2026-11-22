@@ -52,6 +52,7 @@
 // Upstream got <string> transitively from its stdafx.h; this build has no PCH,
 // so the std::wstring the name-bound cases use has to be asked for by name.
 #include <string>
+#include <vector>                    // Test_SkeletonFastPath (M7)
 
 using namespace std;
 
@@ -7633,6 +7634,64 @@ static void Test_ArenaGrowth()
     }
 }
 
+//  M7 (the MSCS performance plan, Msgcore 3.5.2): InitItem appends an absent
+//  skeleton item in place (P2PmsgDesc_AppendField) instead of copying in a
+//  temporary field. The twin of MscsUnitTests' Test_SkeletonFastPath: one
+//  message built each way, the images compared whole.
+static std::vector<char>
+Skeleton_Image ( P3PmsgBSTR& oMsg )
+{
+    oMsg.PrepareP2Piomage ( ~(DWORD)0 );
+    const UINT n = oMsg.P2PiomageSize ( );
+    const char *p = (const char *)oMsg.P2Piomage ( );
+    std::vector<char> v ( p, p + n );
+    oMsg.ReleaseP2Piomage ( );
+    return v;
+}
+
+static void Test_SkeletonFastPath()
+{
+    TF_CASE("M7: InitItem's in-place append builds the image the generic append builds, byte for byte")
+    {
+        static char aBlob [ 3000 ];
+        for ( int i = 0; i < (int)sizeof(aBlob); i++ ) aBlob[i] = (char)(i * 5 + 3);
+        struct Value { const char *label; P3PmsgData (*make)(); };
+        const Value kValues[] = {
+            { "empty",    [] { return P3PmsgData ( ); } },
+            { "int32",    [] { return P3PmsgData ( (INT32)-7 ); } },
+            { "double",   [] { return P3PmsgData ( 2.25 ); } },
+            { "wstr",     [] { return P3PmsgData ( L"A.B.C" ); } },
+            { "blob08",   [] { return P3PmsgData ( (const void *)aBlob, 10, VBLockData_BLOB08 ); } },
+            { "blob3000", [] { return P3PmsgData ( (const void *)aBlob, 3000, VBLockData_BLOB16 ); } },
+        };
+        const UCHAR kWidths[] = { VBLock_Addr16, VBLock_Addr32, VBLock_Addr64 };
+        int nDiffer = 0;
+        for ( UCHAR uWidth : kWidths )
+          for ( const Value& v : kValues )
+          {
+            P3PmsgBSTR oFast ( uWidth, 2048 );
+            oFast.InitItem ( VBLockBSTR_NET, P3PmsgData ( ) );
+            oFast.r_item ( VBLockBSTR_NET ).DeclareItem ( L"Src", P3PmsgData ( L"Peer.A" ) );
+            oFast.InitItem ( VBLockBSTR_MSG, v.make ( ) );
+            oFast.InitItem ( VBLockBSTR_EVT, P3PmsgData ( (INT32)5 ) );
+
+            P3PmsgBSTR oSlow ( uWidth, 2048 );
+            P3PmsgItem& oRoot = oSlow.r_item ( VBLockBSTR_ROOT );
+            oRoot += P3PmsgItem ( L"Net", P3PmsgData ( ) );
+            oSlow.r_item ( VBLockBSTR_NET ).DeclareItem ( L"Src", P3PmsgData ( L"Peer.A" ) );
+            oRoot += P3PmsgItem ( L"Msg", v.make ( ) );
+            oRoot += P3PmsgItem ( L"Evt", P3PmsgData ( (INT32)5 ) );
+
+            if ( Skeleton_Image ( oFast ) != Skeleton_Image ( oSlow ) )
+            {
+                ++nDiffer;
+                printf ( "    [M7] width %u %s differs\n", (UINT)uWidth, v.label );
+            }
+          }
+        TF_CHECK_EQ ( nDiffer, 0 );
+    }
+}
+
 void RunMsgcoreSuite()
 {
     Test_Data_TypedValues();
@@ -7693,4 +7752,5 @@ void RunMsgcoreSuite()
     Test_ValueCopyBounds();
     Test_WireTrim();
     Test_ArenaGrowth();
+    Test_SkeletonFastPath();
 }

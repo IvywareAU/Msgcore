@@ -3,6 +3,29 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.5.2
+
+A patch release: creating a message is faster. The flat C API, the C++ export surface, the
+image format, saved files and every exported class layout are unchanged, and so are the bytes
+of every message built.
+
+### Changed: the message skeleton is built in place
+
+Creating an empty message and adding its `Msg` item went through the general object model: a
+name lookup on a root with no children, then a temporary field that was copied into the heap.
+`InitItem` now writes the item straight into the heap, and `Exists` on the skeleton items asks
+the root's own cursor.
+
+| create + destroy (3.5.1 and 3.5.2 interleaved, 7 rounds, p50) | 3.5.1 | 3.5.2 |
+|---|---|---|
+| empty message, Windows Release | 5,471 ns | 3,283 ns (−40%) |
+| empty message, Linux Release | 10.4 µs, 9 allocations | 6.3 µs (−40%), 7 allocations |
+
+- **Same bytes.** A test builds 36 messages both ways — every addressing width; empty, scalar,
+  string and blob values up to 3 KB — and compares the images byte for byte.
+- Sorted collections and names over 63 characters take the old route, unchanged.
+- `DeclareItem` (adding ordinary fields) is unchanged in this release.
+
 ## 3.5.1
 
 A patch release: building a large message copies far less. The flat C API, the C++ export

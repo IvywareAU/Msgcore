@@ -705,6 +705,81 @@ ASSERT(OBJ__uVBLock==(pVBLockItem->oHdr.uVBLockDefs&VBLock_AddrMask));
     //ASSERT(uVBLock==oObject.m_uVBLock);
     return oHdl;
 }
+
+//
+//  Appends a field built from a name and a value, without the temporary
+//  NOTES: M7 (3.5.2). PushBack ( P3PmsgField ( lpszName, oData ) ) builds a
+//         standalone field, copies the value into it, then sizes the heap
+//         block FROM that copy, lays the block out, and copies name and value
+//         a second time. On the empty message that temporary and the second
+//         copy were most of the cost (msgcore_bench msg_new, perf on Linux)
+//       : SAME BLOCK, SAME BYTES. Each term below is the one PushBack derives
+//         from the temporary, derived from what the temporary was made of:
+//           - the name: P3PmsgName::c_name stores nUnits = p2p_wide_units of
+//             the name, and an unchained name is laid out at
+//             max(VBLockName_Sizeof(u,nUnits), VBLockName_Sizeof_Min(u)) --
+//             P2PmsgName_SizeofLaidOut's unchained arm;
+//           - the value: VBLockData_Copy carries the type and the blob's
+//             lengths across unchanged, so VBLockData_Sizeof of the source
+//             (chain followed, as PushBack follows the temporary's) is
+//             VBLockData_Sizeof of the copy;
+//           - the layout is P2PmsgItem_InitField's, with the name and type
+//             the temporary would have handed it; the value is then copied
+//             once, by the same P3PmsgData::operator= the second copy used.
+//         MscsUnitTests Test_SkeletonFastPath and Msgcore's twin compare the
+//         images the two routes build, byte for byte, across addressing
+//         widths and value types
+//       : NOT FOR every case. A sorted collection (AttrField_SORT) is placed
+//         by name and a name over 63 units is refused by c_name with its own
+//         message; both go the generic way, unchanged
+P2PmsgFieldHdl
+P2PmsgDesc_AppendField ( P3PmsgDesc& oDesc, LPCWSTR lpszName, const P3PmsgData& oData )
+{
+    const size_t nChars = lpszName ? wcslen ( lpszName ) : 0;
+    const size_t nUnits = p2p_wide_units ( lpszName, nChars );
+    if ( lpszName == nullptr || nUnits > 63 ||
+         oDesc.GetPermissions(AttrField_SORT) )
+      return oDesc.PushBack ( P3PmsgField ( lpszName, oData ) );
+
+    if ( oDesc.m_oObject.m_aVBLock == NULL )
+      oDesc.Create ( );
+    P3PmsgObject& oObject = oDesc.m_oObject;
+    const UCHAR   uVBLock = oObject.m_uVBLock;
+
+    // Sizes, before the allocation: it may grow the heap, and oData may be in it
+    const VBLsize nSizeofName = max ( VBLockName_Sizeof ( uVBLock, nUnits )
+                                    , VBLockName_Sizeof_Min ( uVBLock ) );
+    const VBLsize nSizeofData = VBLockData_Sizeof ( uVBLock
+                                    , P2PmsgObject_pData ( *oData.p_Object(), true ) );
+    const VBLockDataType uDataType = oData.DataType ( );
+    const VBLsize nSizeofItem = VBLockItem_Sizeof ( uVBLock ) + VBLockField_Sizeof ( )
+                              + nSizeofName + nSizeofData;
+
+    // Block allocation, layout and linkage, as PushBack
+    const VBLaddr aItem       = oObject.AllocVBLock ( VBLock_Item, nSizeofItem );
+    VBLock       *pVBLockItem = (VBLock *)oObject.Msg2Phys ( aItem );
+    const UCHAR   uVBLockDefs = pVBLockItem->oHdr.uVBLockDefs;
+    const UCHAR   uVBLocknn   = uVBLockDefs & VBLock_AddrMask;
+    VBLockItem_Init  ( uVBLockDefs, VBLock_pItem(pVBLockItem), VBLock_Field );
+    VBLockField_Init ( VBLock_pField(pVBLockItem), AttrField_DEFAULT );
+    VBLockName_Init  ( uVBLocknn, VBLock_pName(pVBLockItem), VBLockAttr_DEFAULT
+                     , lpszName, nSizeofName );
+    VBLockData_Init  ( VBLock_pData(pVBLockItem), VBLockAttr_DEFAULT, uDataType, nSizeofData );
+    VBLockDesc *pVBLockDesc = VBLock_pDesc ( (VBLock *)oObject.GetVBLock() );
+    P2PmsgDesc_LinkinItem ( &oDesc
+                          , VBLockDesc_GetLast(uVBLock,pVBLockDesc)
+                          , aItem
+                          , 0 );
+
+    // The value, once
+    P3PmsgField oFieldItem ( oObject.m_hVBList, aItem
+                           , P2PmsgHeap_Sizeof ( oObject.m_hVBList, aItem ) );
+    oFieldItem.r_data() = oData;
+
+    P2PmsgFieldHdl oHdl = { (UINT_PTR)oObject.m_hVBList, aItem
+                          , P2PmsgHeap_Sizeof ( oObject.m_hVBList, aItem ) };
+    return oHdl;
+}
 P2PmsgListHdl
 P3PmsgDesc::PushBack ( const P3PmsgList& oList )
 {

@@ -98,6 +98,7 @@ class P3PmsgDesc;
 class Msgcore_EXT P3PmsgDesc
 {
       friend P3PmsgCurs;
+      friend P2PmsgFieldHdl P2PmsgDesc_AppendField ( P3PmsgDesc&, LPCWSTR, const P3PmsgData& );
 
     // Constructors and destructor
     public:
@@ -233,6 +234,11 @@ P2PmsgDesc_UnLinkItem( P3PmsgObject *pObject, VBLockDesc *pVBLockDesc, VBLaddr a
 void
 P2PmsgDesc_SortinItem ( P3PmsgDesc *pDesc, const P3PmsgName& oName
                       , VBLaddr aItem );
+//  PushBack ( P3PmsgField ( lpszName, oData ) ) without building the
+//  temporary field: the same block, laid out the same way, byte for byte
+//  (M7, 3.5.2). Not exported. Refer MsgDesc.cpp
+P2PmsgFieldHdl
+P2PmsgDesc_AppendField ( P3PmsgDesc& oDesc, LPCWSTR lpszName, const P3PmsgData& oData );
 Msgcore_EXT void
 P2PmsgDesc_Swap ( P3PmsgItem& oItem1, P3PmsgItem& oItem2 );
 Msgcore_EXT BOOL

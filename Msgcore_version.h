@@ -46,6 +46,56 @@
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
 //
+//  3.5.2.0, a PATCH on 3.5.1 (the MSCS performance plan's M7: the empty
+//  message). The flat ABI and the mangled C++ exports are unchanged (285 / 772):
+//  the new function is not exported, and P3PmsgDesc gains a friend
+//  declaration, which moves neither its layout nor its exports.
+//
+//  MEASURED FIRST, AND THE PLAN WAS WRONG ABOUT WHERE THE COST WAS. It
+//  proposed one allocation for handle and arena, no zeroing, a per-thread
+//  arena pool. perf on the empty message (msgcore_bench --profile msg_new):
+//  creating the heap is ~5%; 59% is InitItem adding the MSG item through the
+//  generic object model - a name lookup on a root with no children (13%), a
+//  temporary standalone field (8%), and PushBack copying it in (35%).
+//
+//  WHAT IT DOES:
+//   - P3PmsgBSTR::Exists and r_item's create check ask the root's own cursor
+//     (BSTR_HasSkeletonItem), and a root with no children answers without
+//     one. P3PmsgField::Exists reached the same Goto through
+//     P3Pmsg_SelectObject's path parse, field copy and cursor build; the
+//     skeleton names are plain names, so the answer cannot differ.
+//   - InitItem appends an absent skeleton item with P2PmsgDesc_AppendField:
+//     PushBack ( P3PmsgField ( name, value ) ) without the temporary. Every
+//     size term PushBack derived from the temporary is derived from what the
+//     temporary was made of (refer MsgDesc.cpp); the value is copied once.
+//     Sorted collections and over-long names take the generic route.
+//
+//  SAME BYTES. MscsUnitTests Test_SkeletonFastPath builds 36 messages both
+//  ways (Addr16/32/64 x empty, scalars, short/long/narrow/8-bit strings,
+//  blobs 10 / 300 / 3,000 B, the last growing the heap) and compares the
+//  images whole: identical on MSVC Debug and Release and on gcc Release.
+//
+//  RESULT (create + destroy, msgcore_bench msg_new, 3.5.1 and 3.5.2 run
+//  interleaved, 7 rounds, p50): Windows Release 5,471 -> 3,283 ns (-40%),
+//  Linux 10.4 -> 6.3 us (-40%), allocations 9 -> 7; build_flat at 1 field
+//  -24% / -27%. The heap and root alone (heap_only) do not move, 1.5 / 2.6 us.
+//  What is left there is P3PmsgBSTR::Init's own temporary (31% of it) - sized
+//  at the temporary's addressing width, which is Addr64 on x64 and Addr32 on
+//  Win32, so removing it means reproducing a layout that differs by build
+//  architecture. Not done here.
+//
+//  A WINDOWS-ONLY recv_adopt DRIFT THAT IS NOT THIS CHANGE: adopting the same
+//  bytes through the same, unchanged code measures +4% at 1 field to +19% at
+//  512 on Windows, and is flat on Linux. Ruled out in turn, each run
+//  interleaved: the images (byte-identical at 0/1/8/64/512 fields), CRT heap
+//  state (it holds in a fresh process timing adoption alone), the new
+//  include, the uncalled new function, a stale object (a fresh full build
+//  repeats it). One unused function added to this translation unit brings
+//  adoption back to 3.5.1's time, so it is code alignment in the validating
+//  walk, moved by the link. Not chased further here.
+//
+//  BELOW IS THE 3.5.1 RATIONALE.
+//
 //  3.5.1.0, a PATCH on 3.5.0 (the MSCS performance plan's M6: arena growth).
 //  tools\ci\exports-flat.manifest and both exports-cxx manifests match
 //  unchanged (285 flat, 772 mangled); no header line a consumer compiles
@@ -479,22 +529,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  5
-#define MSGCORE_VERSION_PATCH  1
+#define MSGCORE_VERSION_PATCH  2
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,5,1,0
+#define MSGCORE_VERSION_COMMAS 3,5,2,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.5.1.0"
+#define MSGCORE_VERSION_STRING "3.5.2.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03050100 is 3.5.1.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03050100
+//  0x03050200 is 3.5.2.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03050200
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

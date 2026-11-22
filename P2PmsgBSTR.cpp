@@ -20,6 +20,7 @@
 #include "P2PmsgBSTR.h"
 #include "Msgexception.h"
 #include "MsgVBHeap.h"
+#include "MsgDesc.h"           // P2PmsgDesc_AppendField (M7)
 #include <ASSERT.h>
 
 //////////////////////////////////////////////////////////////////////
@@ -214,16 +215,19 @@ P3PmsgBSTR::InitData ( P3PmsgData& oDataHdr )
 P3PmsgItem&
 P3PmsgBSTR::InitItem ( UCHAR uVBLockBSTR, const P3PmsgData& oData )
 {
+    //  An absent skeleton item is appended in place (M7, 3.5.2): the block
+    //  m_oItem += P3PmsgItem ( name, oData ) would build, without the
+    //  temporary field. Refer P2PmsgDesc_AppendField
     if ( Exists(uVBLockBSTR) )
       r_item(uVBLockBSTR).r_data() = oData;
     else if ( uVBLockBSTR == VBLockBSTR_NET )
-      m_oItem += P3PmsgItem( TBSTR_Net, oData );
+      P2PmsgDesc_AppendField ( m_oItem.r_Desc(), TBSTR_Net, oData );
     else if ( uVBLockBSTR == VBLockBSTR_MSG )
-      m_oItem += P3PmsgItem( TBSTR_Msg, oData );
+      P2PmsgDesc_AppendField ( m_oItem.r_Desc(), TBSTR_Msg, oData );
     else if ( uVBLockBSTR == VBLockBSTR_WRP )
-      m_oItem += P3PmsgItem( TBSTR_Wrp, oData );
+      P2PmsgDesc_AppendField ( m_oItem.r_Desc(), TBSTR_Wrp, oData );
     else if ( uVBLockBSTR == VBLockBSTR_EVT )
-      m_oItem += P3PmsgItem( TBSTR_Evt, oData );
+      P2PmsgDesc_AppendField ( m_oItem.r_Desc(), TBSTR_Evt, oData );
     ASSERT(r_item(uVBLockBSTR).VerifyContainment());
     return r_item ( uVBLockBSTR );
 }
@@ -392,19 +396,44 @@ P3PmsgBSTR::GetDefaultP2Pmsgnn ( )
     return s_uP2Pmsgnn;
 }
 
+//
+//  Whether the root has a child of this skeleton name (M7, 3.5.2)
+//  NOTES: The same question P3PmsgField::Exists answers, asked directly.
+//         Exists goes through P3Pmsg_SelectObject: it parses the name as a
+//         path, copies the root into a temporary field, builds and drops a
+//         cursor on that copy, and for a plain name ends in exactly this
+//         Goto on the root's descendants. The skeleton names (Net, Msg, Wrp,
+//         Evt, Sys) are plain names - no '.', '@', '^' or ':' - so nothing on
+//         that route changes the answer; it was most of the cost of the empty
+//         message (msgcore_bench msg_new, perf on Linux: the lookup on a root
+//         with NO children was 13% of creating the message)
+//       : A root with no descendants answers false without a cursor at all
+//       : Goto moves the root's own cursor. Nothing reads its position
+//         without moving it first: r_item's SelectItem Goto's the same name
+//         next, and lands on it without a walk
+//       : A file-local function, not a member: P3PmsgBSTR is exported whole,
+//         so a member would be a new C++ export for a PATCH release
+static bool
+BSTR_HasSkeletonItem ( P3PmsgItem& oRoot, LPCWSTR lpszName )
+{
+    if ( oRoot.IsVoid() || !oRoot.IsDescendant() )
+      return false;
+    return oRoot.r_Desc().r_Curs().Goto ( lpszName ) ? true : false;
+}
+
 bool
 P3PmsgBSTR::Exists ( UCHAR uBSTRmask )
 {
     if ( (uBSTRmask&VBLockBSTR_NET) == VBLockBSTR_NET )
-      return m_oItem.Exists(TBSTR_Net);
+      return BSTR_HasSkeletonItem(m_oItem,TBSTR_Net);
     if ( (uBSTRmask&VBLockBSTR_MSG) == VBLockBSTR_MSG )
-      return m_oItem.Exists(TBSTR_Msg);
+      return BSTR_HasSkeletonItem(m_oItem,TBSTR_Msg);
     if ( (uBSTRmask&VBLockBSTR_WRP) == VBLockBSTR_WRP )
-      return m_oItem.Exists(TBSTR_Wrp);
+      return BSTR_HasSkeletonItem(m_oItem,TBSTR_Wrp);
     if ( (uBSTRmask&VBLockBSTR_EVT) == VBLockBSTR_EVT )
-      return m_oItem.Exists(TBSTR_Evt);
+      return BSTR_HasSkeletonItem(m_oItem,TBSTR_Evt);
     if ( (uBSTRmask&VBLockBSTR_SYS) == VBLockBSTR_SYS )
-      return m_oItem.Exists(TBSTR_Sys);
+      return BSTR_HasSkeletonItem(m_oItem,TBSTR_Sys);
     return false;
 }
 
@@ -417,15 +446,15 @@ P3PmsgBSTR::r_item  ( UCHAR eVBLockBSTR, bool bCreate )
       return m_oItem.SelectItem(TBSTR_Net);
     if ( eVBLockBSTR == VBLockBSTR_MSG )
     {
-      if (    bCreate                 &&
-           !m_oItem.Exists(TBSTR_Msg)    )
+      if (    bCreate                                   &&
+           !BSTR_HasSkeletonItem(m_oItem,TBSTR_Msg)    )
         m_oItem += P3PmsgItem ( TBSTR_Msg, P3PmsgData() );
       return m_oItem.SelectItem(TBSTR_Msg);
     }
     if ( eVBLockBSTR == VBLockBSTR_SYS )
     {
-      if (    bCreate                 &&
-           !m_oItem.Exists(TBSTR_Sys)    )
+      if (    bCreate                                   &&
+           !BSTR_HasSkeletonItem(m_oItem,TBSTR_Sys)    )
         m_oItem += P3PmsgItem ( TBSTR_Sys, P3PmsgData() );
       return m_oItem.SelectItem(TBSTR_Sys);
     }
