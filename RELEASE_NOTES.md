@@ -3,6 +3,21 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.6.2
+
+A patch release that changes build settings only. The Visual Studio project's Release
+configurations now build with full inlining (`/Ob2`, was `/Ob1`), as the CMake build always has.
+The source, exports, layouts, image format and saved files are unchanged.
+
+| `perf_ab`, 64 B, Windows Release, Visual Studio-built DLLs | 3.6.1 + Targetcore 3.7.3 | 3.6.2 + Targetcore 3.7.4 |
+|---|---|---|
+| one-way latency p50 | 105.0 µs | ~94 µs |
+| throughput | 21.9k msg/s | ~26.4k msg/s |
+
+`/sdl` stays on. Turning it off would recover about 4% more, but it would also remove the
+`__autoclassinit2` members `/sdl` generates from the DLL's C++ export table, which programs
+compiled with `/sdl` call.
+
 ## 3.6.1
 
 A patch release: fewer heap allocations on every name lookup. The flat C API, the C++ export

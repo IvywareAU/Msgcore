@@ -46,6 +46,27 @@
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
 //
+//  3.6.2.0, a PATCH on 3.6.1: BUILD SETTINGS ONLY, no source change. The
+//  Visual Studio project's Release and ReleaseLib configurations were
+//  compiled /Ob1 (InlineFunctionExpansion=OnlyExplicitInline) where the
+//  CMake build is /Ob2; they are /Ob2 (AnySuitable) now. Measured (MSCS
+//  performance log F-P4-8; same perf_ab.exe, 3.6.1 code): the msbuild DLLs
+//  read one-way 105.0 us and 21.9k msg/s against the CMake DLLs' 88.7 us
+//  and 27.9k, and /Ob1 alone reproduced the gap. With Targetcore 3.7.4 (the
+//  same fix) the msbuild DLLs read ~94 us and ~26.4k msg/s.
+//
+//  /sdl STAYS, AND IT IS PART OF THE C++ EXPORT TABLE. The ~4% left is /sdl
+//  (measured alone). Turning it off was tried and refused by CI: /sdl's
+//  class-member initialisation makes the compiler emit __autoclassinit2 for
+//  each exported class, 23 per architecture in the manifest, and a consumer
+//  compiled with /sdl (the Visual Studio default) calls it through the
+//  import table on every new. Dropping /sdl removes those exports, so it is
+//  an export removal, not a build setting, and it waits for a release that
+//  can carry one. The CMake DLL is built without /sdl and has never exported
+//  them. Exports and layouts unchanged here.
+//
+//  BELOW IS THE 3.6.1 RATIONALE.
+//
 //  3.6.1.0, a PATCH on 3.6.0 (the MSCS performance plan's T7, step 1). Two
 //  function bodies; the flat ABI, the mangled C++ exports, every class layout,
 //  the image format and saved files are unchanged.
@@ -631,22 +652,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  6
-#define MSGCORE_VERSION_PATCH  1
+#define MSGCORE_VERSION_PATCH  2
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,6,1,0
+#define MSGCORE_VERSION_COMMAS 3,6,2,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.6.1.0"
+#define MSGCORE_VERSION_STRING "3.6.2.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03060100 is 3.6.1.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03060100
+//  0x03060200 is 3.6.2.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03060200
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"
