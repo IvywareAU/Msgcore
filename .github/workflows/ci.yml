@@ -81,9 +81,54 @@ defaults:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Job 0 -- skip a master push whose commit is already green (2026-11-23).
+  # Master only ever fast-forwards to a commit that went through a branch first
+  # (tools/hooks/pre-push), so the push-to-master run re-tested a commit CI had
+  # already passed. If a SUCCESSFUL run of this workflow exists for the same
+  # commit on another branch, or by workflow_dispatch, build and hygiene are
+  # skipped (test follows build) and this run concludes success. Anything else
+  # runs everything: any ref but master, a master push whose branch run failed
+  # or never happened, an API error. release.yml names the run that actually
+  # tested the commit, never a skipped one. Same gate as Targetcore's CI.
+  # actions: read at JOB level only - this workflow sets no top-level
+  # permissions, and a top-level block would narrow every other job's token.
+  # ---------------------------------------------------------------------------
+  already-green:
+    name: already green on a branch?
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      skip: ${{ steps.look.outputs.skip }}
+    steps:
+      - id: look
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          skip=false
+          if [ "${{ github.event_name }}" = push ] && [ "${{ github.ref }}" = refs/heads/master ]; then
+            wf="${GITHUB_WORKFLOW_REF%%@*}"; wf="${wf##*/}"
+            prior="$(gh api "repos/${{ github.repository }}/actions/workflows/$wf/runs?head_sha=${{ github.sha }}&status=success&per_page=50" \
+                       --jq '[.workflow_runs[] | select(.head_branch != "master" and .id != ${{ github.run_id }}) | .html_url] | first // empty' \
+                     2>/dev/null)" || prior=""
+            if [ -n "$prior" ]; then
+              skip=true
+              echo "::notice::${{ github.sha }} already passed $wf in $prior - skipping the master re-run"
+            else
+              echo "No earlier green $wf run for ${{ github.sha }}; running everything."
+            fi
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
   # Job 1 -- clean-clone build, all eight configurations, project and solution.
   # ---------------------------------------------------------------------------
   build:
+    needs: already-green
+    if: needs.already-green.outputs.skip != 'true'
     name: ${{ matrix.configuration }}|${{ matrix.platform }}
     runs-on: windows-2025-vs2026
     strategy:
@@ -426,6 +471,8 @@ jobs:
   #  hide one class of problem behind another.
   # --------------------------------------------------------------------------
   hygiene:
+    needs: already-green
+    if: needs.already-green.outputs.skip != 'true'
     name: Hygiene (citations, ASSERT forms)
     # Pinned. `ubuntu-latest` migrates to Ubuntu 26 on 2026-10-19
     # (actions/runner-images#14748). This is the only job in this repository

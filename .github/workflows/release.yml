@@ -92,8 +92,16 @@ jobs:
           sha="$(git rev-parse "${TAG}^{commit}")"
           notes="$RUNNER_TEMP/notes.txt"
 
-          run_id="$(gh run list --workflow CI --commit "$sha" --status success \
-                      --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          # The newest successful CI run that actually TESTED the commit. Since
+          # 2026-11-23 a master push of a commit already green on its branch
+          # skips every job (ci.yml, already-green) and still concludes
+          # success; that run tested nothing, so it is passed over and the
+          # branch (or dispatch) run that did is the one named
+          run_id=""
+          for rid in $(gh run list --workflow CI --commit "$sha" --status success                          --limit 30 --json databaseId --jq '.[].databaseId'); do
+            tested="$(gh run view "$rid" --json jobs                         --jq '[.jobs[] | select(.name != "already green on a branch?" and .conclusion != "skipped")] | length')"
+            if [ "$tested" -gt 0 ]; then run_id="$rid"; break; fi
+          done
           if [ -z "$run_id" ]; then
             echo "::error::No successful CI run for $TAG ($sha). Push that commit through CI, then re-run this workflow for $TAG."
             exit 1
