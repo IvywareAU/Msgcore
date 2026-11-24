@@ -46,6 +46,27 @@
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
 //
+//  3.7.1.0, a PATCH on 3.7.0, paired with Targetcore 3.10.1. The flat ABI, the
+//  mangled C++ exports, every class layout, the image format and saved files are
+//  unchanged.
+//
+//  BOUNDED OBJECT-GRAPH TRAVERSAL (MSCS performance log F-P6-6). The checks that
+//  accept a received image prove its BLOCK structure (MsgVBHeap, F12-F14); they
+//  do not walk the OBJECT GRAPH those blocks form. A frame could pass them and
+//  still carry a forged graph - a sibling aNext/aPrev chain linked into a loop,
+//  or a descendant/attribute pointer aimed back at an ancestor. Reading one hung
+//  the reader (P3PmsgCurs::Goto walked the sibling loop forever - reached by
+//  GetSource() on every inbound message) or overflowed the stack (the AssertValid
+//  family and the deep-copy recurse through descendants without a depth limit).
+//  Both are now bounded: the two Goto loops stop at the heap's byte extent (a
+//  chain cannot have more items than the heap has bytes), and the tree recursion
+//  at a fixed nesting depth; a forged graph raises a P2Pevent instead. A
+//  well-formed message is unaffected. PATCH: a bug fix, no surface change.
+//  Targetcore 3.10.1 is what calls the now-safe AssertValid on every received
+//  message, at its ingress gate.
+//
+//  BELOW IS THE 3.7.0 RATIONALE.
+//
 //  3.7.0.0, a MINOR on 3.6.2, paired with Targetcore 3.10.0. Two changes; the
 //  flat ABI, the mangled C++ exports, every class layout, the image format and
 //  saved files are unchanged.
@@ -674,22 +695,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  7
-#define MSGCORE_VERSION_PATCH  0
+#define MSGCORE_VERSION_PATCH  1
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,7,0,0
+#define MSGCORE_VERSION_COMMAS 3,7,1,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.7.0.0"
+#define MSGCORE_VERSION_STRING "3.7.1.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
 //  0x03070000 is 3.7.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03070000
+#define MSGCORE_VERSION_HEX    0x03070100
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

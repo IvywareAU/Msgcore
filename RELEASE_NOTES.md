@@ -3,6 +3,20 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.7.1
+
+A patch release, paired with Targetcore 3.10.1. The flat C API, the C++ exports, every class
+layout, the image format and saved files are unchanged.
+
+- **The walks over a received message's object graph are now bounded.** A frame can pass the
+  block-structure checks that accept an image and still carry a forged *graph* those blocks
+  form — a sibling chain linked back on itself, or a descendant aimed at an ancestor. Reading
+  such a message used to hang the reader (a non-terminating sibling walk) or overflow the stack
+  (unbounded recursion). The sibling walks now stop at the heap's own size, and the tree
+  recursion at a fixed depth, so a forged graph is refused with an exception instead. A
+  well-formed message is unaffected. Found and fixed as F-P6-6; Targetcore 3.10.1 is what calls
+  the now-safe whole-tree check on every message it receives.
+
 ## 3.7.0
 
 A minor release, paired with Targetcore 3.10.0. The flat C API, the C++ exports, every class

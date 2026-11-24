@@ -63,6 +63,57 @@ g_bP2Pmsg_AssertValid = P2Pmsg_AssertValidDefault ( );
 VBLsize
 g_nVBListCreateHeap_SizeMax = 10000000;
 
+//  RECURSION-DEPTH BOUND (F-P6-6). AssertValid() descends a message through its
+//  descendants, attributes and stack. Those links come off the wire on a
+//  received image, and a forged pointer that aims a child back at an ancestor
+//  drives UNBOUNDED RECURSION -- a stack overflow (0xC00000FD, measured on a
+//  frame whose Src field's descendant was aimed at its own parent collection).
+//  The sibling walk is bounded by the heap's byte extent (MsgCurs.cpp); this
+//  bounds the orthogonal axis, DEPTH, and it has to be bounded separately: the
+//  sibling guard stops each level from looping, but says nothing about how many
+//  levels deep the tree goes.
+//
+//  A FIXED CAP, not the byte extent. Unlike iteration, each level spends STACK,
+//  so the ceiling must sit below what the stack holds (~1 MB by default) and
+//  must NOT scale with the image -- a 32 KB frame could nest far deeper than the
+//  stack survives. A legitimate message nests a handful of levels; this cap is
+//  well above that and well below the stack, and anything nested past it would
+//  overflow the stack on any recursive pass, so refusing it is the safe answer
+//  rather than a lost capability. Raise s_nAssertDepthMax if a real message ever
+//  legitimately needs more -- it is the one number here with a product meaning.
+//  Measured per-level stack cost is small (~260 bytes in optimised Release, so
+//  the walk itself overflows only near depth ~3900); 128 sits far below that and
+//  far above any real message, which nests a handful of levels.
+//
+//  Thread-local, because each IOCP worker verifies its own message -- the same
+//  reason P2PmsgHeap's untrusted gate (MsgVBHeap.cpp) is thread-local.
+//
+//  THE COUNTER IS ZEROED BEFORE THE THROW, not decremented, and that is the
+//  subtle part. Building the P2Pevent that reports the overrun goes through this
+//  same guarded field machinery (EVERR->Message adds fields, which assign). With
+//  the counter left at the cap, that construction re-trips the guard and throws
+//  WHILE THROWING -- a recursive throw that was the actual stack overflow, not
+//  the walk depth. Zeroing lets the event build from depth 0; the guards still on
+//  the stack then unwind past a zero counter, so the destructor CLAMPS at 0 and
+//  the count self-heals to 0 after the throw rather than drifting negative.
+static const int         s_nAssertDepthMax = 128;
+static thread_local int  s_nAssertDepth    = 0;
+struct P3PmsgAssertDepthGuard
+{
+    P3PmsgAssertDepthGuard ( const char *pszWhere )
+    {
+      if ( ++s_nAssertDepth > s_nAssertDepthMax )
+      {
+        s_nAssertDepth = 0;            // the report builds through guarded code
+        EVERR -> Module ( pszWhere )
+             -> Message ( "Message tree nested past the %i-level limit "
+                          "(cyclic or abusively deep image)", s_nAssertDepthMax )
+             -> Throw();
+      }
+    }
+   ~P3PmsgAssertDepthGuard ( ) { if ( s_nAssertDepth > 0 ) --s_nAssertDepth; }
+};
+
 #define  OBJ__         m_oObject
 #define pOBJ__         m_pObject
 #define  OBJ__hVBList  m_oObject.m_hVBList
@@ -3881,6 +3932,16 @@ P3PmsgField::operator = ( const P3PmsgField& rhs )
 //ASSERT(VerifyContainment()); //delete-bug-hunting
 //ASSERT(rhs.VerifyContainment()); //delete-bug-hunting
 //ASSERT(rhs.OBJ__IsField());
+    // Depth bound (F-P6-6). A deep copy recurses through rhs's descendants
+    // (r_Desc() = rhs.r_Desc() below, which re-enters here per level), so a
+    // forged descendant cycle drives the SAME unbounded recursion the
+    // AssertValid family did -- a stack overflow on a copy of a received
+    // message. The ingress gate (P2PeerCon::GateAppMsgInbound) refuses such a
+    // message before anything copies it, but an application that copies a
+    // message built in-process is not behind that gate, so the walk is bounded
+    // here too. Refer the guard's definition for why the cap is fixed.
+    P3PmsgAssertDepthGuard oDepthGuard ( __FUNCTION__ );
+
     if ( this != &rhs )
     {
 //AssertValid();rhs.AssertValid();
@@ -4259,6 +4320,11 @@ P3PmsgField::GetP2Pos ( ) const
 void
 P3PmsgField::AssertValid ( ) const
 {
+    // Depth bound (F-P6-6): every descent level passes through a field, a list
+    // or a vect (list/vect delegate here via __super), so one guard here bounds
+    // the whole recursion against a forged descendant/attr/stack cycle.
+    P3PmsgAssertDepthGuard oDepthGuard ( __FUNCTION__ );
+
     // Containment
     if ( !VerifyContainment() )
       EVERR -> Module ( __FUNCTION__ )
@@ -5513,6 +5579,10 @@ P3PmsgNode__GetVBLockNode ( const P3PmsgNode *pNode )
 void
 P3PmsgNode::AssertValid ( ) const
 {
+    // Depth bound (F-P6-6): a node recurses into child nodes, which need not be
+    // fields, so this path is guarded in its own right (refer P3PmsgField).
+    P3PmsgAssertDepthGuard oDepthGuard ( __FUNCTION__ );
+
     VBLock     *pVBLock = OBJ__VBLock;
     if ( pVBLock == nullptr )
       return;

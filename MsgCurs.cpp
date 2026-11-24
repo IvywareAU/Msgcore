@@ -607,9 +607,44 @@ P3PmsgCurs::Goto ( LPCWSTR lpszItemName )
       nSizeofNameMin = VBLockName_Sizeof_Min ( uVBLockHeap );
     }
 
+    //  BOUND THE SIBLING WALK (F-P6-6). aItem advances along aNext links which,
+    //  for a message built from a received image, come straight off the wire. A
+    //  forged chain that points back on itself spins here forever -- the
+    //  confirmed denial of service, because GetSource() on an inbound
+    //  application message reaches this loop (SelectObjectRecurse -> Goto) and
+    //  P2PeerCon::GateAppMsgInbound reads the source of every frame before it is
+    //  dispatched.
+    //
+    //  THE CEILING IS THE HEAP'S BYTE EXTENT, and the choice matters. A chain
+    //  cannot have more items than the heap has bytes -- each GetNext must reach
+    //  a distinct in-bounds address -- so nSizeofAlloc is an upper bound no
+    //  legitimate acyclic walk can reach, while a cycle reaches it for certain.
+    //  It is deliberately NOT the tighter block count (nSizeofAlloc / header):
+    //  that count is a true ceiling on the free-list walk, but applied here it
+    //  FALSE-POSITIVED on small live heaps (the P2Pevent a refusal itself builds
+    //  is walked during Display, and its block count came out as 1), throwing
+    //  from inside the throw. A byte extent cannot be reached by a valid chain.
+    //
+    //  Only an IMAGE heap (IOMAGE / BSTRio, i.e. one built from bytes) is
+    //  bounded. A SYSTEM heap is process-built, carries no wire image, reports
+    //  no extent, and keeps the unbounded path it has always had -- nothing a
+    //  stranger sent ever lands on one. A tripped bound is corruption: it is
+    //  thrown, which the receive path turns into a dropped connection.
+    P2PmsgHeapExtent oExtentWalk {};
+    if ( hVBList )
+      P2PmsgHeap_GetExtent ( hVBList, &oExtentWalk );
+    const VBLsize nMaxWalk = oExtentWalk.uKind == P2PmsgHeapExtent::Image
+                           ? oExtentWalk.nSizeofAlloc : 0;
+    VBLsize       nWalked  = 0;
     m_pP3PmsgFoN = 0;
     while ( aItem )
     {
+      if ( nMaxWalk && ++nWalked > nMaxWalk )
+        EVERR -> Module ( __FUNCTION__ )
+              -> Message ( "Cyclic sibling chain in message image "
+                           "(walked %u past %u-byte heap)"
+                         , (unsigned)nWalked, (unsigned)nMaxWalk )
+              -> Throw();
       ASSERT(GetCount()>0);
       //VBLock *pVBLock = 0;
       if ( m_pP3PmsgDesc )
@@ -725,10 +760,31 @@ ASSERT(nItem>=0);
     }
 
     // Navigation
+    //  BOUND THE SIBLING WALK (F-P6-6), the by-index twin of the by-name walk
+    //  above and the same byte-extent ceiling -- refer that loop for why the
+    //  extent and not the block count. AssertValid() iterates this with
+    //  for(i=0; Goto(i); i++), so a forged aNext/aPrev cycle hangs it here.
+    //  m_nItem can oscillate around nItem without ever meeting it on a cyclic
+    //  chain, so the step counter, not the index, is what terminates.
+    P2PmsgHANDLE hVBListWalk = m_pP3PmsgDesc ? m_pP3PmsgDesc->m_oObject.m_hVBList
+                            : m_pP3PmsgAttr ? m_pP3PmsgAttr->m_oObject.m_hVBList
+                            :                 0;
+    P2PmsgHeapExtent oExtentWalk {};
+    if ( hVBListWalk )
+      P2PmsgHeap_GetExtent ( hVBListWalk, &oExtentWalk );
+    const VBLsize nMaxWalk = oExtentWalk.uKind == P2PmsgHeapExtent::Image
+                           ? oExtentWalk.nSizeofAlloc : 0;
+    VBLsize       nWalked  = 0;
     VBLock     *pVBLock = 0;
     VBLockItem *pItem   = 0;
     while ( aItem )
     {
+      if ( nMaxWalk && ++nWalked > nMaxWalk )
+        EVERR -> Module ( __FUNCTION__ )
+              -> Message ( "Cyclic sibling chain in message image "
+                           "(walked %u past %u-byte heap)"
+                         , (unsigned)nWalked, (unsigned)nMaxWalk )
+              -> Throw();
       //if ( m_pP3PmsgNode )
       //  pVBLock  = (VBLock *)m_pP3PmsgNode->r_Object().Msg2Phys ( aItem );
       if ( m_pP3PmsgDesc )
