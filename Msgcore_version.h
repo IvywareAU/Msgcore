@@ -46,6 +46,28 @@
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
 //
+//  3.7.0.0, a MINOR on 3.6.2, paired with Targetcore 3.10.0. Two changes; the
+//  flat ABI, the mangled C++ exports, every class layout, the image format and
+//  saved files are unchanged.
+//
+//  (1) g_bP2Pmsg_AssertValid DEFAULTS TO FALSE IN RELEASE (MSCS performance log
+//  F-P6-5). It was true, and Targetcore's post paths read it to validate every
+//  outbound message: 25% of all CPU in a two-process round trip. Debug is
+//  unchanged (true). The environment variable P2P_ASSERT_VALID, anything but
+//  "0", turns it back on, read once at load; so does setting the variable.
+//  Nothing in Msgcore reads it and it never covered bytes off a wire: the
+//  ingress checks on an adopted image do not consult it. MINOR, not PATCH,
+//  because a Release process that relied on the default sees less checking of
+//  the messages it builds itself.
+//
+//  (2) Platform/p2pshm.h, NEW: the same-host shared-memory primitives under
+//  Targetcore 3.10.0's transport (two byte rings in one sealed mapping, park
+//  words, a wake per side that lands in a completion port, and handing both to
+//  the peer process). Header-only, no exported symbol; Msgcore itself does not
+//  include it.
+//
+//  BELOW IS THE 3.6.2 RATIONALE.
+//
 //  3.6.2.0, a PATCH on 3.6.1: BUILD SETTINGS ONLY, no source change. The
 //  Visual Studio project's Release and ReleaseLib configurations were
 //  compiled /Ob1 (InlineFunctionExpansion=OnlyExplicitInline) where the
@@ -651,23 +673,23 @@
 //  promises - but a C++ consumer pinned to 3.0.0 has to recompile, and that is
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
-#define MSGCORE_VERSION_MINOR  6
-#define MSGCORE_VERSION_PATCH  2
+#define MSGCORE_VERSION_MINOR  7
+#define MSGCORE_VERSION_PATCH  0
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,6,2,0
+#define MSGCORE_VERSION_COMMAS 3,7,0,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.6.2.0"
+#define MSGCORE_VERSION_STRING "3.7.0.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
-//  0x03060200 is 3.6.2.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03060200
+//  0x03070000 is 3.7.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
+#define MSGCORE_VERSION_HEX    0x03070000
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

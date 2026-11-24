@@ -29,8 +29,37 @@
 #include "MsgCurs.h"
 #include "Msgexception.h"
 
+//  Validation of messages THIS PROCESS BUILT, on their way out (p2p_performance
+//  §M2, F-P6-5).  Debug: on.  Release: OFF since Msgcore 3.7.0, unless the
+//  environment sets P2P_ASSERT_VALID to anything but "0" (read once, at load).
+//  NOTES: Every reader is a post path - P2PeerHub / P2PeerCon::PostP2PeerMsg and
+//         P2PmsgPump::PutP2Pmsg for the hub's own posts - so this switch never
+//         covered bytes off a wire.  Those are checked by the ingress walk
+//         (CreateIOMAGE with the buffer extent, F12-F14) and by the receive-side
+//         VerifyP2Pmsg, neither of which reads it
+//       : Its cost on the default build was three full tree walks of every
+//         outbound message: 25% of all CPU in a two-process perf_ab round trip,
+//         -13% RTT / +25% pipelined throughput when off (F-P6-5).  An
+//         application can still set it true, which restores the old behaviour
+static bool
+P2Pmsg_AssertValidDefault ( )
+{
+#ifdef _DEBUG
+    return true;
+#else
+#if defined(_MSC_VER)
+#  pragma warning( push )
+#  pragma warning( disable : 4996 )    // getenv: read-only lookup, resolved once
+#endif
+    const char *psz = getenv ( "P2P_ASSERT_VALID" );
+#if defined(_MSC_VER)
+#  pragma warning( pop )
+#endif
+    return psz && *psz && strcmp ( psz, "0" ) != 0;
+#endif
+}
 bool Msgcore_EXT
-g_bP2Pmsg_AssertValid = true;
+g_bP2Pmsg_AssertValid = P2Pmsg_AssertValidDefault ( );
 VBLsize
 g_nVBListCreateHeap_SizeMax = 10000000;
 

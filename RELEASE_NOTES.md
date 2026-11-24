@@ -3,6 +3,19 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.7.0
+
+A minor release, paired with Targetcore 3.10.0. The flat C API, the C++ exports, every class
+layout, the image format and saved files are unchanged.
+
+- **Release builds no longer validate the messages they build themselves.**
+  `g_bP2Pmsg_AssertValid` now defaults to false in Release; Debug is unchanged. Targetcore reads it
+  on its post paths, where it was a quarter of the CPU of a round trip. To turn it back on, set
+  the environment variable `P2P_ASSERT_VALID=1` before the process starts, or set the variable to
+  true. The checks on an image received from elsewhere do not read this switch and are unchanged.
+- **New: `Platform/p2pshm.h`**, the shared-memory primitives under Targetcore 3.10.0's
+  shared-memory transport, for Windows 8 or later and Linux. Header-only, no exported symbols.
+
 ## 3.6.2
 
 A patch release that changes build settings only. The Visual Studio project's Release

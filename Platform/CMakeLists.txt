@@ -25,6 +25,7 @@ set(P2PPLATFORM_HEADERS
     p2pthread.h
     p2pfile.h
     p2piocp.h
+    p2pshm.h
     p2psock.h
     p2pserial.h
     p2pcrypto.h
