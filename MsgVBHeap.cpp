@@ -22,6 +22,11 @@
 #include "Msgexception.h"
 #include <ASSERT.h>
 #include <atomic>
+#include <cstring>                     // std::memcpy (P2PmsgNameFilter_HashName)
+#include <cwctype>                     // std::towlower / towupper (P2PmsgNameFilter_HashKey)
+#include <thread>                      // std::this_thread::yield (name-filter lock)
+#include <unordered_map>
+#include <vector>
 //  Sizing VBLockHdr's, eliminates need to contract empty objects
 const VBLockHdr  soHdr  = { 0 };
 const VBLockName soName = { 0 };
@@ -801,6 +806,9 @@ CMapTriggers*                          // Pre-definition
 P2PmsgHeap_DropTriggers ( CMapTriggers *pCMapTriggers );
 
 typedef CMap<VBLaddr,VBLaddr,VBLaddr,VBLaddr> CMapAlloc;
+struct P2PmsgNameFilters;              // refer P2PmsgHeap_BumpShape
+static void
+P2PmsgHeap_DropNameFilters ( P2PmsgNameFilters *pFilters ) noexcept;
 typedef struct
 {
     std::atomic<int> nRefCount;   // atomic: AddRef/Close race across pump threads (msg IOMAGE handle share)
@@ -860,6 +868,12 @@ typedef struct
     // first P2PmsgHeap_InodeStamp). Refer that function for the whole of it.
     CMapAlloc        *pGenerations;
     UINT32            nInodeStamp;
+    // The "definitely new" name filters (runtime-only, like the sink above, and
+    // zero until a cursor builds the first). Refer P2PmsgHeap_BumpShape for the
+    // whole of it.
+    std::atomic<UINT32>              nShapeStamp;
+    std::atomic<int>                 nFilterLock;
+    std::atomic<P2PmsgNameFilters *> pNameFilters;
     // Report budgets for the two collation refusals. Runtime-only, like the
     // sink above, and zero-initialised by the ZeroMemory in every handle
     // allocation below.
@@ -3992,6 +4006,7 @@ P2PmsgHeap_Close ( P2PmsgHANDLE hVBList )
 
     // Tidy up, and
     delete pHandle->pGenerations;
+    P2PmsgHeap_DropNameFilters ( pHandle->pNameFilters.load ( ) );
     delete pHandle;                    // Garbage collection
     return 0;
 }
@@ -4353,6 +4368,10 @@ ASSERT(pHandle->nSizeofUsed>=VBLock_Hdr_u_SizeNN(pVBLock));
       pHandle->pGenerations->SetAt ( aVBLock, nGeneration + 1 );
     }
 
+    // Name filters: a freed CONTAINER's address can be taken by a new one,
+    // which must not inherit its filter (refer P2PmsgHeap_BumpShape).
+    P2PmsgHeap_BumpShape ( hVBList );
+
     // Tidy up, and
     return 0;
 }
@@ -4413,6 +4432,309 @@ P2PmsgHeap_InodeGeneration ( P2PmsgHANDLE hVBList, VBLaddr aVBLock ) noexcept
     if ( pHandle != nullptr && pHandle->pGenerations != nullptr )
       pHandle->pGenerations->Lookup ( aVBLock, nGeneration );
     return nGeneration;
+}
+
+//
+//  The heap's shape stamp, and the "definitely new" name filters it governs
+//  (MSCS p2p_performance B2, M3 Option A).
+//  NOTES: WHY. P3PmsgDesc/Attr::DeclareItem must prove a name new before it
+//         appends it, and that proof was a walk of every sibling: a build of n
+//         names cost O(n^2) (p2p_performance F-P1-6, F-P4-9). A filter holds the
+//         hashes of one container's children's case-folded names, beside the
+//         heap in process memory -- never in the image, so the wire, the frame
+//         and the saved format are unchanged.
+//       : IT ANSWERS ONLY "NOT HERE". Hash absent: no child can match, and the
+//         walk is skipped. Hash present (a match or a collision): the walk runs
+//         exactly as before and alone decides a hit, so first-match-wins and
+//         case-insensitivity are untouched.
+//       : THE RULE. A filter is believed only while its stamp equals the heap's
+//         nShapeStamp. Anything that could add a name to any container on this
+//         heap bumps it, which retires every filter here at once:
+//           - linking an item into a container (P2PmsgDesc/Attr/Node/List_
+//             LinkinItem), unlinking one (P2PmsgDesc/Attr/List_UnLinkItem);
+//           - renaming (P3PmsgName::c_name, P3PmsgName_ResizeName, the inline-
+//             chain functions, P2PmsgField_DropName) -- a sibling renamed to x
+//             adds x without any add path;
+//           - reordering (P2PmsgDesc_Swap, P2PmsgNode_Swap);
+//           - P2PmsgHeap_Free, because a freed CONTAINER's address can be
+//             taken by a new container, which must not inherit the old filter;
+//           - P2PmsgMgr::Attacheap.
+//         A new handle starts at stamp 0 with no filters, so a heap made from
+//         an image, a defragmented copy or a received frame has none.
+//         DeclareItem's own append re-stamps the one filter it updated
+//         (P2PmsgHeap_NameFilterNoteAppend), so a long build stays fast; any
+//         other change costs at most one walk to rebuild.
+//       : A MISSED BUMP IS A DUPLICATE FIELD in Release, silently. The Debug
+//         build (and -DP2P_NAME_FILTER_CHECK, since Linux never defines _DEBUG)
+//         runs the skipped walk and throws on a hit: P3PmsgCurs::Goto.
+//       : ONE WRITER. Msgcore has no heap lock: two threads writing one heap at
+//         once already corrupt it, and the stamp assumes the same rule. READERS
+//         may share a heap, though (a message handle shared across pump
+//         threads), and a read -- Goto's miss walk -- now builds a filter. So
+//         the filter map, and only it, is behind nFilterLock: a spin lock on a
+//         zero-initialised int, taken for a lookup or an insert, never across a
+//         walk.
+//       : A caller that writes raw bytes through GetVBLock() or Msg2Phys is
+//         outside this contract, as it already is for every other invariant of
+//         the heap.
+//
+namespace
+{
+struct NameFilter
+{
+    UINT32              nStamp = 0;
+    UINT32              nUsed  = 0;
+    std::vector<UINT32> aSlot;          // open addressing, 0 = empty, power of two
+
+    bool Has ( UINT32 nHash ) const noexcept
+    {
+      const size_t nMask = aSlot.size() - 1;
+      for ( size_t i = nHash & nMask; ; i = ( i + 1 ) & nMask )
+      {
+        if ( aSlot[i] == nHash ) return true;
+        if ( aSlot[i] == 0 )     return false;
+      }
+    }
+    void Add ( UINT32 nHash )
+    {
+      if ( ( nUsed + 1 ) * 2 > aSlot.size() )
+      {
+        std::vector<UINT32> aOld;
+        aOld.swap ( aSlot );
+        aSlot.assign ( aOld.empty() ? 64 : aOld.size() * 2, 0 );
+        nUsed = 0;
+        for ( UINT32 n : aOld )
+          if ( n ) Put ( n );
+      }
+      Put ( nHash );
+    }
+private:
+    void Put ( UINT32 nHash ) noexcept
+    {
+      const size_t nMask = aSlot.size() - 1;
+      for ( size_t i = nHash & nMask; ; i = ( i + 1 ) & nMask )
+      {
+        if ( aSlot[i] == nHash ) return;
+        if ( aSlot[i] == 0 )     { aSlot[i] = nHash; ++nUsed; return; }
+      }
+    }
+};
+
+class FilterLock
+{
+public:
+    explicit FilterLock ( std::atomic<int> &n ) noexcept : m_n ( n )
+    {
+      while ( m_n.exchange ( 1, std::memory_order_acquire ) != 0 )
+        std::this_thread::yield ( );
+    }
+    ~FilterLock ( ) { m_n.store ( 0, std::memory_order_release ); }
+    FilterLock ( const FilterLock & ) = delete;
+    FilterLock &operator= ( const FilterLock & ) = delete;
+private:
+    std::atomic<int> &m_n;
+};
+
+//  FNV-1a over the ASCII-folded units, never 0 (0 marks an empty slot)
+inline UINT32
+NameFilter_Step ( UINT32 h, unsigned c ) noexcept
+{
+    if ( c >= 'A' && c <= 'Z' )
+      c += 'a' - 'A';
+    return ( h ^ c ) * 16777619u;
+}
+inline UINT32
+NameFilter_Done ( UINT32 h ) noexcept
+{
+    h ^= h >> 15;
+    return h ? h : 1;
+}
+}
+
+struct P2PmsgNameFilters
+{
+    std::unordered_map<VBLaddr, NameFilter> oMap;
+};
+
+static void
+P2PmsgHeap_DropNameFilters ( P2PmsgNameFilters *pFilters ) noexcept
+{
+    delete pFilters;
+}
+
+//
+//  A key's hash, when the filter may judge it: the rules of the M3 sibling
+//  test (GotoKey_Init, MsgCurs.cpp). 0..63 units of 7-bit ASCII without NUL, in
+//  a locale that folds 'I' and 'i' into each other.
+bool
+P2PmsgNameFilter_HashKey ( LPCWSTR lpszKey, UINT32 *pnHash ) noexcept
+{
+    if ( lpszKey == nullptr )
+      lpszKey = L"";
+    if ( std::towlower ( L'I' ) != L'i' || std::towupper ( L'i' ) != L'I' )
+      return false;
+    UINT32 h = 2166136261u;
+    for ( size_t n = 0; lpszKey[n] != 0; ++n )
+    {
+      if ( n >= 63 || (unsigned)lpszKey[n] > 0x7F )
+        return false;
+      h = NameFilter_Step ( h, (unsigned)lpszKey[n] );
+    }
+    *pnHash = NameFilter_Done ( h );
+    return true;
+}
+
+//
+//  The same hash, for a key the caller has already judged and folded
+//  (GotoKey_Init, MsgCurs.cpp): its locale test is the one HashKey makes, and
+//  towlower is not cheap on Linux, so a lookup does not pay it twice.
+UINT32
+P2PmsgNameFilter_HashFolded ( const P2PWCHAR *pwFold, size_t nUnits ) noexcept
+{
+    UINT32 h = 2166136261u;
+    for ( size_t i = 0; i < nUnits; ++i )
+      h = NameFilter_Step ( h, (unsigned)pwFold[i] );
+    return NameFilter_Done ( h );
+}
+
+//
+//  A stored name's hash, when the filter may judge it: unchained, and no unit
+//  that is NUL or above 0x7F (either may compare equal to an ASCII key under
+//  _wcsicmp: refer GotoKey_Differs). Names over 63 units hash too; no key the
+//  filter judges is that long, so they never match one.
+bool
+P2PmsgNameFilter_HashName ( const VBLockName *pName, UINT32 *pnHash ) noexcept
+{
+    if ( pName == nullptr || VBLockName_IsChainedInl ( pName ) )
+      return false;
+    const size_t n = pName->u.vBlob08.nBlobUsed;
+    const unsigned char *pb = reinterpret_cast<const unsigned char*>(pName)
+                            + offsetof ( VBLockName, u.vBlob08.cBlob );
+    UINT32 h = 2166136261u;
+    for ( size_t i = 0; i < n; ++i )
+    {
+      P2PWCHAR wc;
+      std::memcpy ( &wc, pb + i * sizeof(P2PWCHAR), sizeof(wc) );
+      const unsigned c = wc;
+      if ( c == 0 || c > 0x7F )
+        return false;
+      h = NameFilter_Step ( h, c );
+    }
+    *pnHash = NameFilter_Done ( h );
+    return true;
+}
+
+//
+//  Retires every name filter on this heap. Refer the NOTES above.
+void
+P2PmsgHeap_BumpShape ( P2PmsgHANDLE hVBList ) noexcept
+{
+    VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    if ( pHandle == nullptr )
+      return;
+    //  A load and a store, not fetch_add: only the one writer bumps (NOTES), and
+    //  a locked add on every link and rename is what this would otherwise cost.
+    const UINT32 nStamp = pHandle->nShapeStamp.load ( std::memory_order_relaxed ) + 1;
+    pHandle->nShapeStamp.store ( nStamp, std::memory_order_relaxed );
+    //  4 billion bumps bring a stamp round again: forget every filter instead.
+    P2PmsgNameFilters *pFilters = pHandle->pNameFilters.load ( std::memory_order_acquire );
+    if ( nStamp == 0 && pFilters != nullptr )
+    {
+      FilterLock oLock ( pHandle->nFilterLock );
+      pFilters->oMap.clear ( );
+    }
+}
+
+UINT32
+P2PmsgHeap_ShapeStamp ( P2PmsgHANDLE hVBList ) noexcept
+{
+    const VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    return pHandle ? pHandle->nShapeStamp.load ( std::memory_order_relaxed ) : 0;
+}
+
+//  True once any cursor has filed a filter on this heap. Until then Goto skips
+//  the count, the key hash and the Ask on every lookup (F-P4-12 trim).
+bool
+P2PmsgHeap_HasNameFilters ( P2PmsgHANDLE hVBList ) noexcept
+{
+    const VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    return pHandle != nullptr &&
+           pHandle->pNameFilters.load ( std::memory_order_acquire ) != nullptr;
+}
+
+P2PmsgNameFilterAnswer
+P2PmsgHeap_NameFilterAsk ( P2PmsgHANDLE hVBList, VBLaddr aColl, UINT32 nHash ) noexcept
+{
+    VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    if ( pHandle == nullptr || aColl == 0 )
+      return P2PmsgNameFilter_None;
+    //  No filter yet on this heap: no lock either (the pointer is set once,
+    //  under the lock, and freed only with the handle).
+    P2PmsgNameFilters *pFilters = pHandle->pNameFilters.load ( std::memory_order_acquire );
+    if ( pFilters == nullptr )
+      return P2PmsgNameFilter_None;
+    FilterLock oLock ( pHandle->nFilterLock );
+    auto it = pFilters->oMap.find ( aColl );
+    if ( it == pFilters->oMap.end() ||
+         it->second.nStamp != pHandle->nShapeStamp.load ( std::memory_order_relaxed ) )
+      return P2PmsgNameFilter_None;
+    return it->second.Has ( nHash ) ? P2PmsgNameFilter_Maybe : P2PmsgNameFilter_Absent;
+}
+
+//
+//  Files a filter for aColl from the hashes of all its children, stamped with
+//  the heap's current stamp. The caller walked every child to collect them, and
+//  nothing changed the heap since (one writer, and readers do not bump).
+void
+P2PmsgHeap_NameFilterBuild ( P2PmsgHANDLE hVBList, VBLaddr aColl
+                           , const UINT32 *pnHashes, size_t nHashes )
+{
+    VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    if ( pHandle == nullptr || aColl == 0 )
+      return;
+    NameFilter oFilter;
+    for ( size_t i = 0; i < nHashes; ++i )
+      oFilter.Add ( pnHashes[i] );
+    FilterLock oLock ( pHandle->nFilterLock );
+    P2PmsgNameFilters *pFilters = pHandle->pNameFilters.load ( std::memory_order_relaxed );
+    if ( pFilters == nullptr )
+    {
+      pFilters = new P2PmsgNameFilters;
+      pHandle->pNameFilters.store ( pFilters, std::memory_order_release );
+    }
+    oFilter.nStamp = pHandle->nShapeStamp.load ( std::memory_order_relaxed );
+    pFilters->oMap[aColl] = std::move ( oFilter );
+}
+
+//
+//  DeclareItem has just appended lpszKey to aColl, and confirmed the new last
+//  child carries it. If aColl's filter was current before that append
+//  (nStampBefore), it is current again with the key added: the append's own
+//  links are what moved the stamp. Anything else -- no filter, a stale one, a
+//  key it cannot judge -- leaves the filter stale, so the next lookup walks.
+void
+P2PmsgHeap_NameFilterNoteAppend ( P2PmsgHANDLE hVBList, VBLaddr aColl
+                                , UINT32 nStampBefore, LPCWSTR lpszKey )
+{
+    VBListHANDLE *pHandle = static_cast<VBListHANDLE *>(hVBList);
+    if ( pHandle == nullptr || aColl == 0 )
+      return;
+    P2PmsgNameFilters *pFilters = pHandle->pNameFilters.load ( std::memory_order_acquire );
+    if ( pFilters == nullptr )
+      return;                          // the usual case: a small message
+    UINT32 nHash = 0;
+    const bool bJudge = P2PmsgNameFilter_HashKey ( lpszKey, &nHash );
+    FilterLock oLock ( pHandle->nFilterLock );
+    auto it = pFilters->oMap.find ( aColl );
+    if ( it == pFilters->oMap.end() || it->second.nStamp != nStampBefore )
+      return;
+    if ( !bJudge )
+    {
+      pFilters->oMap.erase ( it );     // a child it cannot judge
+      return;
+    }
+    it->second.Add ( nHash );
+    it->second.nStamp = pHandle->nShapeStamp.load ( std::memory_order_relaxed );
 }
 
 //

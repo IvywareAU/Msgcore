@@ -382,6 +382,11 @@ P3PmsgDesc::DeclareItem ( LPCWSTR lpszItemName, const P3PmsgData& oData, BOOL bU
     //  caller's pointer after the append, as this did, could read another name.
     const p2p_wkey oKey ( lpszItemName ? lpszItemName : L"" );
     LPCWSTR lpszKey = oKey;
+    //  B2: the stamp the name filter must still carry for the append below to
+    //  keep it current (refer P2PmsgHeap_NameFilterNoteAppend). Goto only reads.
+    const P2PmsgHANDLE hVBList      = OBJ__hVBList;
+    const VBLaddr      aColl        = OBJ__aVBLock;
+    const UINT32       nStampBefore = P2PmsgHeap_ShapeStamp ( hVBList );
     if ( !m_pCurs->Goto(lpszKey) )
     {
       (*this) += P3PmsgField ( lpszKey, oData );
@@ -396,6 +401,8 @@ P3PmsgDesc::DeclareItem ( LPCWSTR lpszItemName, const P3PmsgData& oData, BOOL bU
       if ( nLast < 0 || !m_pCurs->Goto ( nLast ) ||
            m_pCurs->r_name().c_wcsicmp ( lpszKey ) != 0 )
         m_pCurs->Goto ( lpszKey );     // PushBack appends; not expected
+      else if ( OBJ__hVBList == hVBList && OBJ__aVBLock == aColl )
+        P2PmsgHeap_NameFilterNoteAppend ( hVBList, aColl, nStampBefore, lpszKey );
       return m_pCurs->r_item();
     }
     if ( bUpdate || 
@@ -954,6 +961,7 @@ P2PmsgDesc_LinkinItem(P3PmsgDesc* pDesc,
     auto* field = pDesc->GetField();
     auto& obj   = field->r_Object();
 
+    P2PmsgHeap_BumpShape ( pDesc->r_Object().m_hVBList );   // B2: a name joins
     VBLock* pItemPrev = aItemPrev ? (VBLock*)obj.Msg2Phys(aItemPrev) : nullptr;
     VBLock* pItem     = (VBLock*)obj.Msg2Phys(aItem);
     VBLock* pItemNext = aItemNext ? (VBLock*)obj.Msg2Phys(aItemNext) : nullptr;
@@ -1291,6 +1299,7 @@ VBLaddr
 P2PmsgDesc_UnLinkItem ( P3PmsgDesc *pDesc, VBLockDesc *pVBLockDesc, VBLaddr aItem )
 {
     P3PmsgField *pField      = pDesc -> GetField();
+    P2PmsgHeap_BumpShape ( pField->r_Object().m_hVBList );   // B2: a name leaves
     VBLock      *pVBLockPrev = 0;
     VBLock      *pVBLock     =(VBLock *)pField->r_Object().Msg2Phys(aItem);
     ASSERT(VBLock_IsLinked(pVBLock));
@@ -1332,6 +1341,7 @@ VBLaddr
 P2PmsgDesc_UnLinkItem ( P3PmsgObject *pObject, VBLockDesc *pVBLockDesc, VBLaddr aItem )
 {
     //P3PmsgField *pField      = pDesc -> GetField();
+    P2PmsgHeap_BumpShape ( pObject->m_hVBList );   // B2: a name leaves
     VBLock      *pVBLockPrev = 0;
     VBLock      *pVBLock     =(VBLock *)pObject->Msg2Phys(aItem);
     ASSERT(VBLock_IsLinked(pVBLock));
@@ -1415,6 +1425,7 @@ P2PmsgDesc_Swap ( P3PmsgItem& oItem1, P3PmsgItem& oItem2 )
            ->Throw();
     if ( aVBLock1 == aVBLock2 )
       return;
+    P2PmsgHeap_BumpShape ( oItem1.GetP2PmsgHandle() );   // B2: the shape changes
 
     // Parent Desc(First) housekeeping
     VBLockDesc *pDescParent = VBLock_pDesc ( pParent1 );

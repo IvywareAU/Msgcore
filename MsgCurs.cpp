@@ -25,6 +25,7 @@
 #include "MsgVBHeap.h"
 #include "MsgCurs.h"
 #include <cwctype>                     // std::towlower / towupper (GotoKey_Init)
+#include <vector>                      // GotoFilter_Build
 
 
 #define  OBJ__         m_oObject
@@ -480,6 +481,68 @@ GotoQuick_StillHere ( const P3PmsgObject &oColl, const P3PmsgField *pFoN, int nK
            VBLockItem_GetParent ( uDefs, pItem ) == oColl.m_aVBLock;
 }
 
+//
+//  B2: files a name filter for a collection Goto has just walked end to end
+//  without a hit (refer P2PmsgHeap_BumpShape, MsgVBHeap.cpp).
+//  NOTES: The same chain, bounds and name checks as the walk that preceded it,
+//         and nothing has written to the heap since, so it cannot throw where
+//         that walk did not. A child the filter cannot judge (chained, NUL or
+//         non-ASCII units) means no filter: the walk stays the only answer.
+void
+GotoFilter_Build ( P2PmsgHANDLE hVBList, VBLaddr aColl, VBLock *pColl, UCHAR uVBLockHeap
+                 , const P2PmsgHeapExtent &oExtent, VBLsize nSizeofNameMin
+                 , VBLsize nMaxWalk, bool bDesc )
+{
+    std::vector<UINT32> aHashes;
+    const UCHAR uDefs = pColl->oHdr.uVBLockDefs;
+    VBLaddr aItem = bDesc ? VBLockDesc_GetFirst ( uDefs, VBLock_pDesc(pColl) )
+                          : VBLockAttr_GetFirst ( uDefs, VBLock_pAttr(pColl) );
+    VBLsize nWalked = 0;
+    while ( aItem )
+    {
+      if ( nMaxWalk && ++nWalked > nMaxWalk )
+        return;                        // the walk would have thrown first
+      VBLock *pVBLock = (VBLock *)P2PmsgHeap_Addr2Phys ( hVBList, aItem );
+      UINT32 nHash = 0;
+      if ( !P2PmsgNameFilter_HashName ( P2PmsgHeap_pNameChkIn ( hVBList, uVBLockHeap
+                                                              , oExtent, nSizeofNameMin
+                                                              , pVBLock )
+                                      , &nHash ) )
+        return;
+      aHashes.push_back ( nHash );
+      aItem = VBLockItem_GetNext ( pVBLock->oHdr.uVBLockDefs, VBLock_pItem ( pVBLock ) );
+    }
+    P2PmsgHeap_NameFilterBuild ( hVBList, aColl, aHashes.data(), aHashes.size() );
+}
+
+//  B2: the end of a whole miss walk over a collection past
+//  P2PmsgNameFilter_MinChildren that had no current filter: file one.
+//  NOTES: Out of line, and it works the collection's address and block out
+//         again rather than having Goto carry them across its walk (Goto
+//         carries one flag). Carried, they cost every hit: MSVC kept them live
+//         through the loop and lookup_alt read +5% at 8, 64 and 512 siblings,
+//         per sibling, under a padding control (MSCS p2p_performance F-P4-12).
+//         Nothing writes to the heap during the walk, so the "no filter"
+//         answer Goto had before it still holds here.
+#if defined(_MSC_VER)
+__declspec(noinline)
+#else
+__attribute__((noinline))
+#endif
+void
+GotoFilter_AfterMiss ( const P3PmsgObject &oObj, bool bDesc, P2PmsgHANDLE hVBList
+                     , UCHAR uVBLockHeap
+                     , const P2PmsgHeapExtent &oExtent, VBLsize nSizeofNameMin
+                     , VBLsize nMaxWalk )
+{
+    const VBLaddr aColl = oObj.m_aVBLock;
+    VBLock *const pColl = (VBLock *)oObj.GetVBLock();
+    if ( aColl == 0 || pColl == nullptr )
+      return;
+    GotoFilter_Build ( hVBList, aColl, pColl, uVBLockHeap, oExtent
+                     , nSizeofNameMin, nMaxWalk, bDesc );
+}
+
 //  The cursor's side of the question: which collection, which item, which kind.
 bool
 GotoQuick_Curs ( const P3PmsgObject *pColl, const P3PmsgField *pFoN, int nKind
@@ -607,6 +670,57 @@ P3PmsgCurs::Goto ( LPCWSTR lpszItemName )
       nSizeofNameMin = VBLockName_Sizeof_Min ( uVBLockHeap );
     }
 
+    //  B2: the "definitely new" name filter (refer P2PmsgHeap_BumpShape). A
+    //  current filter without the key's hash says no child has this name, and
+    //  the walk is skipped. No current filter: a miss walk below files one
+    //  (GotoFilter_AfterMiss, which works its inputs out again: nothing of
+    //  this block may stay live across the walk, refer its NOTES). Only for
+    //  containers past P2PmsgNameFilter_MinChildren, where a walk is worth a
+    //  map lookup, and only for keys the M3 test can judge.
+#ifdef P2P_NAME_FILTER_CHECK
+    bool bFilterSkipped = false;
+#endif
+    bool bFilterBuild = false;         // one flag: the only B2 state the walk carries
+    //  A heap no cursor has filed a filter on (most heaps, and every heap whose
+    //  lookups all hit) answers None for every collection: no count, no hash,
+    //  no Ask. The size test moves to after the walk, where m_nItem already
+    //  holds the number of children it passed (F-P4-12: lookup_alt +1.4%
+    //  instructions before this).
+    if ( oKey.bJudge && !P2PmsgHeap_HasNameFilters ( hVBList ) )
+      bFilterBuild = true;
+    else if ( oKey.bJudge )
+    {
+      //  The count straight from the collection's block: GetCount() would find
+      //  that block again through two objects, on every walk of every size.
+      const VBLaddr aColl = m_pP3PmsgDesc ? m_pP3PmsgDesc->m_oObject.m_aVBLock
+                                          : m_pP3PmsgAttr->m_oObject.m_aVBLock;
+      const VBLelem nChildren = m_pP3PmsgDesc ? VBLockDesc_GetItems ( pVBLock->oHdr.uVBLockDefs
+                                                                    , VBLock_pDesc(pVBLock) )
+                                              : VBLockAttr_GetItems ( pVBLock->oHdr.uVBLockDefs
+                                                                    , VBLock_pAttr(pVBLock) );
+      if ( nChildren >= (VBLelem)P2PmsgNameFilter_MinChildren && aColl != 0 )
+      {
+        switch ( P2PmsgHeap_NameFilterAsk ( hVBList, aColl
+                                          , P2PmsgNameFilter_HashFolded ( oKey.wcFold, oKey.nUnits ) ) )
+        {
+        case P2PmsgNameFilter_Absent:
+#ifdef P2P_NAME_FILTER_CHECK
+          bFilterSkipped = true;       // walk anyway, and throw on a hit
+          break;
+#else
+          m_pP3PmsgFoN = 0;
+          m_nItem      = 0;
+          return false;
+#endif
+        case P2PmsgNameFilter_None:
+          bFilterBuild = true;         // if this walk misses: refer the end
+          break;
+        case P2PmsgNameFilter_Maybe:
+          break;
+        }
+      }
+    }
+
     //  BOUND THE SIBLING WALK (F-P6-6). aItem advances along aNext links which,
     //  for a message built from a received image, come straight off the wire. A
     //  forged chain that points back on itself spins here forever -- the
@@ -704,10 +818,34 @@ P3PmsgCurs::Goto ( LPCWSTR lpszItemName )
       ASSERT(m_pP3PmsgFoN!=nullptr);
       //LPCWSTR lpszName = m_pP3PmsgFoN->c_name();
       if ( m_pP3PmsgFoN->r_name().c_wcsicmp(lpszStackName) == 0 )
+      {
+#ifdef P2P_NAME_FILTER_CHECK
+        //  The filter said no child has this name, and here is one: a writer
+        //  that adds a name without bumping the shape stamp. A throw, not an
+        //  ASSERT (tools/ci/check_asserts.ps1); EVERR reports in whichever width
+        //  stderr is in (MSCS p2p_performance F-P4-11a).
+        if ( bFilterSkipped )
+          EVERR->MODULE
+               ->Message(L"NAME-FILTER-MISMATCH: the filter ruled out [%s], which is here"
+                        , lpszStackName )
+               ->Throw();
+#endif
         return true;
+      }
       aItem = VBLockItem_GetNext ( pVBLock->oHdr.uVBLockDefs, pItem, &m_nItem );
       m_pP3PmsgFoN = 0;
     }
+
+    //  A whole miss walk over a container with no current filter: file one,
+    //  in a second pass. Not hashed during the walk above, because most walks
+    //  HIT, and a hit would throw the hashes away (measured: lookup_alt +30%
+    //  at 64 and 512 siblings when it did). A miss is where the filter pays.
+    //  m_nItem: one per child the walk passed (VBLockItem_GetNext counts), so
+    //  after a whole miss it is the collection's count.
+    if ( bFilterBuild && m_nItem >= (VBLelem)P2PmsgNameFilter_MinChildren )
+      GotoFilter_AfterMiss ( m_pP3PmsgDesc ? m_pP3PmsgDesc->m_oObject : m_pP3PmsgAttr->m_oObject
+                           , m_pP3PmsgDesc != nullptr, hVBList, uVBLockHeap, oExtent
+                           , nSizeofNameMin, nMaxWalk );
 
     // Tidy up, and
     m_nItem = 0;

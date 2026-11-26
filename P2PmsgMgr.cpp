@@ -125,6 +125,7 @@ P2PmsgMgr::Attacheap ( LPCWSTR lpszMsgName, const P3PmsgData& oData )
     //        a chunk directly from the P2PmsgHeap since its yet to be attached
     //        to the P2PmsgMgr
     ASSERT(oData.VerifyContainment());
+    P2PmsgHeap_BumpShape ( m_hMgr );   // B2: a new root and its name
     UCHAR      uVBLaddrnn  = P2PmsgHeap_Addrnn ( m_hMgr );
     P3PmsgItem oRootItem ( lpszMsgName, oData );     // Dummy root for P2PmsgMgr
     VBLsize    nSizeofRoot = P2PmsgField_SizeofItem ( uVBLaddrnn, oRootItem, TRUE );

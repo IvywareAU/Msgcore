@@ -2085,6 +2085,7 @@ P3PmsgName_ResizeName ( P3PmsgObject *pObject, size_t nSizeof )
 {
     // Garbage collection for existing
     //VBLock     *pVBLock = pObject -> GetVBLock();
+    P2PmsgHeap_BumpShape ( pObject->m_hVBList );   // B2: name storage moves
     VBLockName *pName0  = P3PmsgName_GetVBLockName ( pObject, false );
     UCHAR       uAttr   = pName0 -> uVBLockAttr; 
     UCHAR       uVBLock = pObject-> m_uVBLock;
@@ -2301,6 +2302,7 @@ P3PmsgName::c_name ( LPCWSTR lpszName, size_t nSize )
             -> Message("Attempted buffer overrun nSize(%i) > 64"
                       , nSize )
             -> Throw();
+    P2PmsgHeap_BumpShape ( m_pObject->m_hVBList );   // B2: a sibling may now match
     UCHAR       uVBLock = m_pObject->m_uVBLock;
     VBLockName *pName   = P3PmsgName_GetVBLockName(m_pObject,true);
     const P2PWCHAR *lpszName1 = &pName->u.vBlob08.cBlob;   // ptr into 16-bit store (§4.2)
@@ -3143,6 +3145,7 @@ P3PmsgObject::PrivatiseInlineChain ( )
     if ( m_hVBList == 0                           ||
          m_aVBLock != (VBLaddr)&m_oVBLock[0]         )
       return;                          // Nothing inline, or nowhere to put it
+    P2PmsgHeap_BumpShape ( m_hVBList );   // B2: name storage moves
 
     if ( VBLock_IsData ( (VBLock *)&m_oVBLock[0] ) )
     {
@@ -3216,6 +3219,7 @@ P3PmsgObject::ReleaseInlineChain ( )
          m_xVBLock != 0                           ||
          m_aVBLock != (VBLaddr)&m_oVBLock[0]         )
       return;                          // Not ours to give back
+    P2PmsgHeap_BumpShape ( m_hVBList );   // B2: name storage moves
 
     if ( VBLock_IsData ( (VBLock *)&m_oVBLock[0] ) )
     {
@@ -4714,6 +4718,7 @@ P2PmsgNode_Swap ( P3PmsgField& oField1, P3PmsgField& oField2 )
            ->Throw();
     if ( aVBLock1 == aVBLock2 )
       return;
+    P2PmsgHeap_BumpShape ( oField1.GetP2PmsgHandle() );   // B2: the shape changes
 
     // Parent Node(First) housekeeping
 ASSERT(0);
@@ -7192,6 +7197,7 @@ P2PmsgList_LinkinItem ( P3PmsgList *pList
     VBLock     *pItemNext   = (VBLock *)OBJ__Msg2Phys(aItemNext);
     VBLock     *pVBLock     =           OBJ__VBLock;
     VBLockList *pVBLockList =           VBLock_pList ( ptrVBLOCK(pList->r_Object()) );
+    P2PmsgHeap_BumpShape ( m_oObject.m_hVBList );   // B2: the shape changes
 
     // Observe addressing model
     if ( (pVBLock->oHdr.uVBLockDefs&VBLock_AddrMask) == VBLock_Addr08 )
@@ -7281,6 +7287,7 @@ VBLaddr
 P2PmsgList_UnLinkItem ( P3PmsgList *pList, VBLockList *pVBLockList, VBLaddr aItem )
 {
     P3PmsgObject& m_oObject = (P3PmsgObject&)pList -> r_Object();
+    P2PmsgHeap_BumpShape ( m_oObject.m_hVBList );   // B2: the shape changes
     VBLock     *pVBLockPrev = 0;
     VBLock     *pVBLock     = (VBLock *)OBJ__Msg2Phys(aItem);
     VBLockItem *pItem       = VBLock_pItem ( pVBLock );
@@ -7546,6 +7553,7 @@ P2PmsgField_DropData   ( P3PmsgField *pField )
 void
 P2PmsgField_DropName   ( P3PmsgField *pField )
 {
+   P2PmsgHeap_BumpShape ( pField->r_Object().m_hVBList );   // B2: a name changes
    VBLockName *pName = P2PmsgObject_pName ( pField->r_Object(), false );
    //VBLockName *pName = pField -> GetVBLockName ( false ); //TODO:LJM deprecated
    //UCHAR       uAttr = pName  -> uVBLockAttr; 

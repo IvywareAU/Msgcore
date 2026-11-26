@@ -7692,8 +7692,138 @@ static void Test_SkeletonFastPath()
     }
 }
 
+// ---------------------------------------------------------------------------
+// B2 (3.8.0): the "definitely new" name filter (P2PmsgHeap_BumpShape,
+// MsgVBHeap.cpp). A filter that missed a change makes DeclareItem append a
+// DUPLICATE (or, with the check compiled in, throw NAME-FILTER-MISMATCH). Each
+// case builds a container past the 32-child threshold, changes it by one
+// route, declares the affected name and requires one child of it. The same
+// cases are in MscsUnitTests/MsgcoreSuite.cpp (Test_NameFilter).
+// ---------------------------------------------------------------------------
+namespace
+{
+template<class Coll>
+int NfCount ( Coll& oColl, LPCWSTR lpszName )
+{
+    int n = 0;
+    for ( int i = 0; oColl.r_Curs().Goto(i); ++i )
+      if ( oColl.r_Curs().r_item().r_name().c_wcsicmp(lpszName) == 0 )
+        ++n;
+    return n;
+}
+template<class Fn>
+bool NfRuns ( Fn fn )
+{
+    try { fn(); return true; }
+    catch ( P2Pevent *pEVT )
+    {
+        if ( pEVT )
+        {
+            const CString strMsg = pEVT->GetMessage();
+            printf ( "      threw: %ls\n", (LPCWSTR)strMsg );
+            pEVT->Cancel(false);
+        }
+        return false;
+    }
+    catch ( ... ) { printf ( "      threw: (not a P2Pevent)\n" ); return false; }
+}
+std::wstring NfName ( int i ) { wchar_t sz[16]; swprintf ( sz, 16, L"n%03d", i ); return sz; }
+template<class Coll>
+void NfFill ( Coll& oColl, int nCount = 40 )
+{
+    for ( int i = 0; i < nCount; ++i )
+      oColl.DeclareItem ( NfName(i).c_str(), P3PmsgData(i), FALSE );
+}
+}
+
+static void Test_NameFilter()
+{
+    TF_CASE("name filter: a build declares each name once, and redeclares find it")
+    {
+        P2PmsgMgr m; m.r_name() = L"S";
+        NfFill ( m.r_Desc(), 100 );
+        bool bOk = NfRuns ( [&]{
+            for ( int i = 0; i < 100; ++i )
+              m.r_Desc().DeclareItem ( NfName(i).c_str(), P3PmsgData(1000 + i), TRUE );
+        } );
+        TF_CHECK ( bOk );
+        TF_CHECK_EQ ( (int)m.r_Desc().GetCount(), 100 );
+        TF_CHECK_EQ ( m.SelectItem(L"N099").c_int(), 1099 );
+        TF_CHECK ( !m.Exists(L"absent") );
+    }
+
+    TF_CASE("name filter: a sibling renamed to a new name is found (c_name)")
+    {
+        P2PmsgMgr m; m.r_name() = L"S";
+        NfFill ( m.r_Desc() );
+        m.SelectItem(L"n007").r_name() = L"renamed";
+        bool bOk = NfRuns ( [&]{ m.r_Desc().DeclareItem ( L"renamed", P3PmsgData(77), TRUE ); } );
+        TF_CHECK ( bOk );
+        TF_CHECK_EQ ( NfCount ( m.r_Desc(), L"renamed" ), 1 );
+        TF_CHECK_EQ ( (int)m.r_Desc().GetCount(), 40 );
+    }
+
+    TF_CASE("name filter: a sibling renamed past its storage (a chained name) is found")
+    {
+        P2PmsgMgr m; m.r_name() = L"S";
+        NfFill ( m.r_Desc() );
+        const wchar_t *pszLong = L"a-much-longer-name-than-the-block-was-laid-out-for";
+        m.SelectItem(L"n011").r_name() = pszLong;
+        m.r_Desc().DeclareItem ( L"fresh", P3PmsgData(1), FALSE );
+        bool bOk = NfRuns ( [&]{ m.r_Desc().DeclareItem ( pszLong, P3PmsgData(11), TRUE ); } );
+        TF_CHECK ( bOk );
+        TF_CHECK_EQ ( NfCount ( m.r_Desc(), pszLong ), 1 );
+    }
+
+    TF_CASE("name filter: children appended without DeclareItem are found (Desc, Attr)")
+    {
+        P2PmsgMgr m; m.r_name() = L"S";
+        NfFill ( m.r_Desc() );
+        NfFill ( m.r_Attr() );
+        m.r_Desc() += P3PmsgField ( L"pushed", P3PmsgData(5) );
+        m.r_Attr() += P3PmsgField ( L"pushed", P3PmsgData(5) );
+        bool bOk = NfRuns ( [&]{
+            m.r_Desc().DeclareItem ( L"pushed", P3PmsgData(55), TRUE );
+            m.r_Attr().DeclareItem ( L"pushed", P3PmsgData(55), true );
+        } );
+        TF_CHECK ( bOk );
+        TF_CHECK_EQ ( NfCount ( m.r_Desc(), L"pushed" ), 1 );
+        TF_CHECK_EQ ( NfCount ( m.r_Attr(), L"pushed" ), 1 );
+    }
+
+    TF_CASE("name filter: a received message's children are declared once")
+    {
+        std::vector<char> aWire;
+        {
+            P3PmsgBSTR oSent ( VBLock_Addr32, 4096 );
+            oSent.InitItem ( VBLockBSTR_MSG, P3PmsgData ( (int)0 ) );
+            NfFill ( oSent.r_item(VBLockBSTR_MSG).r_Desc(), 64 );
+            oSent.PrepareP2Piomage ( ~(DWORD)0 );
+            const char *p = (const char *)oSent.P2Piomage ( );
+            aWire.assign ( p, p + oSent.P2PiomageSize ( ) );
+            oSent.ReleaseP2Piomage ( );
+        }
+        P3PmsgBSTR oRecv ( *(const VBListIOmage *)aWire.data(), (VBLsize)aWire.size() );
+        P3PmsgItem &oRoot = oRecv.r_item ( VBLockBSTR_MSG );
+        TF_CHECK ( !oRoot.Exists(L"absent") );
+        oRoot.SelectItem(L"n040").r_name() = L"moved";
+        oRoot.r_Desc() += P3PmsgField ( L"added", P3PmsgData(1) );
+        bool bOk = NfRuns ( [&]{
+            for ( int i = 0; i < 64; ++i )
+              oRoot.r_Desc().DeclareItem ( NfName(i).c_str(), P3PmsgData(i), TRUE );
+            oRoot.r_Desc().DeclareItem ( L"moved", P3PmsgData(40), TRUE );
+            oRoot.r_Desc().DeclareItem ( L"added", P3PmsgData(2), TRUE );
+        } );
+        TF_CHECK ( bOk );
+        TF_CHECK_EQ ( (int)oRoot.r_Desc().GetCount(), 66 );
+        TF_CHECK_EQ ( NfCount ( oRoot.r_Desc(), L"moved" ), 1 );
+    }
+}
+
 void RunMsgcoreSuite()
 {
+    if ( !NfRuns ( [] { Test_NameFilter(); } ) )
+      tf_fail ( __FILE__, __LINE__, "name filter: a lookup threw outside its check" );
     Test_Data_TypedValues();
     Test_Data_CopySemantics();
     Test_SafePtr_CopySemantics();

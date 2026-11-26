@@ -391,3 +391,37 @@ UINT32
 P2PmsgHeap_InodeStamp ( P2PmsgHANDLE hVBHeap );
 VBLaddr
 P2PmsgHeap_InodeGeneration ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLock ) noexcept;
+//  The shape stamp and the "definitely new" name filters (p2p_performance B2).
+//  Runtime-only handle state; not persisted; not exported. Refer
+//  P2PmsgHeap_BumpShape in MsgVBHeap.cpp for the rule every writer follows.
+//  P2P_NAME_FILTER_CHECK: the Debug cross-check, for builds without _DEBUG.
+#if defined(_DEBUG) && !defined(P2P_NAME_FILTER_CHECK)
+#define P2P_NAME_FILTER_CHECK 1
+#endif
+const unsigned P2PmsgNameFilter_MinChildren = 32;   // smaller containers just walk
+enum P2PmsgNameFilterAnswer
+{
+    P2PmsgNameFilter_None,             // no current filter: walk
+    P2PmsgNameFilter_Maybe,            // the hash is there: walk
+    P2PmsgNameFilter_Absent            // no child of that name: no walk needed
+};
+void
+P2PmsgHeap_BumpShape ( P2PmsgHANDLE hVBHeap ) noexcept;
+UINT32
+P2PmsgHeap_ShapeStamp ( P2PmsgHANDLE hVBHeap ) noexcept;
+bool
+P2PmsgNameFilter_HashKey ( LPCWSTR lpszKey, UINT32 *pnHash ) noexcept;
+UINT32
+P2PmsgNameFilter_HashFolded ( const P2PWCHAR *pwFold, size_t nUnits ) noexcept;
+bool
+P2PmsgNameFilter_HashName ( const VBLockName *pName, UINT32 *pnHash ) noexcept;
+P2PmsgNameFilterAnswer
+P2PmsgHeap_NameFilterAsk ( P2PmsgHANDLE hVBHeap, VBLaddr aColl, UINT32 nHash ) noexcept;
+bool
+P2PmsgHeap_HasNameFilters ( P2PmsgHANDLE hVBHeap ) noexcept;
+void
+P2PmsgHeap_NameFilterBuild ( P2PmsgHANDLE hVBHeap, VBLaddr aColl
+                           , const UINT32 *pnHashes, size_t nHashes );
+void
+P2PmsgHeap_NameFilterNoteAppend ( P2PmsgHANDLE hVBHeap, VBLaddr aColl
+                                , UINT32 nStampBefore, LPCWSTR lpszKey );

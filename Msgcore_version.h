@@ -46,6 +46,37 @@
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
 //
+//  3.8.0.0, a MINOR on 3.7.1. Stands alone: no Targetcore release is needed. The
+//  flat ABI, the mangled C++ exports, every class layout, the image format and
+//  saved files are unchanged; nothing new is exported.
+//
+//  THE "DEFINITELY NEW" NAME FILTER (MSCS performance log F-P4-12, plan M3
+//  option A). Building a message was quadratic: each DeclareItem first proves
+//  the name is new by walking every sibling, so n fields cost n^2/2 compares.
+//  A heap now keeps, per collection of 32 or more children, a small hash set of
+//  its children's names. A lookup whose key is not in a CURRENT set returns
+//  "absent" without walking. A miss walk over a collection with no current set
+//  files one; DeclareItem keeps it current across its own append.
+//    - Currency is a heap-wide shape stamp, bumped by everything that could
+//      add or change a name (links, renames, name resizes, swaps, frees,
+//      inline-chain moves, Attacheap). A set is believed only while it carries
+//      the heap's current stamp: any bump retires every set on the heap, and
+//      a retired set only costs the walk it would have skipped.
+//    - Only keys the M3 sibling test can judge (0..63 units of 7-bit ASCII, no
+//      NUL, in a locale that folds I/i) are filtered; any child it cannot
+//      judge (chained, non-ASCII) means no set for that collection.
+//    - Runtime-only: the sets live in the heap handle, never in the image.
+//    - A Debug build (or -DP2P_NAME_FILTER_CHECK) walks anyway after an
+//      "absent" and throws NAME-FILTER-MISMATCH if the name is there.
+//  Measured (median of 7 interleaved rounds): build_flat 512 fields -69%
+//  Windows / -74% Linux, now linear in n; lookup_miss 512 -96%. At 64 fields
+//  or fewer the added work is +0.3..+0.7% retired instructions (xperf PMC,
+//  layout-independent); wall-clock there moves with code layout on the
+//  reference i7-8700 (JCC erratum), not with this change.
+//  MINOR: a new capability with an observable cost profile, no surface change.
+//
+//  BELOW IS THE 3.7.1 RATIONALE.
+//
 //  3.7.1.0, a PATCH on 3.7.0, paired with Targetcore 3.10.1. The flat ABI, the
 //  mangled C++ exports, every class layout, the image format and saved files are
 //  unchanged.
@@ -694,23 +725,23 @@
 //  promises - but a C++ consumer pinned to 3.0.0 has to recompile, and that is
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
-#define MSGCORE_VERSION_MINOR  7
-#define MSGCORE_VERSION_PATCH  1
+#define MSGCORE_VERSION_MINOR  8
+#define MSGCORE_VERSION_PATCH  0
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,7,1,0
+#define MSGCORE_VERSION_COMMAS 3,8,0,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.7.1.0"
+#define MSGCORE_VERSION_STRING "3.8.0.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
 //  0x03070000 is 3.7.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03070100
+#define MSGCORE_VERSION_HEX    0x03080000
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

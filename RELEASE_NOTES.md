@@ -3,6 +3,27 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.8.0
+
+A minor release. It stands alone: no Targetcore release goes with it. The flat C API, the C++
+exports, every class layout, the image format and saved files are unchanged.
+
+- **Building a large message is no longer quadratic.** Adding a field first proves its name is
+  new, and that used to mean comparing it with every sibling, so a message of *n* fields cost
+  about *n²/2* comparisons. A collection of 32 or more children now keeps a small runtime set of
+  its children's names. A name the set does not hold is known to be new without a walk, and the
+  set is kept current as fields are added. Building 512 fields is about 69% faster on Windows
+  and 74% faster on Linux, and the cost per field no longer grows with the message. Looking up
+  a name that is absent from 512 siblings is about 96% faster.
+- **Nothing changes for small messages.** At 64 fields or fewer the added work is under 1% of
+  instructions retired.
+- **The set is never trusted past a change.** Every operation that could add or change a name
+  retires the sets on that heap, so a lookup falls back to the walk rather than giving a wrong
+  answer. Names the set cannot judge (non-ASCII, chained long names) are always walked. A Debug
+  build, or one with `-DP2P_NAME_FILTER_CHECK`, walks anyway after every "absent" and throws
+  `NAME-FILTER-MISMATCH` if the name was there. The sets live only in memory, never in a
+  message image or a saved file.
+
 ## 3.7.1
 
 A patch release, paired with Targetcore 3.10.1. The flat C API, the C++ exports, every class
