@@ -3094,7 +3094,9 @@ static void Test_HandleOrCopy()
         P3PmsgObject oHeld = oSrc.r_Object();
 
         //  The one that used to fail: the copy addressed oSrc's inline array.
-        TF_CHECK(oHeld.m_aVBLock != (VBLaddr)&oSrc.r_Object().m_oVBLock[0]);
+        //  (Since 4.0.0 the inline block is allocated on demand; IsInlineAddr
+        //  is the same question asked of wherever it lives.)
+        TF_CHECK(!oSrc.r_Object().IsInlineAddr(oHeld.m_aVBLock));
         TF_CHECK(oHeld.m_aVBLock != 0);
         TF_CHECK(oHeld.m_hVBList == oSrc.r_Object().m_hVBList);
 
@@ -3114,7 +3116,7 @@ static void Test_HandleOrCopy()
         P3PmsgObject oHeld;
         oHeld = oSrc.r_Object();
 
-        TF_CHECK(oHeld.m_aVBLock != (VBLaddr)&oSrc.r_Object().m_oVBLock[0]);
+        TF_CHECK(!oSrc.r_Object().IsInlineAddr(oHeld.m_aVBLock));
         TF_CHECK(oHeld.m_hVBList == oSrc.r_Object().m_hVBList);
 
         P3PmsgField oHnd(oHeld);
