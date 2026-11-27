@@ -216,7 +216,7 @@ P2PmsgHeap_Addr2PhysChk ( P2PmsgHANDLE hVBHeap, VBLaddr aVBLaddr, VBLsize nSpan 
 // VBLock_pData and its siblings compute from a block's own header: there is no
 // offset to check at the door there, only a result that may already have left
 // the image. Answers rather than throws, because a block held inline in
-// P3PmsgObject::m_oVBLock is legitimately outside one. TRUE for SYSTEM heaps.
+// P3PmsgObject::m_pInline (the inline block) is legitimately outside one. TRUE for SYSTEM heaps.
 BOOL
 P2PmsgHeap_IsPhysSpan ( P2PmsgHANDLE hVBHeap, const void *pv, VBLsize nSpan ) noexcept;
 // What IsPhysSpan bounds against, fetched once. A caller about to test several

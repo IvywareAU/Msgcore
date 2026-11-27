@@ -126,7 +126,7 @@ void
 P3PmsgList::RenderThisSafe ( )
 {
     //m_uVBLock  = VBLock_Addr32;
-    VBLock& oVBLock = *(VBLock *)m_oObject.m_oVBLock;       // Delegate field object
+    VBLock& oVBLock = *(VBLock *)m_oObject.InlineVBLock ( );       // Delegate field object
     ZeroMemory ( &oVBLock, sizeof(oVBLock) );
     m_nCurs = 0;
     ZeroMemory (  m_pP3PmsgData, sizeof(m_pP3PmsgData) );

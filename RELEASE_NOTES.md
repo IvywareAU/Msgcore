@@ -3,6 +3,36 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 4.0.0
+
+A major release. It stands alone: no Targetcore release goes with it. **Rebuild every C++
+consumer against the new headers**: the C++ classes changed size. The flat C API is unchanged,
+and so are the message image format and saved files, so a program that uses only `Msgcore_c.h`,
+and every message on the wire or on disk, is unaffected.
+
+- **Field handles and cursors are far smaller.** A field handle went from 1,856 bytes to 200 and
+  a cursor from 5,736 to 768 (x64). They used to carry fixed buffers they seldom used. Now:
+  - the text buffers behind `ToString` and `ToStringDefs` are allocated on first use;
+  - an item's 704-byte inline block is allocated only when something is rendered into it, and
+    freed blocks are kept in a small per-thread cache (at most about 11 KB a thread);
+  - a plain value (an int, a double) no longer allocates a separate object;
+  - a cursor no longer builds its field, list and vector members until it moves onto one;
+  - walking a vector reuses its element wrapper.
+- **It is faster at every layer.** Against 3.8.1:
+  - walking a vector is 43% to 57% faster;
+  - a lookup that misses is 4% to 23% faster;
+  - building a nested message is 2% to 14% faster;
+  - the MsgFacade layers are 3% to 5% faster on average (C++, C API, facade and COM alike);
+  - Targetcore's one-way latency is 3% to 6% lower and its throughput 7% to 13% higher, from
+    64-byte to 32 KB messages.
+  - Allocations per operation fell wherever there were any: building a 512-field message went
+    from 539 to 25.
+  - A few cheap operations (under 3 µs) are 3% to 4% slower on Linux.
+- **Copying a cursor no longer copies its field, list and vector members.** The copy starts with
+  them empty and builds them on its next move, which is what a moved cursor did anyway.
+- **Three new C++ exports**, all on `P3PmsgObject`: `InlineVBLock`, `IsInlineAddr` and
+  `kInlineSize`. Nothing was removed.
+
 ## 3.8.1
 
 A patch release that changes only how Msgcore is compiled on Windows. It stands alone: no

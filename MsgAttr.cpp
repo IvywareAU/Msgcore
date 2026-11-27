@@ -71,7 +71,7 @@ P2PmsgObject_pAttr ( const P3PmsgObject& oObject );
 P3PmsgAttr::P3PmsgAttr ( )
 {
     //v TODO:LJM This block added 5/12/2014 to handle isolated P3PmsgAttr's
-    VBLock& oVBLock = *(VBLock *)m_oObject.m_oVBLock;       // Delegate object
+    VBLock& oVBLock = *(VBLock *)m_oObject.InlineVBLock ( );       // Delegate object
     ZeroMemory ( &oVBLock, sizeof(oVBLock) );
     VBLock_Init( &oVBLock
                , OBJ__uVBLock|VBLock_Attr|VBLock_Linked|VBLock_Alloc, sizeof(oVBLock) );

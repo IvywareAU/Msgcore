@@ -480,6 +480,7 @@
 ?InitData@P3PmsgBSTR@@QAEAAVP3PmsgField@@AAVP3PmsgData@@@Z
 ?InitEvent@P2Pevent@@QAEPAV1@W4P2Pevent_e@@@Z
 ?InitItem@P3PmsgBSTR@@QAEAAVP3PmsgField@@EABVP3PmsgData@@@Z
+?InlineVBLock@P3PmsgObject@@QAEPAIXZ
 ?InsertAt@P3PmsgVect@@QAEAAVP3PmsgField@@HABV2@@Z
 ?IOmage_Sizeof@@YAIPBUVBListIOmage@@@Z
 ?IsAt@P3PmsgCurs@@QAE_NPB_W@Z
@@ -510,6 +511,7 @@
 ?IsField@P3PmsgVect@@QAE_NH@Z
 ?IsInline@P3PmsgField@@UBE_NXZ
 ?IsInline@P3PmsgObject@@QBE_NXZ
+?IsInlineAddr@P3PmsgObject@@QBE_NI@Z
 ?IsItem@P3PmsgCurs@@QAE_NXZ
 ?IsList@P2PmsgRecurs@@QAE_NXZ
 ?IsList@P3PmsgCurs@@QAE_NXZ
@@ -534,6 +536,7 @@
 ?IsVoid@P3PmsgField@@UBE_NXZ
 ?IsVoid@P3PmsgObject@@QBE_NXZ
 ?Item@P3PmsgCurs@@QAEHXZ
+?kInlineSize@P3PmsgObject@@2IB
 ?Load@P2PmsgMgr@@QAEHPB_W@Z
 ?LoadConfigFile@P2Pevent@@SA_NPB_W@Z
 ?LogFilePath@P2Pevent@@SAPB_WXZ

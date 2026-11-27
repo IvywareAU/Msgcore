@@ -84,6 +84,184 @@ class Msgcore_EXT P2PmsgCheckMemory
 //#define DeclareNode_T(str,data)  DeclareNode(L##str,data)
 
 
+///////////////////////////////////////////////////////////////////////////////
+//  P2PmsgObject containers and definitions
+//  NOTES: Base class for VBLock objects
+
+#define ROBJ r_Object()
+#define ObjectCheckID_DataSizeGT9 1
+
+class Msgcore_EXT P3PmsgObject
+{
+    // Constructors and destructers
+    public:
+        P3PmsgObject ( ) noexcept;
+
+        P3PmsgObject ( UCHAR uVBLock );
+
+        P3PmsgObject ( const P3PmsgObject& rhs );
+      virtual
+       ~P3PmsgObject ( );
+
+      virtual void
+        Nullify ( );
+      void
+        ConnectVBLock ( );
+      void
+        Connect ( const P3PmsgObject& rhs );
+      void
+        Connectx ( P2PmsgHANDLE hVBList, VBLaddr xVBLock, VBLsize nVBLockSize );
+      void
+        Connecta ( P2PmsgHANDLE hVBList, VBLaddr aVBLock, VBLsize nVBLockSize );
+
+    // Operators
+    public:
+      P3PmsgObject&
+        operator = ( const P3PmsgObject& rhs );
+      bool
+        operator == ( const P3PmsgObject& rhs ) const;
+      bool
+        operator != ( const P3PmsgObject& rhs ) const;
+
+      //  `if ( oObject )` and nothing else.  EXPLICIT because the implicit
+      //  form made `oA == oB` compile as `(int)(bool)oA == (int)(bool)oB` --
+      //  "are we both non-void" wearing the spelling of "are we the same
+      //  item".  Refer P3PmsgField::operator == for the measurement.
+      explicit
+        operator bool ( ) const noexcept;
+
+    // Memory management
+    // NOTES: Referenced in VBLock units
+    public:
+      VBLaddr
+        AllocVBLock ( UCHAR uVBLockType, VBLsize nItemSize, bool bZero = true );
+      VBLaddr
+        RehomeInlineItem ( );
+
+      //  Give this object its own copy of whatever its inline VALUE block
+      //  points at.  memcpy duplicates the block; a value that has outgrown
+      //  the block keeps its payload elsewhere and only chains to it, and
+      //  copying the chain is not copying the value.  Refer the implementation.
+      void
+        PrivatiseInlineChain ( );
+
+      //  Give back what this object's inline VALUE block points at.  The other
+      //  half of PrivatiseInlineChain: that one allocates the copy's payload
+      //  block on the heap the two objects SHARE, and a shared heap does not go
+      //  away when the copy does.  Refer the implementation.
+      void
+        ReleaseInlineChain ( );
+      VBLaddr
+        Free ( VBLaddr aVBLockAddr );
+      void*
+        Msg2Phys ( VBLaddr aVBLockAddr ) const;
+      VBLsize
+        Msg2Size ( VBLaddr aVBLockAddr ) const;
+      VBLsize
+        GetVBLockSize ( ) const;
+
+    // Addressing and allocations
+    public:
+      virtual P2Pos
+        GetP2Pos ( ) const noexcept;
+      virtual char*
+        GetVBLock  ( ) const;
+      virtual VBLaddr
+        GetVBLocknn( ) const;
+      virtual P3PmsgObject
+        GetParent ( ) const;
+      virtual P3PmsgObject
+        GetParentItem ( ) const;
+      virtual P3PmsgObject
+        GetObject ( P2Pos nP2Pos ) const;
+
+    // Troubleshooting
+    public:
+      virtual void
+        AssertValid ( ) const;
+      BOOL
+        AssertCommon ( const P3PmsgObject& rhs ) const;
+      BOOL
+        AssertValidAddr ( VBLaddr aVBLockAddr );
+      BOOL
+        AssertCondition ( int nConditionId ) const;
+    /*virtual void
+        Print ( FILE *fd, int iDepthOS = 0  );*/
+
+    // Properties
+    public:
+      bool
+        IsEmpty ( ) const noexcept { return m_nVBLockSize==0 ? true : false; }
+      bool
+        IsVoid ( ) const noexcept;
+
+      //  Is the item INSIDE me, or on a heap where others can name it?
+      //  That, and not "is there a heap", is what decides whether a write
+      //  through this object can be seen anywhere else.  Refer the
+      //  implementation for what it does not settle.
+      bool
+        IsInline ( ) const noexcept;
+
+      //  Can anything other than me see a write through me?  TRUE is a
+      //  guarantee that nothing can; FALSE says only that the question is
+      //  open.  That is IsInline's guarantee widened to cover the storage
+      //  rather than the block -- refer the implementation for the row it
+      //  covers and the one it does not.
+      bool
+        IsSole ( ) const noexcept;
+      bool
+        IsData ( ) const;
+      bool
+        IsName ( ) const;
+      bool
+        IsField ( ) const;
+      //bool
+      //  IsNode ( ) const;
+      bool
+        IsList ( ) const;
+      bool
+        IsVect ( ) const;
+      bool
+        IsAttr ( ) const;
+      bool
+        IsDesc ( ) const;
+      bool
+        IsStck ( ) const;
+      bool
+        IsRoot ( ) const;
+      BOOL
+        IsVBLaddrnn ( UCHAR uVBLock ) const noexcept;
+      BOOL
+        IsContainedVBLump ( void *pVBLaddr, VBLsize nSizeofVBLump = 0 ) const noexcept;
+      BOOL
+        HasParent ( ) const;
+
+    // Attributes
+    public:
+      //  THE INLINE ITEM BLOCK (p2p_performance M4). kInlineSize bytes, owned,
+      //  allocated zeroed on first use by InlineVBLock(); null for an object
+      //  that has only ever named heap blocks -- every handle a collection or
+      //  a cursor connects. It was an inline VBLaddr[88]: 704 B in every
+      //  object, zeroed on every construction, three times in each cursor.
+      //  It cannot be smaller: a standalone Vect renders a VBLockVect (525 B)
+      //  in it. Test an address against it with IsInlineAddr, never by
+      //  comparing with m_pInline, which is 0 -- a valid "no block" -- when
+      //  absent.
+      static constexpr VBLsize kInlineSize = 88 * sizeof(VBLaddr);
+      VBLaddr*
+        InlineVBLock ( );
+      bool
+        IsInlineAddr ( VBLaddr aVBLockAddr ) const noexcept
+        { return m_pInline != nullptr && aVBLockAddr == (VBLaddr)m_pInline; }
+
+      P2PmsgHANDLE  m_hVBList{0};
+      VBLaddr      *m_pInline{nullptr};
+      VBLaddr       m_xVBLock{0};
+      VBLaddr       m_aVBLock{0};
+      VBLsize       m_nVBLockSize{0};
+      UCHAR         m_uVBLock{VBLock_Addrxx};
+};
+
 class P3PmsgField;
 class P3PmsgObject;
 class Msgcore_EXT P3PmsgData
@@ -356,9 +534,15 @@ class Msgcore_EXT P3PmsgData
     private:
       mutable
       P3PmsgObject *m_pObject{nullptr};
+      //  THE STANDALONE CELL'S OBJECT, embedded (p2p_performance M4): it was a
+      //  new P3PmsgObject per scalar -- 76% of the allocations building a
+      //  message makes. Void, and unused, when this is a P3PmsgField's data
+      //  (m_pObject then names the field's own object).
+      P3PmsgObject  m_oStandalone;
+      //  ToString / ToStringDefs scratch: 2 x 256 units, allocated on first
+      //  use (p2p_performance M4; was two inline arrays, 1 KB per handle).
       mutable
-      WCHAR         m_szToString[256];
-      WCHAR         m_szToStrDef[256];
+      WCHAR        *m_pszToStr{nullptr};
       bool          m_bDataDirty{false};
 };
 //WCHAR
@@ -492,167 +676,6 @@ class Msgcore_EXT P3PmsgName
       bool          m_bNameDirty{false};
 };
 
-///////////////////////////////////////////////////////////////////////////////
-//  P2PmsgObject containers and definitions
-//  NOTES: Base class for VBLock objects
-
-#define ROBJ r_Object()
-#define ObjectCheckID_DataSizeGT9 1
-
-class Msgcore_EXT P3PmsgObject
-{
-    // Constructors and destructers
-    public:
-        P3PmsgObject ( ) noexcept;
-
-        P3PmsgObject ( UCHAR uVBLock );
-
-        P3PmsgObject ( const P3PmsgObject& rhs );
-      virtual
-       ~P3PmsgObject ( );
-
-      virtual void
-        Nullify ( );
-      void
-        ConnectVBLock ( );
-      void
-        Connect ( const P3PmsgObject& rhs );
-      void
-        Connectx ( P2PmsgHANDLE hVBList, VBLaddr xVBLock, VBLsize nVBLockSize );
-      void
-        Connecta ( P2PmsgHANDLE hVBList, VBLaddr aVBLock, VBLsize nVBLockSize );
-
-    // Operators
-    public:
-      P3PmsgObject&
-        operator = ( const P3PmsgObject& rhs );
-      bool
-        operator == ( const P3PmsgObject& rhs ) const;
-      bool
-        operator != ( const P3PmsgObject& rhs ) const;
-
-      //  `if ( oObject )` and nothing else.  EXPLICIT because the implicit
-      //  form made `oA == oB` compile as `(int)(bool)oA == (int)(bool)oB` --
-      //  "are we both non-void" wearing the spelling of "are we the same
-      //  item".  Refer P3PmsgField::operator == for the measurement.
-      explicit
-        operator bool ( ) const noexcept;
-
-    // Memory management
-    // NOTES: Referenced in VBLock units
-    public:
-      VBLaddr
-        AllocVBLock ( UCHAR uVBLockType, VBLsize nItemSize, bool bZero = true );
-      VBLaddr
-        RehomeInlineItem ( );
-
-      //  Give this object its own copy of whatever its inline VALUE block
-      //  points at.  memcpy duplicates the block; a value that has outgrown
-      //  the block keeps its payload elsewhere and only chains to it, and
-      //  copying the chain is not copying the value.  Refer the implementation.
-      void
-        PrivatiseInlineChain ( );
-
-      //  Give back what this object's inline VALUE block points at.  The other
-      //  half of PrivatiseInlineChain: that one allocates the copy's payload
-      //  block on the heap the two objects SHARE, and a shared heap does not go
-      //  away when the copy does.  Refer the implementation.
-      void
-        ReleaseInlineChain ( );
-      VBLaddr
-        Free ( VBLaddr aVBLockAddr );
-      void*
-        Msg2Phys ( VBLaddr aVBLockAddr ) const;
-      VBLsize
-        Msg2Size ( VBLaddr aVBLockAddr ) const;
-      VBLsize
-        GetVBLockSize ( ) const;
-
-    // Addressing and allocations
-    public:
-      virtual P2Pos
-        GetP2Pos ( ) const noexcept;
-      virtual char*
-        GetVBLock  ( ) const;
-      virtual VBLaddr
-        GetVBLocknn( ) const;
-      virtual P3PmsgObject
-        GetParent ( ) const;
-      virtual P3PmsgObject
-        GetParentItem ( ) const;
-      virtual P3PmsgObject
-        GetObject ( P2Pos nP2Pos ) const;
-
-    // Troubleshooting
-    public:
-      virtual void
-        AssertValid ( ) const;
-      BOOL
-        AssertCommon ( const P3PmsgObject& rhs ) const;
-      BOOL
-        AssertValidAddr ( VBLaddr aVBLockAddr );
-      BOOL
-        AssertCondition ( int nConditionId ) const;
-    /*virtual void
-        Print ( FILE *fd, int iDepthOS = 0  );*/
-
-    // Properties
-    public:
-      bool
-        IsEmpty ( ) const noexcept { return m_nVBLockSize==0 ? true : false; }
-      bool
-        IsVoid ( ) const noexcept;
-
-      //  Is the item INSIDE me, or on a heap where others can name it?
-      //  That, and not "is there a heap", is what decides whether a write
-      //  through this object can be seen anywhere else.  Refer the
-      //  implementation for what it does not settle.
-      bool
-        IsInline ( ) const noexcept;
-
-      //  Can anything other than me see a write through me?  TRUE is a
-      //  guarantee that nothing can; FALSE says only that the question is
-      //  open.  That is IsInline's guarantee widened to cover the storage
-      //  rather than the block -- refer the implementation for the row it
-      //  covers and the one it does not.
-      bool
-        IsSole ( ) const noexcept;
-      bool
-        IsData ( ) const;
-      bool
-        IsName ( ) const;
-      bool
-        IsField ( ) const;
-      //bool
-      //  IsNode ( ) const;
-      bool
-        IsList ( ) const;
-      bool
-        IsVect ( ) const;
-      bool
-        IsAttr ( ) const;
-      bool
-        IsDesc ( ) const;
-      bool
-        IsStck ( ) const;
-      bool
-        IsRoot ( ) const;
-      BOOL
-        IsVBLaddrnn ( UCHAR uVBLock ) const noexcept;
-      BOOL
-        IsContainedVBLump ( void *pVBLaddr, VBLsize nSizeofVBLump = 0 ) const noexcept;
-      BOOL
-        HasParent ( ) const;
-
-    // Attributes
-    public:
-      P2PmsgHANDLE  m_hVBList{0};
-      VBLaddr       m_oVBLock[88]{0}; // TODO:LJM was WIN32 2022/02/04
-      VBLaddr       m_xVBLock{0};
-      VBLaddr       m_aVBLock{0};
-      VBLsize       m_nVBLockSize{0};
-      UCHAR         m_uVBLock{VBLock_Addrxx};
-};
 
 
 /////////////////////////////////////////////////

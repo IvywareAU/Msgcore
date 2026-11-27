@@ -166,6 +166,20 @@ struct P3PmsgAssertDepthGuard
       P2PmsgHeap_SetDirty ( pOBJ__hVBList, TRUE ); } 
     
 //
+//  ToString / ToStringDefs scratch (p2p_performance M4). Two 256-unit buffers
+//  were inline in every P3PmsgData -- 1 KB of each Field, List, Vect and three
+//  times over in each cursor -- for two calls few handles ever make. They are
+//  now one allocation of both, made on first use and freed by ~P3PmsgData.
+//  The returned pointer lives as long as the object, as before.
+static constexpr size_t P2PmsgToStrCch = 256;
+static WCHAR*
+P3PmsgData_ToStrBuf ( WCHAR*& pszToStr, int iBuf )
+{
+    if ( pszToStr == nullptr )
+      pszToStr = new WCHAR[2*P2PmsgToStrCch]{};
+    return pszToStr + iBuf*P2PmsgToStrCch;
+}
+//
 //  Constructors and destructors
 P3PmsgData::P3PmsgData ( const P3PmsgField *pField )
 {
@@ -371,11 +385,13 @@ P3PmsgData::P3PmsgData ( const GUID& oGUID )
 }
 P3PmsgData::~P3PmsgData ( )
 {
+    delete[] m_pszToStr;
     if ( m_bDataDirty && pOBJ__ )
       P2PmsgHeap_SetDirty ( pOBJ__hVBList, TRUE );
-    if ( pOBJ__ == nullptr)
-      return;
-    delete pOBJ__;
+    //  Nothing to delete: a standalone cell's object is m_oStandalone, and a
+    //  field's data names the field's own (M4). m_oStandalone's destructor
+    //  runs after this body.
+    m_pObject = nullptr;
 }
 void
 P3PmsgData::Connect ( P2PmsgHANDLE hVBList, VBLaddr aData, VBLsize nDataSize )
@@ -389,7 +405,7 @@ void
 P3PmsgData::RenderThisSafe ( )
 {
     ASSERT(m_pObject==nullptr);
-    m_pObject    = new P3PmsgObject ( );
+    m_pObject    = &m_oStandalone;     // Embedded, not new'd (M4)
     m_pObject -> ConnectVBLock ( );
     /*VBLock& oVBLock = *(VBLock*)m_pObject->m_oVBLock;      // Delegate field object
     //m_bDataDirty = false;
@@ -1354,6 +1370,7 @@ P3PmsgData::ToString ( LPCWSTR /*lpszFormat*/ )
 {
     VBLockData *pData  = P2PmsgObject_pData(*pOBJ__);
     UCHAR       uDType = pData->uDataType;
+    WCHAR      *m_szToString = P3PmsgData_ToStrBuf ( m_pszToStr, 0 );
     m_szToString[0]    = 0;
 
     if ( uDType == VBLockData_NULL )
@@ -1361,35 +1378,35 @@ P3PmsgData::ToString ( LPCWSTR /*lpszFormat*/ )
     if ( (pData->uDataAttr&VBLockAttr_NULL) == VBLockAttr_NULL )
       return L"Null";
     if ( uDType == VBLockData_INT08 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%c", c_char() );
+     _stprintf_s ( m_szToString, P2PmsgToStrCch, L"%c", c_char() );
     else if ( uDType == VBLockData_UINT08 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"0x%02x", pData->u.vuInt08 );
+     _stprintf_s ( m_szToString, P2PmsgToStrCch, L"0x%02x", pData->u.vuInt08 );
     else if ( uDType == VBLockData_INT16 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%i", c_short() );
+     _stprintf_s ( m_szToString, P2PmsgToStrCch, L"%i", c_short() );
     else if ( uDType == VBLockData_UINT16 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%iu", pData->u.vuInt16 );
+     _stprintf_s ( m_szToString, P2PmsgToStrCch, L"%iu", pData->u.vuInt16 );
     else if ( uDType == VBLockData_INT32 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%i", c_int() );
+     _stprintf_s ( m_szToString, P2PmsgToStrCch, L"%i", c_int() );
     else if ( uDType == VBLockData_UINT32 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%iu", pData->u.vuInt32 );
+     _stprintf_s ( m_szToString, P2PmsgToStrCch, L"%iu", pData->u.vuInt32 );
     //else if ( uDType == VBLockData_LONG )
     //  sprintf ( m_szToString, L"%i", c_long() );
     else if ( uDType == VBLockData_INT64 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%I64i", pData->u.vInt64 );
+     _stprintf_s ( m_szToString, P2PmsgToStrCch, L"%I64i", pData->u.vInt64 );
     else if ( uDType == VBLockData_UINT64 )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%I64iu", pData->u.vuInt64 );
+     _stprintf_s ( m_szToString, P2PmsgToStrCch, L"%I64iu", pData->u.vuInt64 );
     else if ( uDType == VBLockData_FLOAT )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%g", c_float() );
+     _stprintf_s ( m_szToString, P2PmsgToStrCch, L"%g", c_float() );
     else if ( uDType == VBLockData_DOUBLE )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%g", c_double() );
+     _stprintf_s ( m_szToString, P2PmsgToStrCch, L"%g", c_double() );
     else if ( uDType == VBLockData_BOOL )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%i", c_bool() );
+     _stprintf_s ( m_szToString, P2PmsgToStrCch, L"%i", c_bool() );
     else if ( uDType == VBLockData_WCHAR )
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%c", c_wchar() );
+     _stprintf_s ( m_szToString, P2PmsgToStrCch, L"%c", c_wchar() );
     else if ( uDType == VBLockData_TIME64 )
     {
       CTime oTime(pData->u.vTime64);
-     _stprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%04i-%02i-%02i %02i:%02i:%02i"
+     _stprintf_s ( m_szToString, P2PmsgToStrCch, L"%04i-%02i-%02i %02i:%02i:%02i"
                  , oTime.GetYear(), oTime.GetMonth(), oTime.GetDay()
                  , oTime.GetHour(), oTime.GetMinute(), oTime.GetSecond() );
     }
@@ -1403,7 +1420,7 @@ P3PmsgData::ToString ( LPCWSTR /*lpszFormat*/ )
     {
       //CString strBSTRnn = c_wstr(); //TODO:LJM debugging
       return c_wstr();
-      //swprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%s", c_wstr() );
+      //swprintf_s ( m_szToString, P2PmsgToStrCch, L"%s", c_wstr() );
     }
     // BSTR's
     else if ( uDType == VBLockData_BSTR08    ||
@@ -1414,7 +1431,7 @@ P3PmsgData::ToString ( LPCWSTR /*lpszFormat*/ )
               uDType == VBLockData_BSTR32var    )
     {
       CString strBSTRnn = c_str(); //TODO:LJM debugging
-      swprintf_s ( m_szToString, ARRAYSIZE(m_szToString), L"%s", (LPCWSTR)strBSTRnn );
+      swprintf_s ( m_szToString, P2PmsgToStrCch, L"%s", (LPCWSTR)strBSTRnn );
     }
                                        // Entry type Blob
     else if ( uDType == VBLockData_BLOB08 )
@@ -1442,6 +1459,7 @@ P3PmsgData::ToStringDefs ( LPCWSTR /*lpszFormat*/ )
 {
     VBLockData *pData  = P2PmsgObject_pData(*pOBJ__);
     UCHAR       uDType = pData->uDataType;
+    WCHAR      *m_szToStrDef = P3PmsgData_ToStrBuf ( m_pszToStr, 1 );
     m_szToStrDef[0]    = 0;
 
     if ( uDType == VBLockData_NULL )
@@ -1474,60 +1492,60 @@ P3PmsgData::ToStringDefs ( LPCWSTR /*lpszFormat*/ )
       return L"";
 
     if ( uDType == VBLockData_WSTR08 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	                , pData->u.vBlob08.nBlobSize , pData->u.vBlob08.nBlobUsed );
     else if ( uDType == VBLockData_WSTR08var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob08.nBlobSize, pData->u.vBlob08.nBlobUsed );
     else if ( uDType == VBLockData_WSTR16 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob16.nBlobSize, pData->u.vBlob16.nBlobUsed );
     else if ( uDType == VBLockData_WSTR16var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob16.nBlobSize, pData->u.vBlob16.nBlobUsed );
     else if ( uDType == VBLockData_WSTR32 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob32.nBlobSize, pData->u.vBlob32.nBlobUsed );
     else if ( uDType == VBLockData_WSTR32var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob32.nBlobSize, pData->u.vBlob32.nBlobUsed );
 
     else if ( uDType == VBLockData_BSTR08 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	                , pData->u.vBlob08.nBlobSize , pData->u.vBlob08.nBlobUsed );
     else if ( uDType == VBLockData_BSTR08var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob08.nBlobSize, pData->u.vBlob08.nBlobUsed );
     else if ( uDType == VBLockData_BSTR16 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob16.nBlobSize, pData->u.vBlob16.nBlobUsed );
     else if ( uDType == VBLockData_BSTR16var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob16.nBlobSize, pData->u.vBlob16.nBlobUsed );
     else if ( uDType == VBLockData_BSTR32 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob32.nBlobSize, pData->u.vBlob32.nBlobUsed );
     else if ( uDType == VBLockData_BSTR32var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob32.nBlobSize, pData->u.vBlob32.nBlobUsed );
                                        // Entry type Blob
     else if ( uDType == VBLockData_BLOB08 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob08.nBlobSize, pData->u.vBlob08.nBlobUsed );
     else if ( uDType == VBLockData_BLOB08var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob08.nBlobSize, pData->u.vBlob08.nBlobUsed );
     else if ( uDType == VBLockData_BLOB16 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob16.nBlobSize, pData->u.vBlob16.nBlobUsed );
     else if ( uDType == VBLockData_BLOB16var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob16.nBlobSize, pData->u.vBlob16.nBlobUsed );
     else if ( uDType == VBLockData_BLOB32 )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob32.nBlobSize, pData->u.vBlob32.nBlobUsed );
     else if ( uDType == VBLockData_BLOB32var )
-     _stprintf_s ( m_szToStrDef, ARRAYSIZE(m_szToStrDef), L"%02i:%02i"
+     _stprintf_s ( m_szToStrDef, P2PmsgToStrCch, L"%02i:%02i"
 	               , pData->u.vBlob32.nBlobSize, pData->u.vBlob32.nBlobUsed );
 
     else if ( uDType == VBLockData_GUID )
@@ -2587,7 +2605,7 @@ ASSERT(0);
 //         two paths now agree, and the discriminator here is deliberately the
 //         same one Connect uses.
 //       : Standalone objects are unaffected. ConnectVBLock() always sets a
-//         non-zero m_nVBLockSize (it asserts the size equals sizeof(m_oVBLock)),
+//         non-zero m_nVBLockSize (it asserts the size equals kInlineSize),
 //         so P3PmsgData / P3PmsgName - which use that mode extensively - still
 //         take the inline-copy branch.
 P3PmsgObject::P3PmsgObject ( const P3PmsgObject& rhs )
@@ -2609,7 +2627,7 @@ P3PmsgObject::P3PmsgObject ( const P3PmsgObject& rhs )
     //  verbatim: a pointer into the SOURCE OBJECT. Where the source was a
     //  local, the copy outlived it and read a dead stack frame. §22.
     if ( rhs.m_nVBLockSize != 0 &&
-         rhs.m_aVBLock == (VBLaddr)&rhs.m_oVBLock[0] )
+         rhs.IsInlineAddr ( rhs.m_aVBLock ) )
       ((P3PmsgObject&)rhs).RehomeInlineItem ( );
 
     m_uVBLock     = rhs.m_uVBLock;
@@ -2626,15 +2644,15 @@ P3PmsgObject::P3PmsgObject ( const P3PmsgObject& rhs )
       m_aVBLock = 0;
       m_xVBLock = 0;
     }
-    else if ( rhs.m_aVBLock == (VBLaddr)&rhs.m_oVBLock[0] )
+    else if ( rhs.IsInlineAddr ( rhs.m_aVBLock ) )
     {
       // Still inline, so RehomeInlineItem declined it: a VALUE block and not
       // an item. Copy it, and address OUR copy of it -- never the source's,
       // which is the whole of the defect above. The heap, if there is one,
       // holds the payload the block points at and has been AddRef'd already.
-      m_aVBLock = (VBLaddr)&m_oVBLock[0];
+      m_aVBLock = (VBLaddr)InlineVBLock ( );
       m_xVBLock = 0;
-      memcpy ( m_oVBLock, (void*)&rhs.m_oVBLock[0], sizeof(m_oVBLock) );
+      memcpy ( InlineVBLock ( ), rhs.m_pInline, kInlineSize );
 
       //  AND OUR OWN COPY OF WHAT IT POINTS AT. The memcpy above copies the
       //  block; a value that has outgrown it does not keep its payload IN the
@@ -2645,11 +2663,74 @@ P3PmsgObject::P3PmsgObject ( const P3PmsgObject& rhs )
       PrivatiseInlineChain ( );
     }
 }
+namespace { void P3PmsgInline_Give ( VBLaddr *pBlock ) noexcept; }
 P3PmsgObject::~P3PmsgObject ( )
 {
     ReleaseInlineChain ( );            // ... before the heap it is on is closed
     if ( m_hVBList )
       P2PmsgHeap_Close ( m_hVBList );
+    P3PmsgInline_Give ( m_pInline );
+}
+//
+//  The inline item block, allocated zeroed on first use (p2p_performance M4).
+//  NOTES: Zeroed because the block can leave the process: RehomeInlineItem
+//         copies all of it onto a message heap, so bytes nobody wrote must be
+//         zero, as the inline array's {0} initializer made them. Nullify keeps
+//         it, so a handle reused for a standalone item does not reallocate.
+//  A FEW BLOCKS ARE KEPT PER THREAD. A standalone handle -- the scalar a
+//  caller passes to DeclareItem, a default P3PmsgField -- is built and dropped
+//  per call, and giving each its own new/delete of 704 B cost more than the
+//  inline array it replaced (+6% build_flat, +18% vect_walk). A returned block
+//  is re-zeroed when it is handed out again, for the reason above.
+//  NOTES: t_bInlineCacheGone is trivially destructible and so outlives the
+//         cache during thread exit: a handle destroyed after the cache (a
+//         thread_local of the application's, say) frees its block directly
+//         rather than touch a destroyed object.
+namespace
+{
+    constexpr int kInlineCacheMax = 16;
+    struct P3PmsgInlineCache
+    {
+        VBLaddr *aBlock[kInlineCacheMax];
+        int      nBlock = 0;
+       ~P3PmsgInlineCache ( );
+    };
+    thread_local bool              t_bInlineCacheGone = false;
+    thread_local P3PmsgInlineCache t_oInlineCache;
+    P3PmsgInlineCache::~P3PmsgInlineCache ( )
+    {
+        t_bInlineCacheGone = true;
+        while ( nBlock > 0 )
+          delete[] aBlock[--nBlock];
+    }
+    VBLaddr*
+    P3PmsgInline_Take ( )
+    {
+        if ( !t_bInlineCacheGone && t_oInlineCache.nBlock > 0 )
+        {
+          VBLaddr *pBlock = t_oInlineCache.aBlock[--t_oInlineCache.nBlock];
+          memset ( pBlock, 0, P3PmsgObject::kInlineSize );
+          return pBlock;
+        }
+        return new VBLaddr[P3PmsgObject::kInlineSize/sizeof(VBLaddr)]{};
+    }
+    void
+    P3PmsgInline_Give ( VBLaddr *pBlock ) noexcept
+    {
+        if ( pBlock == nullptr )
+          return;
+        if ( !t_bInlineCacheGone && t_oInlineCache.nBlock < kInlineCacheMax )
+          t_oInlineCache.aBlock[t_oInlineCache.nBlock++] = pBlock;
+        else
+          delete[] pBlock;
+    }
+}
+VBLaddr*
+P3PmsgObject::InlineVBLock ( )
+{
+    if ( m_pInline == nullptr )
+      m_pInline = P3PmsgInline_Take ( );
+    return m_pInline;
 }
 void
 P3PmsgObject::Nullify ( )
@@ -2672,12 +2753,12 @@ P3PmsgObject::ConnectVBLock ( )
 {
     ASSERT(m_hVBList==0&&m_aVBLock==0);
     m_uVBLock     = VBLock_Addrxx;
-    m_aVBLock     = (VBLaddr)&m_oVBLock[0];
-    VBLock_Init ( (VBLock *)&m_oVBLock[0]
+    m_aVBLock     = (VBLaddr)InlineVBLock ( );
+    VBLock_Init ( (VBLock *)m_pInline
                 , VBLock_Addrxx|VBLock_Linked|VBLock_Alloc
-                , sizeof(m_oVBLock) );
-    m_nVBLockSize = VBLock_Hdr_u_SizeNN((VBLock*)&m_oVBLock);
-ASSERT(m_nVBLockSize==sizeof(m_oVBLock));
+                , kInlineSize );
+    m_nVBLockSize = VBLock_Hdr_u_SizeNN((VBLock*)m_pInline);
+ASSERT(m_nVBLockSize==kInlineSize);
     m_xVBLock     = 0;
 }
 void
@@ -2713,7 +2794,7 @@ P3PmsgObject::Connect ( const P3PmsgObject& oObject )
     //        skipped an object that has a heap and an inline block both, and
     //        the share below then took the source's own address. §22.
     if ( oObject.m_nVBLockSize != 0 &&
-         oObject.m_aVBLock == (VBLaddr)&oObject.m_oVBLock[0] )
+         oObject.IsInlineAddr ( oObject.m_aVBLock ) )
     {
       P3PmsgObject& oObj = (P3PmsgObject&)oObject;
       if ( oObj.RehomeInlineItem ( ) == 0 )
@@ -2726,10 +2807,10 @@ P3PmsgObject::Connect ( const P3PmsgObject& oObject )
         Nullify ( );
         m_hVBList     = hVBList;
         m_uVBLock     = oObject.m_uVBLock;
-        m_aVBLock     = (VBLaddr)&m_oVBLock[0];
+        m_aVBLock     = (VBLaddr)InlineVBLock ( );
         m_xVBLock     = 0;
         m_nVBLockSize = oObject.m_nVBLockSize;
-        memcpy ( m_oVBLock, (void*)&oObject.m_oVBLock[0], sizeof(m_oVBLock) );
+        memcpy ( InlineVBLock ( ), oObject.m_pInline, kInlineSize );
         PrivatiseInlineChain ( );      // ... and of what it points at. §23.
         return;
       }
@@ -2754,7 +2835,7 @@ P3PmsgObject::Connect ( const P3PmsgObject& oObject )
     m_aVBLock     = oObject.m_aVBLock;
     m_nVBLockSize = oObject.m_nVBLockSize;
  
-if(m_aVBLock&&m_aVBLock!=(VBLaddr)&m_oVBLock)ASSERT(m_hVBList);//TODO:LJM debugging
+if(m_aVBLock&&!IsInlineAddr ( m_aVBLock ))ASSERT(m_hVBList);//TODO:LJM debugging
 }
 void
 P3PmsgObject::Connecta ( P2PmsgHANDLE hVBList, VBLaddr aVBLock, VBLsize nVBLockSize )
@@ -2776,7 +2857,7 @@ P3PmsgObject::Connecta ( P2PmsgHANDLE hVBList, VBLaddr aVBLock, VBLsize nVBLockS
       m_uVBLock = P2PmsgHeap_Addrnn ( hVBList );
     if (   hVBListClose )
       P2PmsgHeap_Close ( hVBListClose );
-if(m_aVBLock!=(VBLaddr)&m_oVBLock)ASSERT(m_hVBList);//TODO:LJM debugging
+if(!IsInlineAddr ( m_aVBLock ))ASSERT(m_hVBList);//TODO:LJM debugging
 }
 void
 P3PmsgObject::Connectx ( P2PmsgHANDLE hVBList, VBLaddr xVBLock, VBLsize nVBLockSize )
@@ -2823,8 +2904,8 @@ P3PmsgObject::Connectx ( P2PmsgHANDLE hVBList, VBLaddr xVBLock, VBLsize nVBLockS
         m_nVBLockSize = VBLock_Hdr_u_SizeNN ( pVBLock );
     }
     //VBLsize nSize1 = sizeof(VBLock);
-    //VBLsize nSize2 = sizeof(m_oVBLock);
-    ASSERT(sizeof(VBLock)<=sizeof(m_oVBLock));
+    //VBLsize nSize2 = kInlineSize;
+    ASSERT(sizeof(VBLock)<=kInlineSize);
 }
 
 // Operators
@@ -2992,9 +3073,9 @@ P3PmsgObject::RehomeInlineItem ( )
     //       : The test that matters was already on the next line, so the guard
     //         below is not merely wrong, it is redundant when it is right.
     if ( m_nVBLockSize == 0                       ||
-         m_aVBLock != (VBLaddr)&m_oVBLock[0]         )
+         !IsInlineAddr ( m_aVBLock )         )
       return 0;                          // The block is not the inline one
-    if ( !VBLock_IsItem ( (VBLock *)&m_oVBLock[0] ) )
+    if ( !VBLock_IsItem ( (VBLock *)m_pInline ) )
       return 0;                          // A value, not an object
 
     const VBLsize nVBLockSize = m_nVBLockSize;
@@ -3019,7 +3100,7 @@ P3PmsgObject::RehomeInlineItem ( )
     const VBLaddr aVBLock = P2PmsgHeap_Alloc ( m_hVBList, VBLock_Item
                                              , nVBLockSize - nSizeofHdr );
     memcpy ( P2PmsgHeap_Addr2Phys ( m_hVBList, aVBLock )
-           , &m_oVBLock[0], nVBLockSize );
+           , m_pInline, nVBLockSize );
 
     m_aVBLock     = aVBLock;
     m_xVBLock     = 0;                   // Life cycle managed by the heap now
@@ -3143,30 +3224,30 @@ void
 P3PmsgObject::PrivatiseInlineChain ( )
 {
     if ( m_hVBList == 0                           ||
-         m_aVBLock != (VBLaddr)&m_oVBLock[0]         )
+         !IsInlineAddr ( m_aVBLock )         )
       return;                          // Nothing inline, or nowhere to put it
     P2PmsgHeap_BumpShape ( m_hVBList );   // B2: name storage moves
 
-    if ( VBLock_IsData ( (VBLock *)&m_oVBLock[0] ) )
+    if ( VBLock_IsData ( (VBLock *)m_pInline ) )
     {
       VBLaddr aOwner = 0;              // 0 addresses the inline block itself
       for ( ;; )
       {
         VBLockData *pData = VBLock_pData ( aOwner ? (VBLock *)Msg2Phys ( aOwner )
-                                                  : (VBLock *)&m_oVBLock[0] );
+                                                  : (VBLock *)m_pInline );
         if ( !VBLockData_IsChained ( pData ) )
           return;
         const VBLaddr aChain2Next = VBLockData_GetChain2Next ( m_uVBLock, pData );
         const VBLaddr aMine       = P2PmsgObject_CopyHeapVBLock ( m_hVBList
                                                                 , aChain2Next );
                     pData = VBLock_pData ( aOwner ? (VBLock *)Msg2Phys ( aOwner )
-                                                  : (VBLock *)&m_oVBLock[0] );
+                                                  : (VBLock *)m_pInline );
         VBLockData_SetChain2Next ( m_uVBLock, pData, aMine );
         aOwner = aMine;
       }
     }
 
-    if ( VBLock_IsName ( (VBLock *)&m_oVBLock[0] ) )
+    if ( VBLock_IsName ( (VBLock *)m_pInline ) )
     {
       VBLaddr aOwner = 0;
       for ( ;; )
@@ -3175,14 +3256,14 @@ P3PmsgObject::PrivatiseInlineChain ( )
         //  pointer is whatever the source carried, which may be off the wire.
         VBLockName *pName = P2PmsgObject_pNameChk ( *this
                                                   , aOwner ? (VBLock *)Msg2Phys ( aOwner )
-                                                           : (VBLock *)&m_oVBLock[0] );
+                                                           : (VBLock *)m_pInline );
         if ( !VBLockName_IsChained ( pName ) )
           return;
         const VBLaddr aChain2Next = VBLockName_GetChain2Next ( m_uVBLock, pName );
         const VBLaddr aMine       = P2PmsgObject_CopyHeapVBLock ( m_hVBList
                                                                 , aChain2Next );
                     pName = VBLock_pName ( aOwner ? (VBLock *)Msg2Phys ( aOwner )
-                                                  : (VBLock *)&m_oVBLock[0] );
+                                                  : (VBLock *)m_pInline );
         VBLockName_SetChain2Next ( m_uVBLock, pName, aMine );
         aOwner = aMine;
       }
@@ -3217,13 +3298,13 @@ P3PmsgObject::ReleaseInlineChain ( )
 {
     if ( m_hVBList == 0                           ||
          m_xVBLock != 0                           ||
-         m_aVBLock != (VBLaddr)&m_oVBLock[0]         )
+         !IsInlineAddr ( m_aVBLock )         )
       return;                          // Not ours to give back
     P2PmsgHeap_BumpShape ( m_hVBList );   // B2: name storage moves
 
-    if ( VBLock_IsData ( (VBLock *)&m_oVBLock[0] ) )
+    if ( VBLock_IsData ( (VBLock *)m_pInline ) )
     {
-      VBLockData *pData = VBLock_pData ( (VBLock *)&m_oVBLock[0] );
+      VBLockData *pData = VBLock_pData ( (VBLock *)m_pInline );
       VBLaddr     aNext = VBLockData_IsChained ( pData )
                             ? VBLockData_GetChain2Next ( m_uVBLock, pData ) : 0;
       if ( aNext )
@@ -3240,9 +3321,9 @@ P3PmsgObject::ReleaseInlineChain ( )
       return;
     }
 
-    if ( VBLock_IsName ( (VBLock *)&m_oVBLock[0] ) )
+    if ( VBLock_IsName ( (VBLock *)m_pInline ) )
     {
-      VBLockName *pName = VBLock_pName ( (VBLock *)&m_oVBLock[0] );
+      VBLockName *pName = VBLock_pName ( (VBLock *)m_pInline );
       VBLaddr     aNext = VBLockName_IsChained ( pName )
                             ? VBLockName_GetChain2Next ( m_uVBLock, pName ) : 0;
       if ( aNext )
@@ -3262,9 +3343,9 @@ VBLaddr
 P3PmsgObject::Free ( VBLaddr aVBLockAddr )
 {
     if ( aVBLockAddr == m_xVBLock              &&
-         aVBLockAddr == (VBLaddr)&m_oVBLock[0]    )
+         IsInlineAddr ( aVBLockAddr )    )
       m_xVBLock = 0;
-    else if ( aVBLockAddr != (VBLaddr)&m_oVBLock[0] )
+    else if ( !IsInlineAddr ( aVBLockAddr ) )
       P2PmsgHeap_Free ( m_hVBList, aVBLockAddr );
     if ( aVBLockAddr == m_aVBLock )
       m_aVBLock = 0;
@@ -3284,8 +3365,8 @@ P3PmsgObject::Msg2Size ( VBLaddr aVBLockAddr ) const
 {
     if ( m_hVBList )
       return P2PmsgHeap_Sizeof ( m_hVBList, aVBLockAddr );
-    if ( aVBLockAddr == (VBLaddr)&m_oVBLock[0] )
-      return sizeof(m_oVBLock);
+    if ( IsInlineAddr ( aVBLockAddr ) )
+      return kInlineSize;
     if ( aVBLockAddr == m_aVBLock )
       return m_nVBLockSize;
     return _msize ( (void *)aVBLockAddr );
@@ -3302,8 +3383,8 @@ char*
 P3PmsgObject::GetVBLock ( ) const
 {
     ASSERT(m_aVBLock==0||m_hVBList==0||P2PmsgHeap_IsValidAlloc(m_hVBList,m_aVBLock));
-    if ( m_aVBLock == (VBLaddr)&m_oVBLock[0] )
-      return (char*)&m_oVBLock[0];
+    if ( IsInlineAddr ( m_aVBLock ) )
+      return (char*)m_pInline;
     if ( m_hVBList )
       return (char *)P2PmsgHeap_Addr2Phys ( m_hVBList, m_aVBLock );
     return (char *)m_aVBLock;
@@ -3415,7 +3496,7 @@ P3PmsgObject::AssertValid ( ) const
             -> Message("Corrupted allocation" )
             -> Throw();
     if ( m_aVBLock                           &&
-         m_aVBLock != (VBLaddr)&m_oVBLock[0] &&
+         !IsInlineAddr ( m_aVBLock ) &&
          m_hVBList ==           NULL            )
       EVERR -> Module ( __FUNCTION__ )
             -> Message("Corrupted address" )
@@ -3444,7 +3525,7 @@ P3PmsgObject::AssertValidAddr ( VBLaddr aVBLockAddr )
 {
     if ( m_hVBList )
       return P2PmsgHeap_IsValidAlloc ( m_hVBList, aVBLockAddr );
-    return aVBLockAddr == (VBLaddr)&m_oVBLock[0] ? TRUE : FALSE;
+    return IsInlineAddr ( aVBLockAddr ) ? TRUE : FALSE;
 }
 
 BOOL
@@ -3507,7 +3588,7 @@ P3PmsgObject::IsVoid ( ) const noexcept
 bool
 P3PmsgObject::IsInline ( ) const noexcept
 {
-    return ( m_aVBLock != 0 && m_aVBLock == (VBLaddr)&m_oVBLock[0] )
+    return ( m_aVBLock != 0 && IsInlineAddr ( m_aVBLock ) )
              ? true : false;
 }
 //
@@ -3556,7 +3637,7 @@ P3PmsgObject::IsSole ( ) const noexcept
 {
     if ( m_aVBLock == 0 )
       return false;                    // Void: no storage to be sole holder of
-    if ( m_aVBLock == (VBLaddr)&m_oVBLock[0] )
+    if ( IsInlineAddr ( m_aVBLock ) )
       return true;                     // The block is in here, so nowhere else
     return P2PmsgHeap_RefCount ( m_hVBList ) == 1;
 }
@@ -3855,7 +3936,7 @@ P3PmsgField::RenderThisSafe ( )
     P3PmsgData::m_pObject = &m_oObject;
     P3PmsgName::m_pObject = &m_oObject;
     //OBJ__uVBLock  = VBLock_Addr32;    // TODO: LJM commented out 2022/02/04
-    VBLock& oVBLock = *(VBLock *)m_oObject.m_oVBLock;       // Delegate field object
+    VBLock& oVBLock = *(VBLock *)m_oObject.InlineVBLock ( );       // Delegate field object
     ZeroMemory ( &oVBLock, sizeof(oVBLock) );
     VBLock_Init( &oVBLock
                , OBJ__uVBLock|VBLock_Item|VBLock_Linked|VBLock_Alloc, sizeof(oVBLock) );
@@ -4892,7 +4973,7 @@ P3PmsgNode::~P3PmsgNode ( )
 void
 P3PmsgNode::RenderThisSafe ( )
 {
-    VBLock& oVBLock = *(VBLock *)m_oObject.m_oVBLock;       // Delegate field object
+    VBLock& oVBLock = *(VBLock *)m_oObject.InlineVBLock ( );       // Delegate field object
     ZeroMemory ( &oVBLock, sizeof(oVBLock) );
     VBLock_Init( &oVBLock
                , OBJ__uVBLock|VBLock_Item|VBLock_Linked|VBLock_Alloc, sizeof(oVBLock) );

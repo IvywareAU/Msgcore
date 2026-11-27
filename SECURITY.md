@@ -196,7 +196,8 @@ be traced back to the source state that produced it.
 
 | Version | Supported | Notes |
 |---|---|---|
-| 3.0.x | **Yes** — fixes land on `master` and ship in the next tag | The flat C ABI only; see the scope sections above |
+| 4.0.x | **Yes** — fixes land on `master` and ship in the next tag | The flat C ABI only; see the scope sections above |
+| 3.x | No — move to 4.0.x | 4.0.0 left the flat C ABI, the image format and saved files unchanged, so a C consumer takes it as it stands; a C++ consumer rebuilds |
 | < 3.0.0 | No | Development states that were never published; there is nothing to identify them by |
 
 There is one maintained line, and no long-term-support branch: a fix goes onto `master`

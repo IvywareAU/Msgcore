@@ -20,6 +20,7 @@
 #include "P2Pmsg.h"
 #include "MsgVect.h"
 #include "MsgList.h"
+#include <typeinfo>
 #include "P2Pmsg_Ext.h"
 #include "MsgAttr.h"
 #include "MsgDesc.h"
@@ -129,12 +130,12 @@ void
 P3PmsgVect::RenderThisSafe ( )
 {
     m_pP3PmsgType = 0;
-    VBLock& oVBLock = *(VBLock *)m_oObject.m_oVBLock;       // Delegate field object
+    VBLock& oVBLock = *(VBLock *)m_oObject.InlineVBLock ( );       // Delegate field object
     // The inline delegate buffer must be sized by its actual byte length, NOT
     // sizeof(VBLock): a vect's aAlloc[32] slab is not part of the VBLock union,
     // so sizeof(VBLock) is too small and would place the trailing field/name/
     // data past the recorded block end (tripping every containment check).
-    const VBLsize nBufSize = (VBLsize)sizeof(m_oObject.m_oVBLock);
+    const VBLsize nBufSize = (VBLsize)P3PmsgObject::kInlineSize;
     ZeroMemory ( &oVBLock, nBufSize );
     m_nCurs = 0;
     ZeroMemory (  m_pP3PmsgData, sizeof(m_pP3PmsgData) );
@@ -797,14 +798,27 @@ P3PmsgVect::Goto ( VBLelem nElem )
 
     // Instantiate a cursor wrapper of the element's own kind so that the
     // dynamic_cast in r_list()/r_vect() succeeds for nested containers.
+    //  REUSED WHEN THE KIND IS UNCHANGED (p2p_performance M4). This deleted the
+    //  wrapper and new'd another on every call -- one allocation per r_data(i)
+    //  (B2 vect_walk), and a default-constructed handle renders a standalone
+    //  item only to be connected over. A wrapper of the right kind is now
+    //  reconnected, as P3PmsgCurs::Goto reconnects its three; a new one starts
+    //  void. A reference from an earlier r_data(i) now names element nElem
+    //  rather than a deleted object.
     VBLockItem *pItem = VBLock_pItem ( (VBLock *)OBJ__Msg2Phys(aElem) );
-    delete m_pP3PmsgType; m_pP3PmsgType = nullptr;
-    if ( VBLockItem_IsList(pItem) )
-      m_pP3PmsgType = new P3PmsgList ( );
-    else if ( VBLockItem_IsVect(pItem) )
-      m_pP3PmsgType = new P3PmsgVect ( );
-    else
-      m_pP3PmsgType = new P3PmsgField ( );
+    const std::type_info &oKind = VBLockItem_IsList(pItem) ? typeid(P3PmsgList)
+                                : VBLockItem_IsVect(pItem) ? typeid(P3PmsgVect)
+                                                           : typeid(P3PmsgField);
+    if ( m_pP3PmsgType == nullptr || typeid(*m_pP3PmsgType) != oKind )
+    {
+      delete m_pP3PmsgType; m_pP3PmsgType = nullptr;
+      if ( oKind == typeid(P3PmsgList) )
+        m_pP3PmsgType = new P3PmsgList  ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 );
+      else if ( oKind == typeid(P3PmsgVect) )
+        m_pP3PmsgType = new P3PmsgVect  ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 );
+      else
+        m_pP3PmsgType = new P3PmsgField ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 );
+    }
     m_pP3PmsgType->Connect ( OBJ__hVBList, aElem, 0 );
     m_nElem = nElem;
     return 1;

@@ -46,6 +46,47 @@
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
 //
+//  4.0.0.0, a MAJOR on 3.8.1. Stands alone: no Targetcore release is needed, but
+//  every C++ consumer must be REBUILT against these headers. The flat C ABI is
+//  unchanged (285 exports, the same names on x64 and Win32), as are the image
+//  format and saved files. What moves is the mangled C++ half: every class
+//  layout below changes size, and three P3PmsgObject members are exported.
+//
+//  THE HANDLE DIET (MSCS performance log P5 / plan M4). A field handle carried
+//  1.8 KB of buffers it rarely used, and a cursor carried three of them:
+//    - P3PmsgData's two ToString buffers (2 x 256 WCHAR) are allocated on the
+//      first ToString / ToStringDefs and freed with the object; the pointer the
+//      call returns lives exactly as long as it did.
+//    - P3PmsgObject's 704-byte inline item block (m_oVBLock[88]) became a
+//      pointer, m_pInline, allocated only when an item is rendered into it.
+//      Freed blocks go to a per-thread cache of up to 16 (about 11 KB a thread
+//      at most) and come back zeroed, as the array was.
+//    - A scalar P3PmsgData renders into an embedded P3PmsgObject instead of a
+//      new one per value.
+//    - P3PmsgCurs no longer default-renders its Field, List and Vect members,
+//      and its copy assignment now Nullifies them rather than copying them:
+//      the cursor re-renders them on the next Goto, as it always had to.
+//    - P3PmsgVect::Goto reuses its element wrapper while the element kind is
+//      unchanged, rather than deleting and re-creating it per element.
+//  Sizes (x64): P3PmsgField 1,856 -> 200 B, P3PmsgCurs 5,736 -> 768,
+//  P3PmsgData 1,048 -> 88, P3PmsgObject 752 -> 56, P3PmsgBSTR 1,880 -> 224.
+//  New exports (whole-class export ships them, private or not):
+//  P3PmsgObject::InlineVBLock, ::IsInlineAddr, ::kInlineSize; nothing removed.
+//  Measured against 3.8.1, median of interleaved rounds, each side its own
+//  build: msgcore_bench Windows 39 of 76 cases >= 3% faster, 1 slower
+//  (vect_walk -43..-57%, lookup_miss -16..-23%, build_nested -6..-14%,
+//  build_flat -3..-4%); Linux 18 faster, 5 slower by 3-4% on sub-3 us cases;
+//  allocations per op down wherever non-zero (build_flat 512: 539 -> 25).
+//  MsgFacade bench, every layer down: cpp -4.6%, ref -3.1%, C API -4.5%,
+//  facade -3.6%, COM -3.2%. Targetcore perf_ab one-way latency -3..-6% and
+//  throughput +7..+13% at 64 B to 32 KB. The one slower micro-case, a 32 KB
+//  recv_adopt on Windows (+50%, page faults in the NT heap around the buffer),
+//  does not reach a real receive.
+//  MAJOR: class layouts and the mangled C++ surface change; the flat ABI and
+//  every on-disk and on-wire byte do not.
+//
+//  BELOW IS THE 3.8.1 RATIONALE.
+//
 //  3.8.1.0, a PATCH on 3.8.0. Build-only: no source line changes. Stands alone;
 //  the flat ABI, the mangled C++ exports, every class layout, the image format
 //  and saved files are unchanged.
@@ -743,24 +784,24 @@
 //  toolchain-pinned and internal, so it sits outside what this number
 //  promises - but a C++ consumer pinned to 3.0.0 has to recompile, and that is
 //  written down here rather than left to be discovered at link time.
-#define MSGCORE_VERSION_MAJOR  3
-#define MSGCORE_VERSION_MINOR  8
-#define MSGCORE_VERSION_PATCH  1
+#define MSGCORE_VERSION_MAJOR  4
+#define MSGCORE_VERSION_MINOR  0
+#define MSGCORE_VERSION_PATCH  0
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,8,1,0
+#define MSGCORE_VERSION_COMMAS 4,0,0,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.8.1.0"
+#define MSGCORE_VERSION_STRING "4.0.0.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
 //  0x03070000 is 3.7.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03080100
+#define MSGCORE_VERSION_HEX    0x04000000
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

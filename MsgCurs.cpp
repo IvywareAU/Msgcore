@@ -63,14 +63,30 @@
 
 //
 //  Constructors and destructor
+//  NOTES: THE THREE BY-VALUE HANDLES START VOID (p2p_performance M4). Each was
+//         default-constructed, and a default P3PmsgField / List / Vect renders
+//         a standalone inline item of its own (RenderThisSafe) -- three item
+//         blocks built, and thrown away on the first Goto, for every cursor.
+//         The cursor never reads one before Connect: every accessor goes
+//         through m_pP3PmsgFoN, which is null until a Goto connects one, and
+//         Clear / the cursor copy treat a void handle as nothing active.
 P3PmsgCurs::P3PmsgCurs ( )
+           : m_oP3PmsgField ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
+           , m_oP3PmsgList  ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
+           , m_oP3PmsgVect  ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
 {
 }
 P3PmsgCurs::P3PmsgCurs ( const P3PmsgCurs& rhs )
+           : m_oP3PmsgField ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
+           , m_oP3PmsgList  ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
+           , m_oP3PmsgVect  ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
 {
     *this = rhs;
 }
 P3PmsgCurs::P3PmsgCurs ( P3PmsgItem& rhs )
+           : m_oP3PmsgField ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
+           , m_oP3PmsgList  ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
+           , m_oP3PmsgVect  ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
 {
     m_pItemParent  =  new P3PmsgItem ( );
   (*m_pItemParent) = rhs.r_Object();
@@ -78,11 +94,17 @@ P3PmsgCurs::P3PmsgCurs ( P3PmsgItem& rhs )
     Goto ( 0 );
 }
 P3PmsgCurs::P3PmsgCurs ( P3PmsgAttr& rhs )
+           : m_oP3PmsgField ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
+           , m_oP3PmsgList  ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
+           , m_oP3PmsgVect  ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
 {
     m_pP3PmsgAttr = &rhs;
     Goto ( 0 );
 }
 P3PmsgCurs::P3PmsgCurs ( P3PmsgDesc& rhs )
+           : m_oP3PmsgField ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
+           , m_oP3PmsgList  ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
+           , m_oP3PmsgVect  ( (P2PmsgHANDLE)0, (VBLaddr)0, (VBLsize)0 )
 {
     m_pP3PmsgDesc = &rhs;
     Goto ( 0 );
@@ -139,9 +161,14 @@ P3PmsgCurs::operator = ( const P3PmsgCurs& rhs )
     if ( &rhs == this )
       return *this;
     RecycleThis ( );
-    m_oP3PmsgField = rhs.m_oP3PmsgField;
-    m_oP3PmsgList  = rhs.m_oP3PmsgList;
-    m_oP3PmsgVect  = rhs.m_oP3PmsgVect;
+    //  VOID, NOT COPIED (p2p_performance M4). RecycleThis has just cleared the
+    //  collection and m_pP3PmsgFoN, so nothing reads these three before a Goto
+    //  connects one. They were VALUE copies (P3PmsgField::operator= builds a
+    //  second item), which dereferences both sides' field block -- a void
+    //  handle, which the constructors now make, has none.
+    m_oP3PmsgField.Nullify ( );
+    m_oP3PmsgList .Nullify ( );
+    m_oP3PmsgVect .Nullify ( );
     return *this;
 }
 P3PmsgCurs&
