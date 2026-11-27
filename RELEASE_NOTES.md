@@ -3,6 +3,24 @@
 User-facing changes, newest first. The full rationale for every version, including the ones
 before this file existed, is kept in `Msgcore_version.h`.
 
+## 3.8.1
+
+A patch release that changes only how Msgcore is compiled on Windows. It stands alone: no
+Targetcore release goes with it. The flat C API, the C++ exports, every class layout, the image
+format and saved files are unchanged.
+
+- **Optimized Windows builds use `/QIntel-jcc-erratum`.** Many Intel processors from Skylake on
+  run a jump slowly when it crosses or ends on a 32-byte boundary. The flag lays out code to avoid
+  that. It applies to every non-Debug configuration of `Msgcore(2026).vcxproj`, and to the
+  CMake `msgcore` and `msgcore_static` targets when the compiler is MSVC (not clang-cl).
+- **Measured on an i7-8700** (Release x64, `msgcore_bench`, four code layouts each way): building
+  a flat message is 8% to 10% faster, looking up names in a large collection up to 18% faster,
+  and adopting a received message 5% to 7% faster. No case is slower. Timings also vary far less
+  with code layout.
+- **`Msgcore.dll` is 4.7% larger.** Processors without the erratum (AMD, newer Intel) were not
+  measured; the padding is expected to cost them little.
+- Linux builds are unchanged.
+
 ## 3.8.0
 
 A minor release. It stands alone: no Targetcore release goes with it. The flat C API, the C++

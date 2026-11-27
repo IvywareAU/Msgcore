@@ -556,6 +556,19 @@ copy /Y "$(OutDir)$(TargetName).lib" "$(WDMSCS_LIB)\$(TargetName).lib"</Command>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
   </ItemDefinitionGroup>
+  <!--
+    /QIntel-jcc-erratum on every optimized configuration (p2p_performance F-P4-13). On
+    Skylake-derived Intel cores (6th-10th gen, many Xeons) the JCC microcode update makes a
+    jump that crosses or ends on a 32-byte line miss the decoded-icache; the switch pads such
+    jumps. MEASURED 2026-11-27 (i7-8700, msgcore_bench, 4 code layouts each side): 13 cases
+    faster at every layout (build_flat -8..-10%, lookup_alt 64/512 -13/-18%), none slower,
+    layout spread cut by about two thirds. Costs about 5% code size. Keep CMakeLists.txt in step.
+  -->
+  <ItemDefinitionGroup Condition="!$(Configuration.StartsWith('Debug'))">
+    <ClCompile>
+      <IntelJCCErratum>true</IntelJCCErratum>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Kernel32_Ext.cpp" />
     <ClCompile Include="Msgcore_c.cpp" />

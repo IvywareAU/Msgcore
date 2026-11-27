@@ -46,6 +46,25 @@
 //  Component version. MAJOR.MINOR.PATCH is the released identity; BUILD is
 //  reserved for a CI build counter and is 0 for a hand-built binary.
 //
+//  3.8.1.0, a PATCH on 3.8.0. Build-only: no source line changes. Stands alone;
+//  the flat ABI, the mangled C++ exports, every class layout, the image format
+//  and saved files are unchanged.
+//
+//  /QIntel-jcc-erratum ON EVERY OPTIMIZED MSVC BUILD (p2p_performance F-P4-13).
+//  Skylake-derived Intel cores (SKX102) stop caching decoded jumps that cross
+//  or end on a 32-byte boundary, so Msgcore's timings moved with code layout.
+//  The vcxproj sets IntelJCCErratum for every non-Debug configuration; CMake
+//  adds the flag to msgcore and msgcore_static for MSVC (not clang-cl) only.
+//  Measured on the reference i7-8700, Release x64, msgcore_bench, four padded
+//  layouts per side, 10 interleaved rounds: 13 cases faster at every layout
+//  (build_flat -8..-10%, lookup_alt 512 -17.8%, recv_adopt 512 -7.2%), none
+//  slower at every layout; the layout spread shrinks (build_flat 512 5.9% ->
+//  1.0%). Msgcore.dll grows 4.7%. Not measured on CPUs without the erratum,
+//  where the padding is expected to cost little. Linux GCC builds unchanged.
+//  PATCH: same code, different instruction placement.
+//
+//  BELOW IS THE 3.8.0 RATIONALE.
+//
 //  3.8.0.0, a MINOR on 3.7.1. Stands alone: no Targetcore release is needed. The
 //  flat ABI, the mangled C++ exports, every class layout, the image format and
 //  saved files are unchanged; nothing new is exported.
@@ -726,22 +745,22 @@
 //  written down here rather than left to be discovered at link time.
 #define MSGCORE_VERSION_MAJOR  3
 #define MSGCORE_VERSION_MINOR  8
-#define MSGCORE_VERSION_PATCH  0
+#define MSGCORE_VERSION_PATCH  1
 #define MSGCORE_VERSION_BUILD  0
 
 //  Comma form, for the FILEVERSION / PRODUCTVERSION resource statements,
 //  which take four comma-separated words and cannot take a macro expression.
-#define MSGCORE_VERSION_COMMAS 3,8,0,0
+#define MSGCORE_VERSION_COMMAS 3,8,1,0
 
 //  String form. Kept spelled out rather than stringised from the parts above:
 //  rc.exe's preprocessor has no reliable ## / # operator support, and a
 //  VERSIONINFO string that silently expands to "MSGCORE_VERSION_MAJOR.0.0"
 //  would ship without anyone noticing.
-#define MSGCORE_VERSION_STRING "3.8.0.0"
+#define MSGCORE_VERSION_STRING "3.8.1.0"
 
 //  Packed form, for a consumer that wants to compare rather than display.
 //  0x03070000 is 3.7.0.0; the byte order is MAJOR, MINOR, PATCH, BUILD.
-#define MSGCORE_VERSION_HEX    0x03080000
+#define MSGCORE_VERSION_HEX    0x03080100
 
 //  Fixed identity strings shared by both resources.
 #define MSGCORE_COMPANY_NAME   "Ivyware Pty Ltd, Khrustal & Mann"

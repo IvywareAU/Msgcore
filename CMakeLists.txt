@@ -170,6 +170,12 @@ if(WIN32)
     target_link_libraries(msgcore PRIVATE
         ws2_32 MsWsock Propsys
         comsuppw$<$<CONFIG:Debug>:d>)
+    # /QIntel-jcc-erratum on the optimized configurations, as Msgcore(2026).vcxproj does
+    # (IntelJCCErratum; see the measurement there, p2p_performance F-P4-13). cl.exe only:
+    # clang-cl has its own spelling and is not measured.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        target_compile_options(msgcore PRIVATE $<$<NOT:$<CONFIG:Debug>>:/QIntel-jcc-erratum>)
+    endif()
 else()
     # GCC/Clang reject a handful of constructs MSVC silently accepts in this legacy
     # codebase (distinct-pointer-type comparisons, NULL-in-arithmetic, etc.). -fpermissive
@@ -208,6 +214,9 @@ if(MSCS_BUILD_STATIC_LIBS)
         target_link_libraries(msgcore_static PUBLIC
             ws2_32 MsWsock Propsys
             comsuppw$<$<CONFIG:Debug>:d>)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+            target_compile_options(msgcore_static PRIVATE $<$<NOT:$<CONFIG:Debug>>:/QIntel-jcc-erratum>)
+        endif()
     else()
         target_compile_options(msgcore_static PRIVATE -fpermissive)
     endif()
